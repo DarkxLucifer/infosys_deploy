@@ -1,0 +1,55 @@
+{
+  "report_metadata": {
+    "system": "InfraScan",
+    "version": "1.0",
+    "generated_at": "2026-10-21T14:58:20.404556+00:00",
+    "ai_analysis": "not_connected",
+    "disclaimer": "NOTICE & DISCLAIMER: InfraScan Structural Analysis System. All findings, defect classifications, and dimensional measurements recorded in this certified report were established and verified by a licensed Civil Engineer. AI analysis: not connected / not applicable. No AI model predictions or confidence scores were utilized."
+  },
+  "inspection": {
+    "id": "57950038-e76f-4f6a-ae74-03d7814f4235",
+    "inspection_date": "2026-10-21",
+    "due_date": "2026-10-28",
+    "status": "reviewed",
+    "reviewed_at": "2026-10-21 14:58 UTC",
+    "asset": {
+      "id": "BR-101",
+      "name": "Riverside Viaduct",
+      "asset_type": "bridge",
+      "material": "reinforced_concrete",
+      "region": "Northern",
+      "address": "100 River Road"
+    },
+    "inspector": {
+      "name": "Test Inspector",
+      "email": "inspector@test.com"
+    },
+    "reviewer": {
+      "name": "Test Civil-Engineer",
+      "email": "engineer@test.com"
+    }
+  },
+  "findings": [
+    {
+      "id": "900568a6-8b1f-4bfe-be12-723b7809c95b",
+      "defect_type": "transverse",
+      "severity": "moderate",
+      "notes": "Transverse flexural crack across bottom deck",
+      "measurement": {
+        "length": 50.06,
+        "avg_width": 5.0,
+        "max_width": 5.0,
+        "area": 250.31,
+        "density": null,
+        "unit": "mm",
+        "calibrated": true,
+        "uncertainty": 0.225
+      }
+    }
+  ],
+  "maintenance_priority": {
+    "recommended": "medium",
+    "confirmed": "high",
+    "suggested_action": "Scheduled periodic re-inspection and monitoring."
+  }
+}

@@ -1,0 +1,9 @@
+Inspection ID,88e30053-c206-402e-b2b6-5576608332d4
+Asset ID,BR-101
+Asset Name,Riverside Viaduct
+Status,reviewed
+Reviewed At,2026-10-21 03:16 UTC
+Disclaimer,"NOTICE & DISCLAIMER: InfraScan Structural Analysis System. All findings, defect classifications, and dimensional measurements recorded in this certified report were established and verified by a licensed Civil Engineer. AI analysis: not connected / not applicable. No AI model predictions or confidence scores were utilized."
+
+Finding ID,Defect Type,Source,Length,Avg Width,Max Width,Area,Density %,Unit,Calibrated,Uncertainty mm,Severity,Notes
+c523d958-b5ad-4909-bd6f-2f00cf3c7055,transverse,Engineer annotation,50.06,5.0,5.0,250.31,,mm,True,0.225,moderate,Transverse flexural crack across bottom deck

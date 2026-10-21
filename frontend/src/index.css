@@ -1,0 +1,190 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+  InfraScan design tokens (Realtime Colors 050315-fbfbfe-2f27ce-dedcff-433bff with Inter)
+  Light (white) is default.
+*/
+:root {
+  --radius: 0.75rem;
+
+  /* Brand Tokens */
+  --brand-text: #050315;
+  --brand-bg: #fbfbfe;
+  --brand-primary: #2f27ce;
+  --brand-secondary: #dedcff;
+  --brand-accent: #433bff;
+
+  /* Semantic tokens for shadcn (Light, default) */
+  --background: #fbfbfe;
+  --foreground: #050315;
+  --card: #ffffff;
+  --card-foreground: #050315;
+  --popover: #ffffff;
+  --popover-foreground: #050315;
+  --primary: #2f27ce;
+  --primary-foreground: #fbfbfe;
+  --secondary: #eeeeff;
+  --secondary-foreground: #050315;
+  --accent: #dedcff;
+  --accent-foreground: #050315;
+  --muted: #f4f4fb;
+  --muted-foreground: #55526e;
+  --border: #e2e1f3;
+  --input: #8d8ba8;
+  --ring: #433bff;
+
+  /* Severity / Status Colors */
+  --destructive: #c62828;
+  --destructive-foreground: #fbfbfe;
+  --success: #166534;
+  --success-soft: #e9f6ee;
+  --warning: #92400e;
+  --warning-soft: #fdf1de;
+  --danger-soft: #fdeaea;
+  --critical: #7f1d1d;
+  --critical-soft: #f9d6d6;
+
+  /* Sidebar */
+  --sidebar: #ffffff;
+  --sidebar-foreground: #050315;
+  --sidebar-primary: #2f27ce;
+  --sidebar-primary-foreground: #fbfbfe;
+  --sidebar-accent: #eeeeff;
+  --sidebar-accent-foreground: #2f27ce;
+  --sidebar-border: #e2e1f3;
+  --sidebar-ring: #433bff;
+
+  --input-addon-foreground: #55526e;
+}
+
+.dark {
+  --brand-text: #fbfbfe;
+  --brand-bg: #050315;
+  --brand-primary: #433bff;
+  --brand-secondary: #16134a;
+  --brand-accent: #9d98ff;
+
+  --background: #050315;
+  --foreground: #fbfbfe;
+  --card: #0d0a2b;
+  --card-foreground: #fbfbfe;
+  --popover: #0d0a2b;
+  --popover-foreground: #fbfbfe;
+  --primary: #433bff;
+  --primary-foreground: #fbfbfe;
+  --secondary: #16134a;
+  --secondary-foreground: #dedcff;
+  --accent: #1f1b66;
+  --accent-foreground: #dedcff;
+  --muted: #120f38;
+  --muted-foreground: #b4b2d4;
+  --border: #2a2670;
+  --input: #6f6c9a;
+  --ring: #9d98ff;
+
+  --destructive: #d16055;
+  --destructive-foreground: #fbfbfe;
+  --success: #4caf7d;
+  --success-soft: #14261c;
+  --warning: #d89a4a;
+  --warning-soft: #2a2213;
+  --danger-soft: #2e1715;
+  --critical: #f87171;
+  --critical-soft: #381212;
+
+  --sidebar: #0d0a2b;
+  --sidebar-foreground: #b4b2d4;
+  --sidebar-primary: #433bff;
+  --sidebar-primary-foreground: #fbfbfe;
+  --sidebar-accent: #16134a;
+  --sidebar-accent-foreground: #dedcff;
+  --sidebar-border: #2a2670;
+  --sidebar-ring: #9d98ff;
+
+  --input-addon-foreground: #b4b2d4;
+}
+
+@theme inline {
+  --color-brand-text: var(--brand-text);
+  --color-brand-bg: var(--brand-bg);
+  --color-brand-primary: var(--brand-primary);
+  --color-brand-secondary: var(--brand-secondary);
+  --color-brand-accent: var(--brand-accent);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-danger-soft: var(--danger-soft);
+  --color-critical: var(--critical);
+  --color-critical-soft: var(--critical-soft);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-input-addon-foreground: var(--input-addon-foreground);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    scroll-behavior: smooth;
+    font-family: 'Inter Variable', Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "cv11", "ss01";
+  }
+}
+
+/* Status badges used across the inspection workflow */
+@utility badge-soft {
+  @apply inline-flex items-center justify-center rounded-full px-2.5 py-1 text-[11px] font-semibold leading-3;
+}
+
+/* Concrete-texture canvas used in image-analysis mocks */
+@utility surface-canvas {
+  background:
+    radial-gradient(ellipse 90% 60% at 30% 20%, rgba(255, 255, 255, 0.28), transparent 60%),
+    radial-gradient(ellipse 70% 50% at 75% 80%, rgba(255, 255, 255, 0.18), transparent 50%),
+    repeating-linear-gradient(45deg, rgba(0, 0, 0, 0.02) 0 2px, transparent 2px 4px);
+}
+
+/* Astrix dotted canvas background */
+@utility pipeline-dots {
+  background-image: radial-gradient(var(--border) 1px, transparent 1px);
+  background-size: 16px 16px;
+}
