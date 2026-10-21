@@ -3,7 +3,7 @@
   "current_task_id": "TASK-BASELINE-01",
   "next_action": "Execute CDP remote browser baseline tests for all 5 roles on http://localhost:5173, capturing screenshots into /docs/agent/screens/ and recording evidence into TEST_LOG.md.",
   "last_updated": "2026-10-21T20:35:00+05:30",
-  "last_green_commit": null,
+  "last_green_commit": "4d8b5a5",
   "env": {
     "backend_url": "http://127.0.0.1:8000",
     "frontend_url": "http://localhost:5173",
@@ -18,8 +18,8 @@
     "test_role_completeness": "PASSING",
     "test_week1_audit": "PASSING",
     "cdp_landing_login": "PASSING",
-    "cdp_inspector_flow": "PENDING",
-    "cdp_engineer_flow": "PENDING",
+    "cdp_inspector_flow": "PASSING",
+    "cdp_engineer_flow": "PASSING",
     "cdp_manager_flow": "PENDING",
     "cdp_maintenance_flow": "PENDING",
     "cdp_admin_flow": "PENDING"
