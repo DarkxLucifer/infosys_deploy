@@ -3,7 +3,7 @@
   "current_task_id": "TASK-CAMERA-PREPROCESS-ROLE-SYNC",
   "next_action": "Proceed with Phase 5 cross-role scenario validation (S1-S10) and Phase 6 deep-learning defect segmentation model inference hookup.",
   "last_updated": "2026-10-22T00:15:00+05:30",
-  "last_green_commit": "44bbc38",
+  "last_green_commit": "109aab1",
   "env": {
     "backend_url": "http://127.0.0.1:8000",
     "frontend_url": "http://localhost:5173",
