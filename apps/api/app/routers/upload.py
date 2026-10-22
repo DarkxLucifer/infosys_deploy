@@ -212,12 +212,11 @@ def list_inspection_images(
     if not inspection:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection not found")
 
-    # Section 4 Visibility Gate: Managers and Maintenance personnel cannot access unreviewed imagery
-    user_role = (current_user.role or "").lower()
-    if user_role in ("manager", "maintenance") and inspection.status not in ("reviewed", "reported", "closed"):
+    # Organization verification
+    if inspection.organization_id != current_user.organization_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail={"code": "UNREVIEWED_ACCESS_BLOCKED", "message": "Managers and Maintenance personnel cannot access unreviewed inspection imagery."}
+            detail={"code": "ACCESS_DENIED", "message": "Cross-organization inspection imagery access denied."}
         )
 
     images = db.query(InspectionImage).filter(
@@ -265,11 +264,10 @@ def get_image_file(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image not found")
 
     inspection = db.query(Inspection).filter(Inspection.id == image.inspection_id).first()
-    user_role = (current_user.role or "").lower()
-    if inspection and user_role in ("manager", "maintenance") and inspection.status not in ("reviewed", "reported", "closed"):
+    if inspection and inspection.organization_id != current_user.organization_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail={"code": "UNREVIEWED_ACCESS_BLOCKED", "message": "Managers and Maintenance personnel cannot access unreviewed inspection imagery."}
+            detail={"code": "ACCESS_DENIED", "message": "Access denied to cross-organization image."}
         )
 
     if not os.path.exists(image.original_path):
@@ -293,11 +291,10 @@ def get_image_thumbnail(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image not found")
 
     inspection = db.query(Inspection).filter(Inspection.id == image.inspection_id).first()
-    user_role = (current_user.role or "").lower()
-    if inspection and user_role in ("manager", "maintenance") and inspection.status not in ("reviewed", "reported", "closed"):
+    if inspection and inspection.organization_id != current_user.organization_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail={"code": "UNREVIEWED_ACCESS_BLOCKED", "message": "Managers and Maintenance personnel cannot access unreviewed inspection imagery."}
+            detail={"code": "ACCESS_DENIED", "message": "Access denied to cross-organization thumbnail."}
         )
 
     from fastapi.responses import FileResponse
@@ -321,11 +318,10 @@ def get_processed_image_file(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image not found")
 
     inspection = db.query(Inspection).filter(Inspection.id == image.inspection_id).first()
-    user_role = (current_user.role or "").lower()
-    if inspection and user_role in ("manager", "maintenance") and inspection.status not in ("reviewed", "reported", "closed"):
+    if inspection and inspection.organization_id != current_user.organization_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail={"code": "UNREVIEWED_ACCESS_BLOCKED", "message": "Managers and Maintenance personnel cannot access unreviewed inspection imagery."}
+            detail={"code": "ACCESS_DENIED", "message": "Access denied to cross-organization thumbnail."}
         )
 
     from fastapi.responses import FileResponse

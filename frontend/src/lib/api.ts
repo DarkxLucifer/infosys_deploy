@@ -2170,7 +2170,8 @@ export const apiService = {
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail?.message || (typeof err.detail === "string" ? err.detail : "Failed to create inspection"));
+      const msg = err.detail?.message || (typeof err.detail === "string" ? err.detail : err.message || `Failed to create inspection (${res.status})`);
+      throw new Error(msg);
     }
     return res.json();
   },
@@ -2495,4 +2496,5 @@ export const apiService = {
 };
 
 export const api = apiService;
+
 

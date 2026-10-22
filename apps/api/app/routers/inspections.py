@@ -85,53 +85,61 @@ def create_inspection(
     insp_date = req.inspection_date or now_utc
     d_date = req.due_date or (now_utc + timedelta(days=14))
 
-    inspection = Inspection(
-        organization_id=current_user.organization_id,
-        asset_id=asset.id,
-        inspector_id=inspector.id,
-        inspection_date=insp_date,
-        due_date=d_date,
-        status="assigned",
-        method=req.inspection_method or "walkdown",
-        parent_inspection_id=req.parent_inspection_id,
-        notes=req.notes
-    )
-    db.add(inspection)
-    db.flush()
+    try:
+        inspection = Inspection(
+            organization_id=current_user.organization_id,
+            asset_id=asset.id,
+            inspector_id=inspector.id,
+            inspection_date=insp_date,
+            due_date=d_date,
+            status="assigned",
+            method=req.inspection_method or "walkdown",
+            parent_inspection_id=req.parent_inspection_id,
+            notes=req.notes
+        )
+        db.add(inspection)
+        db.flush()
 
-    notif = Notification(
-        user_id=inspector.id,
-        organization_id=current_user.organization_id,
-        title="Inspection Assigned",
-        message=f"You have been assigned inspection for asset {asset.name} ({asset.id}).",
-        link=f"/dashboard/inspections/{inspection.id}",
-        event_type="inspection_assigned"
-    )
-    db.add(notif)
+        notif = Notification(
+            user_id=inspector.id,
+            organization_id=current_user.organization_id,
+            title="Inspection Assigned",
+            message=f"You have been assigned inspection for asset {asset.name} ({asset.id}).",
+            link=f"/dashboard/inspections/{inspection.id}",
+            event_type="inspection_assigned"
+        )
+        db.add(notif)
 
-    audit = AuditLog(
-        user_id=current_user.id,
-        actor_email=current_user.email,
-        action="INSPECTION_CREATE",
-        entity_type="inspection",
-        entity_id=inspection.id,
-        details={"asset_id": asset.id, "inspector": inspector.email}
-    )
-    db.add(audit)
-    db.commit()
-    db.refresh(inspection)
+        audit = AuditLog(
+            user_id=current_user.id,
+            actor_email=current_user.email,
+            action="INSPECTION_CREATE",
+            entity_type="inspection",
+            entity_id=inspection.id,
+            details={"asset_id": asset.id, "inspector": inspector.email}
+        )
+        db.add(audit)
+        db.commit()
+        db.refresh(inspection)
 
-    return {
-        "id": inspection.id,
-        "assetId": inspection.asset_id,
-        "inspectorId": inspection.inspector_id,
-        "status": inspection.status,
-        "inspectionDate": inspection.inspection_date.isoformat(),
-        "dueDate": inspection.due_date.isoformat(),
-        "parentInspectionId": inspection.parent_inspection_id,
-        "notes": inspection.notes,
-        "createdAt": inspection.created_at.isoformat()
-    }
+        return {
+            "id": inspection.id,
+            "assetId": inspection.asset_id,
+            "inspectorId": inspection.inspector_id,
+            "status": inspection.status,
+            "method": inspection.method,
+            "inspectionDate": inspection.inspection_date.isoformat(),
+            "dueDate": inspection.due_date.isoformat(),
+            "parentInspectionId": inspection.parent_inspection_id,
+            "notes": inspection.notes,
+            "createdAt": inspection.created_at.isoformat()
+        }
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"code": "INSPECTION_CREATION_FAILED", "message": f"Failed to create inspection: {str(exc)}"}
+        )
 
 @router.get("")
 def list_inspections(

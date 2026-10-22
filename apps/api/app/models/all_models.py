@@ -202,6 +202,7 @@ class Inspection(Base):
     due_date = Column(DateTime(timezone=True), nullable=False)
     status = Column(String(32), default="draft", nullable=False, index=True)
     # draft -> assigned -> in_progress -> images_uploaded -> analysing -> pending_review -> in_review -> reviewed -> reported -> closed
+    method = Column(String(32), default="walkdown", nullable=True)
     analysis_status = Column(String(32), default="skipped_no_model", nullable=False)  # skipped_no_model, complete, failed
     claimed_by = Column(String(64), ForeignKey("users.id"), nullable=True, index=True)
     claimed_at = Column(DateTime(timezone=True), nullable=True)

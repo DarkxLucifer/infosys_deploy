@@ -37,6 +37,8 @@ def ensure_schema_upgrades(engine):
 
             try:
                 cols = [row[1] for row in conn.execute(text("PRAGMA table_info(inspections)")).fetchall()]
+                if "method" not in cols:
+                    conn.execute(text("ALTER TABLE inspections ADD COLUMN method VARCHAR(32) DEFAULT 'walkdown'"))
                 if "analysis_status" not in cols:
                     conn.execute(text("ALTER TABLE inspections ADD COLUMN analysis_status VARCHAR(32) DEFAULT 'skipped_no_model'"))
                 if "claimed_by" not in cols:
