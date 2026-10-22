@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from typing import Optional, List
 import jwt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Query, Request, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from app.config import settings
@@ -28,43 +28,58 @@ def decode_access_token(token: str) -> Optional[dict]:
         return None
 
 def get_current_user(
+    request: Request,
     auth: Optional[HTTPAuthorizationCredentials] = Depends(security_bearer),
+    token: Optional[str] = Query(None),
     db: Session = Depends(get_db)
 ) -> User:
-    if not auth or not auth.credentials:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"code": "UNAUTHORIZED", "message": "Missing authentication credentials"}
-        )
-    
-    payload = decode_access_token(auth.credentials)
-    if not payload:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"code": "TOKEN_INVALID", "message": "Token is invalid or expired"}
-        )
-    
-    user_id = payload.get("sub")
-    if not user_id:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"code": "TOKEN_INVALID", "message": "Token missing subject"}
-        )
-    
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"code": "USER_NOT_FOUND", "message": "User not found"}
-        )
-    
-    if user.status != "active":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={"code": "ACCOUNT_INACTIVE", "message": f"Account status is {user.status}"}
-        )
-    
-    return user
+    raw_token = None
+    if auth and auth.credentials:
+        raw_token = auth.credentials
+    elif token:
+        raw_token = token
+    elif request.cookies.get("infrascan_access"):
+        raw_token = request.cookies.get("infrascan_access")
+    elif request.cookies.get("access_token"):
+        raw_token = request.cookies.get("access_token")
+
+    if raw_token:
+        payload = decode_access_token(raw_token)
+        if payload and payload.get("sub"):
+            user = db.query(User).filter(User.id == payload["sub"]).first()
+            if user:
+                if user.status != "active":
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail={"code": "ACCOUNT_INACTIVE", "message": f"Account status is {user.status}"}
+                    )
+                return user
+
+    # Fallback to active refresh cookie session if available
+    refresh_cookie = request.cookies.get("infrascan_refresh")
+    if refresh_cookie:
+        from app.models.all_models import RefreshSession
+        from app.security.tokens import hash_token
+        hashed = hash_token(refresh_cookie)
+        sess = db.query(RefreshSession).filter(
+            RefreshSession.session_token_hash == hashed,
+            RefreshSession.is_revoked == False,
+            RefreshSession.expires_at > datetime.now(timezone.utc)
+        ).first()
+        if sess:
+            user = db.query(User).filter(User.id == sess.user_id).first()
+            if user:
+                if user.status != "active":
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail={"code": "ACCOUNT_INACTIVE", "message": f"Account status is {user.status}"}
+                    )
+                return user
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail={"code": "UNAUTHORIZED", "message": "Missing authentication credentials"}
+    )
 
 def require_role(allowed_roles: List[str]):
     def role_checker(current_user: User = Depends(get_current_user)) -> User:

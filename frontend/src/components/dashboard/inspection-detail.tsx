@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect, useRef } from "react";
 import { useParams } from "react-router-dom";
-import { api } from "@/lib/api";
+import { api, getAuthToken } from "@/lib/api";
 import {
   Camera,
   CircleAlert,
@@ -165,7 +165,9 @@ export function InspectionDetailPage() {
       if (realInsp) {
         setDbInspection(realInsp);
         setDbImages(realImages.items || []);
-        if (realInsp.assetId) {
+        if (realInsp.asset) {
+          setDbAsset(realInsp.asset);
+        } else if (realInsp.assetId) {
           const assets = await api.getAssets().catch(() => []);
           const match = assets.find((a: any) => a.id === realInsp.assetId);
           if (match) setDbAsset(match);
@@ -343,10 +345,10 @@ export function InspectionDetailPage() {
 
       return {
         id: dbInspection.id,
-        title: dbInspection.title || `Inspection ${dbInspection.id.slice(0, 8)}`,
+        title: dbInspection.title || `${dbInspection.asset?.name || dbInspection.assetId} Inspection`,
         assetId: dbInspection.assetId,
-        inspector: dbInspection.inspectorId || "Assigned Inspector",
-        method: "walkdown" as const,
+        inspector: dbInspection.inspector?.name || dbInspection.inspectorId || "Assigned Inspector",
+        method: (dbInspection.method || "walkdown") as any,
         status: (dbInspection.status === "in_progress" || dbInspection.status === "images_uploaded" || dbInspection.status === "draft"
           ? "in-progress"
           : dbInspection.status === "pending_review" || dbInspection.status === "submitted"
@@ -475,7 +477,7 @@ export function InspectionDetailPage() {
         backLabel="Inspections"
         eyebrow={asset ? `${inspection.assetId} · ${asset.name}` : inspection.assetId}
         title={inspection.title}
-        description={`${inspectionMethodLabels[inspection.method]} · inspector ${inspection.inspector} · ${inspection.frames.length} frame${inspection.frames.length === 1 ? "" : "s"} · model ${inspection.modelVersion}`}
+        description={`${(inspectionMethodLabels as any)[inspection.method] || inspection.method} · inspector ${inspection.inspector} · ${inspection.frames.length} frame${inspection.frames.length === 1 ? "" : "s"} · model ${inspection.modelVersion}`}
         actions={
           <>
             {inspection.status === "in-progress" ? (
@@ -564,7 +566,7 @@ export function InspectionDetailPage() {
             <StatCard
               label="Frames"
               value={inspection.frames.length}
-              hint={inspectionMethodLabels[inspection.method]}
+              hint={(inspectionMethodLabels as any)[inspection.method] || inspection.method}
             />
             <StatCard
               label="Pending review"
@@ -607,7 +609,7 @@ export function InspectionDetailPage() {
                         )
                       }
                     />
-                    <MetaItem label="Capture method" value={inspectionMethodLabels[inspection.method]} />
+                    <MetaItem label="Capture method" value={(inspectionMethodLabels as any)[inspection.method] || inspection.method} />
                     <MetaItem label="Model" value={inspection.modelVersion} />
                   </div>
 
@@ -813,9 +815,11 @@ export function InspectionDetailPage() {
                       const needsConfirm = img.status === "warned" || img.quality_status === "needs_confirmation";
                       const mode = viewMode[img.id] || "orig";
                       const isProc = mode === "proc";
-                      const imgSrc = isProc
+                      const tok = getAuthToken();
+                      const tokQuery = tok ? `?token=${encodeURIComponent(tok)}` : "";
+                      const imgSrc = (isProc
                         ? `/api/v1/images/${img.id}/processed`
-                        : `/api/v1/images/${img.id}/file`;
+                        : `/api/v1/images/${img.id}/file`) + tokQuery;
 
                       return (
                         <div key={img.id || idx} className="rounded-xl border bg-card p-3 space-y-2">
@@ -824,9 +828,6 @@ export function InspectionDetailPage() {
                               src={imgSrc}
                               alt={img.filename}
                               className="w-full h-full object-cover transition-all"
-                              onError={(e) => {
-                                (e.target as HTMLElement).style.display = "none";
-                              }}
                             />
 
                             {/* View Switch Pill (Original vs Preprocessed) */}

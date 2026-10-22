@@ -147,13 +147,13 @@ def list_inspections(
     status_filter: Optional[str] = Query(None, alias="status"),
     assigned_to_me: bool = False,
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    page_size: int = Query(50, ge=1, le=100),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     query = db.query(Inspection).filter(Inspection.organization_id == current_user.organization_id)
 
-    if assigned_to_me or current_user.role == "inspector":
+    if assigned_to_me:
         query = query.filter(Inspection.inspector_id == current_user.id)
 
     if asset_id:
@@ -173,6 +173,13 @@ def list_inspections(
         ).count()
         findings_count = db.query(Detection).filter(Detection.inspection_id == i.id).count()
 
+        top_sev = None
+        if findings_count > 0:
+            for s in ["critical", "severe", "moderate", "minor", "low"]:
+                if db.query(Detection.id).filter(Detection.inspection_id == i.id, Detection.severity == s).first():
+                    top_sev = s
+                    break
+
         items.append({
             "id": i.id,
             "assetId": i.asset_id,
@@ -180,11 +187,13 @@ def list_inspections(
             "inspectorId": i.inspector_id,
             "inspectorName": i.inspector.name if i.inspector else None,
             "status": i.status,
+            "method": i.method or "walkdown",
             "analysisStatus": i.analysis_status or "skipped_no_model",
             "claimedBy": i.claimed_by,
             "claimedByName": i.claimant.name if i.claimant else None,
             "imageCount": img_count,
             "findingsCount": findings_count,
+            "topSeverity": top_sev,
             "inspectionDate": i.inspection_date.isoformat(),
             "dueDate": i.due_date.isoformat(),
             "parentInspectionId": i.parent_inspection_id,

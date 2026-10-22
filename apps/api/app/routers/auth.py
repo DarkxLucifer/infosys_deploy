@@ -238,6 +238,15 @@ async def google_callback(req: GoogleCallbackRequest, request: Request, response
         max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 86400,
         path="/",
     )
+    response.set_cookie(
+        key="infrascan_access",
+        value=access_token,
+        httponly=True,
+        secure=settings.COOKIE_SECURE,
+        samesite=settings.COOKIE_SAMESITE,
+        max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        path="/",
+    )
 
     log_audit_event(
         db,
@@ -584,6 +593,15 @@ def login(req: LoginRequest, request: Request, response: Response, db: Session =
         max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 86400,
         path="/",
     )
+    response.set_cookie(
+        key="infrascan_access",
+        value=access_token,
+        httponly=True,
+        secure=settings.COOKIE_SECURE,
+        samesite=settings.COOKIE_SAMESITE,
+        max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        path="/",
+    )
 
     log_audit_event(
         db,
@@ -690,6 +708,15 @@ def refresh_token(request: Request, response: Response, db: Session = Depends(ge
         max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 86400,
         path="/",
     )
+    response.set_cookie(
+        key="infrascan_access",
+        value=access_token,
+        httponly=True,
+        secure=settings.COOKIE_SECURE,
+        samesite=settings.COOKIE_SAMESITE,
+        max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        path="/",
+    )
 
     return {"accessToken": access_token}
 
@@ -714,6 +741,13 @@ def logout(request: Request, response: Response, db: Session = Depends(get_db)):
     res = Response(status_code=status.HTTP_204_NO_CONTENT)
     res.delete_cookie(
         key=REFRESH_COOKIE_NAME,
+        path="/",
+        httponly=True,
+        secure=settings.COOKIE_SECURE,
+        samesite=settings.COOKIE_SAMESITE,
+    )
+    res.delete_cookie(
+        key="infrascan_access",
         path="/",
         httponly=True,
         secure=settings.COOKIE_SECURE,
