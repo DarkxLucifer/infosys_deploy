@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
-import { MapPin, Download, ChevronDown, Plus } from "lucide-react";
+import { MapPin, Download, ChevronDown, Plus, ArrowRight, ClipboardList } from "lucide-react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { api, type ManagerDashboardPayload, MOCK_ASSETS, type Asset } from "@/lib/api";
+import { api, type ManagerDashboardPayload, type Asset } from "@/lib/api";
 import { getSeverityMeta, formatSeverityLabel } from "@/lib/rules";
 import { InspectionPipelineBoard } from "@/components/dashboard/inspection-pipeline-board";
 
@@ -18,7 +18,8 @@ export function InfrastructureManagerDashboard() {
   const [data, setData] = useState<ManagerDashboardPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedRange, setSelectedRange] = useState("30d");
-  const [selectedAsset, setSelectedAsset] = useState<Asset | null>(MOCK_ASSETS[0]);
+  const [assets, setAssets] = useState<Asset[]>([]);
+  const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
   const [activeLayer, setActiveLayer] = useState<"all" | "severe">("all");
 
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
@@ -26,8 +27,16 @@ export function InfrastructureManagerDashboard() {
 
   const loadData = async () => {
     try {
-      const res = await api.getManagerDashboard();
+      const [res, assetList] = await Promise.all([
+        api.getManagerDashboard(),
+        api.getAssets(),
+      ]);
       setData(res);
+      const items = Array.isArray(assetList) ? assetList : [];
+      setAssets(items);
+      if (items.length > 0 && !selectedAsset) {
+        setSelectedAsset(items[0]);
+      }
     } finally {
       setLoading(false);
     }
@@ -70,13 +79,16 @@ export function InfrastructureManagerDashboard() {
       }
     });
 
-    MOCK_ASSETS.forEach((asset) => {
-      const sevMeta = getSeverityMeta(asset.latest_severity || "minor");
+    assets.forEach((asset) => {
+      const lat = asset.latitude ?? (asset as any).lat ?? 40.7128;
+      const lng = asset.longitude ?? (asset as any).lng ?? -74.0060;
+      const sev = (asset as any).latest_severity || "minor";
+      const sevMeta = getSeverityMeta(sev);
       if (activeLayer === "severe" && sevMeta.code !== "severe" && sevMeta.code !== "critical") {
         return;
       }
 
-      const marker = L.circleMarker([asset.latitude, asset.longitude], {
+      const marker = L.circleMarker([lat, lng], {
         radius: sevMeta.code === "critical" ? 10 : sevMeta.code === "severe" ? 8 : 6,
         fillColor: sevMeta.colorHex,
         color: "#ffffff",
@@ -85,12 +97,12 @@ export function InfrastructureManagerDashboard() {
         fillOpacity: 0.85,
       }).addTo(map);
 
-      marker.bindTooltip(`<b>${asset.code}</b>: ${asset.name}<br/>Severity: ${sevMeta.label}`);
+      marker.bindTooltip(`<b>${asset.code || asset.id}</b>: ${asset.name}<br/>Severity: ${sevMeta.label}`);
       marker.on("click", () => {
         setSelectedAsset(asset);
       });
     });
-  }, [activeLayer]);
+  }, [activeLayer, assets]);
 
   const handleExportCsv = async () => {
     const csvContent = await api.exportDashboardCsv("manager", selectedRange);
@@ -340,6 +352,100 @@ export function InfrastructureManagerDashboard() {
               ))}
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* Live Recent Network Inspections */}
+      <div className="rounded-xl border border-border bg-card shadow-xs overflow-hidden">
+        <div className="p-4 border-b border-border flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <ClipboardList className="size-4 text-primary" />
+            <div>
+              <h2 className="text-sm font-bold text-foreground">Recent Network Inspections & Surveys</h2>
+              <p className="text-xs text-muted-foreground">Real-time inspection uploads and field surveys across all assets</p>
+            </div>
+          </div>
+          <Link
+            to="/app/inspections"
+            className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline"
+          >
+            <span>View all inspections</span>
+            <ArrowRight className="size-3.5" />
+          </Link>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <thead className="bg-muted text-foreground border-b border-border">
+              <tr>
+                <th className="py-2.5 px-4 font-semibold">Asset Code & Name</th>
+                <th className="py-2.5 px-4 font-semibold">Method</th>
+                <th className="py-2.5 px-4 font-semibold">Inspector</th>
+                <th className="py-2.5 px-4 font-semibold">Photos</th>
+                <th className="py-2.5 px-4 font-semibold">Status</th>
+                <th className="py-2.5 px-4 font-semibold">Date</th>
+                <th className="py-2.5 px-4 font-semibold text-right">Action</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {(!data.recentInspections || data.recentInspections.length === 0) ? (
+                <tr>
+                  <td colSpan={7} className="py-8 text-center text-muted-foreground">
+                    No recent inspections recorded in the network.
+                  </td>
+                </tr>
+              ) : (
+                data.recentInspections.map((insp) => {
+                  const statusKey = insp.status || "assigned";
+                  const statusLabel =
+                    statusKey === "pending_review" ? "Pending Review" :
+                    statusKey === "images_uploaded" ? "Images Uploaded" :
+                    statusKey === "in_review" ? "In Review" :
+                    statusKey === "reviewed" ? "Reviewed" :
+                    statusKey === "assigned" ? "Assigned" :
+                    statusKey === "in_progress" ? "In Progress" : statusKey;
+
+                  const statusColor =
+                    statusKey === "pending_review" || statusKey === "in_review"
+                      ? "bg-warning-soft text-warning"
+                      : statusKey === "images_uploaded"
+                      ? "bg-primary/10 text-primary border border-primary/20"
+                      : statusKey === "reviewed" || statusKey === "completed"
+                      ? "bg-success-soft text-success"
+                      : "bg-secondary text-foreground";
+
+                  return (
+                    <tr key={insp.id} className="hover:bg-muted/40 transition-colors">
+                      <td className="py-2.5 px-4">
+                        <Link to={`/app/inspections/${insp.id}`} className="hover:underline">
+                          <span className="font-semibold text-foreground">{insp.assetCode}</span>
+                          <span className="text-muted-foreground ml-2 truncate max-w-36 inline-block align-bottom">{insp.assetName}</span>
+                        </Link>
+                      </td>
+                      <td className="py-2.5 px-4 capitalize font-medium text-foreground">{insp.method || "Walkdown"}</td>
+                      <td className="py-2.5 px-4 text-muted-foreground">{insp.inspectorName || "Field Inspector"}</td>
+                      <td className="py-2.5 px-4 font-mono font-medium">{insp.imagesCount || 0} photo(s)</td>
+                      <td className="py-2.5 px-4">
+                        <span className={`inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full ${statusColor}`}>
+                          {statusLabel}
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-4 text-muted-foreground font-mono">{insp.date}</td>
+                      <td className="py-2.5 px-4 text-right">
+                        <Link
+                          to={`/app/inspections/${insp.id}`}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-primary hover:opacity-90 text-primary-foreground font-semibold text-[11px] transition-all shadow-xs"
+                        >
+                          <span>Open</span>
+                          <ArrowRight className="size-3" />
+                        </Link>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
     </div>

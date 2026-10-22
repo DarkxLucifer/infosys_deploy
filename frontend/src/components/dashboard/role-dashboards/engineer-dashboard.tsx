@@ -5,7 +5,6 @@ import {
   Download, Sparkles, ChevronDown, ArrowRight
 } from "lucide-react";
 import { api, type EngineerDashboardPayload } from "@/lib/api";
-import { formatSeverityLabel } from "@/lib/rules";
 import { InspectionPipelineBoard } from "@/components/dashboard/inspection-pipeline-board";
 
 const DATE_RANGES = [
@@ -205,45 +204,74 @@ export function CivilEngineerDashboard() {
             <thead className="bg-muted text-foreground border-b border-border">
               <tr>
                 <th className="py-2.5 px-4 font-semibold">Asset</th>
-                <th className="py-2.5 px-4 font-semibold">Defect Type</th>
-                <th className="py-2.5 px-4 font-semibold">Confidence</th>
-                <th className="py-2.5 px-4 font-semibold">Severity (AI suggestion)</th>
+                <th className="py-2.5 px-4 font-semibold">Method & Inspector</th>
+                <th className="py-2.5 px-4 font-semibold">Photos</th>
                 <th className="py-2.5 px-4 font-semibold">Status</th>
-                <th className="py-2.5 px-4 font-semibold">Submitted</th>
+                <th className="py-2.5 px-4 font-semibold">Date</th>
+                <th className="py-2.5 px-4 font-semibold text-right">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {reviewQueue.slice(0, 6).map((item) => (
-                <tr key={item.inspectionId} className="hover:bg-muted/40 transition-colors">
-                  <td className="py-2.5 px-4">
-                    <span className="font-semibold text-foreground">{item.assetCode}</span>
-                    <span className="text-muted-foreground ml-2 truncate max-w-36 inline-block align-bottom">{item.assetName}</span>
+              {reviewQueue.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="py-8 text-center text-muted-foreground">
+                    No active or pending inspections in review queue.
                   </td>
-                  <td className="py-2.5 px-4 font-medium text-foreground">Longitudinal crack</td>
-                  <td className="py-2.5 px-4 font-mono font-medium">{(item.lowestConfidence * 100).toFixed(0)}%</td>
-                  <td className="py-2.5 px-4">
-                    <span
-                      className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold ${
-                        item.highestProposedSeverity === "critical"
-                          ? "bg-critical-soft text-critical"
-                          : item.highestProposedSeverity === "severe"
-                          ? "bg-destructive/10 text-destructive"
-                          : item.highestProposedSeverity === "moderate"
-                          ? "bg-warning-soft text-warning"
-                          : "bg-success-soft text-success"
-                      }`}
-                    >
-                      {formatSeverityLabel(item.highestProposedSeverity)}
-                    </span>
-                  </td>
-                  <td className="py-2.5 px-4">
-                    <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-warning bg-warning-soft px-2 py-0.5 rounded-full">
-                      Needs review
-                    </span>
-                  </td>
-                  <td className="py-2.5 px-4 text-muted-foreground font-mono">{item.date}</td>
                 </tr>
-              ))}
+              ) : (
+                reviewQueue.slice(0, 10).map((item) => {
+                  const statusKey = item.status || "pending_review";
+                  const statusLabel =
+                    statusKey === "pending_review" ? "Pending Review" :
+                    statusKey === "images_uploaded" ? "Images Uploaded" :
+                    statusKey === "in_review" ? "In Review" :
+                    statusKey === "reviewed" ? "Reviewed" :
+                    statusKey === "assigned" ? "Assigned" :
+                    statusKey === "in_progress" ? "In Progress" : statusKey;
+
+                  const statusColor =
+                    statusKey === "pending_review" || statusKey === "in_review"
+                      ? "bg-warning-soft text-warning"
+                      : statusKey === "images_uploaded"
+                      ? "bg-primary/10 text-primary border border-primary/20"
+                      : statusKey === "reviewed" || statusKey === "completed"
+                      ? "bg-success-soft text-success"
+                      : "bg-secondary text-foreground";
+
+                  return (
+                    <tr key={item.inspectionId} className="hover:bg-muted/40 transition-colors">
+                      <td className="py-2.5 px-4">
+                        <Link to={`/app/inspections/${item.inspectionId}`} className="hover:underline">
+                          <span className="font-semibold text-foreground">{item.assetCode}</span>
+                          <span className="text-muted-foreground ml-2 truncate max-w-36 inline-block align-bottom">{item.assetName}</span>
+                        </Link>
+                      </td>
+                      <td className="py-2.5 px-4">
+                        <div className="font-medium text-foreground capitalize">{item.method || "Walkdown"}</div>
+                        <div className="text-[11px] text-muted-foreground">{item.inspectorName || "Field Inspector"}</div>
+                      </td>
+                      <td className="py-2.5 px-4 font-mono font-medium">
+                        {item.imagesCount !== undefined ? `${item.imagesCount} photo(s)` : `${item.findingsCount} finding(s)`}
+                      </td>
+                      <td className="py-2.5 px-4">
+                        <span className={`inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full ${statusColor}`}>
+                          {statusLabel}
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-4 text-muted-foreground font-mono">{item.date}</td>
+                      <td className="py-2.5 px-4 text-right">
+                        <Link
+                          to={`/app/inspections/${item.inspectionId}`}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-primary hover:opacity-90 text-primary-foreground font-semibold text-[11px] transition-all shadow-xs"
+                        >
+                          <span>Review</span>
+                          <ArrowRight className="size-3" />
+                        </Link>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
             </tbody>
           </table>
         </div>

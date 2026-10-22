@@ -275,6 +275,10 @@ export interface EngineerDashboardPayload {
     highestProposedSeverity: SeverityLevel;
     lowestConfidence: number;
     ageDays: number;
+    status?: string;
+    method?: string;
+    imagesCount?: number;
+    inspectorName?: string;
   }[];
   crackTypeCounts: {
     type: string;
@@ -367,6 +371,17 @@ export interface ManagerDashboardPayload {
     inspections: number;
     findingsReviewed: number;
     openWorkOrders: number;
+  }[];
+  recentInspections?: {
+    id: string;
+    assetCode: string;
+    assetName: string;
+    assetType: string;
+    status: string;
+    method: string;
+    imagesCount: number;
+    inspectorName: string;
+    date: string;
   }[];
 }
 
@@ -1342,6 +1357,7 @@ export const apiService = {
           upcomingInspections: Array.isArray(raw.upcomingInspections) ? raw.upcomingInspections : [],
           priorityList: Array.isArray(raw.priorityList) ? raw.priorityList : [],
           regionSummary: Array.isArray(raw.regionSummary) ? raw.regionSummary : [],
+          recentInspections: Array.isArray(raw.recentInspections) ? raw.recentInspections : [],
         };
       }
     } catch (e) {

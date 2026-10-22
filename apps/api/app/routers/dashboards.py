@@ -27,22 +27,22 @@ def get_pipeline_counts(
 
     quality_check_count = db.query(Inspection).filter(
         Inspection.organization_id == org_id,
-        Inspection.status.in_(["draft", "uploaded"])
+        Inspection.status.in_(["draft", "assigned", "in_progress", "uploaded"])
     ).count()
 
     ai_analysing_count = db.query(Inspection).filter(
         Inspection.organization_id == org_id,
-        Inspection.status.in_(["processing", "analyzing"])
+        Inspection.status.in_(["images_uploaded", "processing", "analyzing"])
     ).count()
 
     needs_review_count = db.query(Inspection).filter(
         Inspection.organization_id == org_id,
-        Inspection.status.in_(["pending_review", "flagged"])
+        Inspection.status.in_(["pending_review", "in_review", "flagged"])
     ).count()
 
     reviewed_count = db.query(Inspection).filter(
         Inspection.organization_id == org_id,
-        Inspection.status.in_(["reviewed", "approved", "completed"])
+        Inspection.status.in_(["reviewed", "approved", "completed", "reported", "closed"])
     ).count()
 
     reported_count = db.query(Report).join(Inspection).filter(
@@ -133,7 +133,7 @@ def get_role_dashboard_metrics(
         )
         if assigned_count + pending_count + completed_count > 0:
             insp_query = insp_query.filter(Inspection.inspector_id == current_user.id)
-        raw_inspections = insp_query.order_by(desc(Inspection.inspection_date)).limit(20).all()
+        raw_inspections = insp_query.order_by(desc(Inspection.created_at), desc(Inspection.inspection_date)).limit(25).all()
 
         formatted_my_inspections = []
         for i in raw_inspections:
@@ -164,8 +164,8 @@ def get_role_dashboard_metrics(
         # Pending review items for inspector dashboard
         pending_review_insps = db.query(Inspection).filter(
             Inspection.organization_id == org_id,
-            Inspection.status.in_(["pending_review", "in_review", "images_uploaded"])
-        ).order_by(desc(Inspection.inspection_date)).limit(10).all()
+            Inspection.status.in_(["pending_review", "in_review", "images_uploaded", "assigned", "in_progress"])
+        ).order_by(desc(Inspection.created_at), desc(Inspection.inspection_date)).limit(15).all()
 
         formatted_pending = []
         for p in pending_review_insps:
@@ -239,7 +239,7 @@ def get_role_dashboard_metrics(
 
         awaiting_review = db.query(Inspection).filter(
             Inspection.organization_id == org_id,
-            Inspection.status.in_(["pending_review", "in_review", "images_uploaded"])
+            Inspection.status.in_(["pending_review", "in_review", "images_uploaded", "assigned", "in_progress", "draft"])
         ).count()
 
         reviewed_this_period = db.query(Inspection).filter(
@@ -274,22 +274,32 @@ def get_role_dashboard_metrics(
         total_detections = db.query(Detection).count()
         correction_rate = round((verified_count / total_detections * 100), 1) if total_detections > 0 else 0.0
 
-        # Review queue list
+        # Review queue list: include all active, pending, or newly uploaded inspections
         review_inspections = db.query(Inspection).filter(
             Inspection.organization_id == org_id,
-            Inspection.status.in_(["pending_review", "in_review", "images_uploaded", "draft"])
-        ).order_by(desc(Inspection.inspection_date)).limit(10).all()
+            Inspection.status.in_(["pending_review", "in_review", "images_uploaded", "assigned", "in_progress", "draft"])
+        ).order_by(desc(Inspection.created_at), desc(Inspection.inspection_date)).limit(25).all()
 
         formatted_review_queue = []
         for ri in review_inspections:
             asset = db.query(Asset).filter(Asset.id == ri.asset_id).first()
             det_count = db.query(Detection).filter(Detection.inspection_id == ri.id).count()
+            img_count = db.query(InspectionImage).filter(
+                InspectionImage.inspection_id == ri.id,
+                InspectionImage.is_deleted == False
+            ).count()
+            inspector = db.query(User).filter(User.id == ri.inspector_id).first()
             age_days = (now.date() - ri.inspection_date.date()).days if ri.inspection_date else 1
             formatted_review_queue.append({
                 "inspectionId": ri.id,
                 "assetCode": asset.id if asset else "INF-000",
                 "assetName": asset.name if asset else "Asset",
+                "assetType": asset.asset_type if asset else "bridge",
                 "date": ri.inspection_date.strftime("%Y-%m-%d") if ri.inspection_date else now.strftime("%Y-%m-%d"),
+                "status": ri.status,
+                "method": ri.method or "walkdown",
+                "imagesCount": img_count,
+                "inspectorName": inspector.name if inspector else "Field Inspector",
                 "findingsCount": det_count,
                 "highestProposedSeverity": "moderate",
                 "lowestConfidence": 0.88,
@@ -527,6 +537,30 @@ def get_role_dashboard_metrics(
 
         progress_pct = round((closed_wo / total_wo * 100), 1) if total_wo > 0 else 100.0
 
+        mgr_recent_inspections = db.query(Inspection).filter(
+            Inspection.organization_id == org_id
+        ).order_by(desc(Inspection.created_at), desc(Inspection.inspection_date)).limit(15).all()
+
+        formatted_mgr_inspections = []
+        for ri in mgr_recent_inspections:
+            asset = db.query(Asset).filter(Asset.id == ri.asset_id).first()
+            img_count = db.query(InspectionImage).filter(
+                InspectionImage.inspection_id == ri.id,
+                InspectionImage.is_deleted == False
+            ).count()
+            inspector = db.query(User).filter(User.id == ri.inspector_id).first()
+            formatted_mgr_inspections.append({
+                "id": ri.id,
+                "assetCode": asset.id if asset else ri.asset_id,
+                "assetName": asset.name if asset else "Asset",
+                "assetType": asset.asset_type if asset else "bridge",
+                "status": ri.status,
+                "method": ri.method or "walkdown",
+                "imagesCount": img_count,
+                "inspectorName": inspector.name if inspector else "Field Inspector",
+                "date": ri.inspection_date.strftime("%Y-%m-%d") if ri.inspection_date else now.strftime("%Y-%m-%d")
+            })
+
         return {
             "role": "manager",
             "totalAssets": total_assets,
@@ -534,6 +568,7 @@ def get_role_dashboard_metrics(
             "damagedAssetsCount": len(damaged_asset_ids),
             "highPriorityCount": high_priority_count,
             "inspectionsAwaitingReview": pending_review_count,
+            "recentInspections": formatted_mgr_inspections,
             "kpis": {
                 "totalAssets": total_assets,
                 "totalInspectionsPeriod": total_inspections,
@@ -725,14 +760,14 @@ def get_review_queue(
     org_id = current_user.organization_id
     query = db.query(Inspection).filter(
         Inspection.organization_id == org_id,
-        Inspection.status.in_(["pending_review", "in_review", "images_uploaded", "reviewed", "reported", "closed"])
+        Inspection.status.in_(["pending_review", "in_review", "images_uploaded", "assigned", "in_progress", "draft", "reviewed", "reported", "closed"])
     )
 
     if status and status != "all":
         if status == "needs_review":
             query = query.filter(Inspection.status.in_(["pending_review", "in_review"]))
         elif status == "ai_analysing":
-            query = query.filter(Inspection.status.in_(["images_uploaded", "analysing"]))
+            query = query.filter(Inspection.status.in_(["images_uploaded", "analysing", "assigned", "in_progress", "draft"]))
         elif status == "reviewed":
             query = query.filter(Inspection.status.in_(["reviewed", "reported", "closed"]))
 
@@ -743,7 +778,7 @@ def get_review_queue(
         )
 
     total = query.count()
-    inspections = query.order_by(desc(Inspection.inspection_date)).offset((page - 1) * pageSize).limit(pageSize).all()
+    inspections = query.order_by(desc(Inspection.created_at), desc(Inspection.inspection_date)).offset((page - 1) * pageSize).limit(pageSize).all()
 
     items = []
     for insp in inspections:
