@@ -2153,9 +2153,10 @@ export const apiService = {
 
   async createInspection(payload: {
     asset_id: string;
-    inspector_id: string;
-    inspection_date: string;
-    due_date: string;
+    inspector_id?: string;
+    inspection_date?: string;
+    due_date?: string;
+    inspection_method?: string;
     notes?: string;
   }): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/inspections`, {
@@ -2494,3 +2495,4 @@ export const apiService = {
 };
 
 export const api = apiService;
+

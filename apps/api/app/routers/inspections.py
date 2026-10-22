@@ -33,6 +33,7 @@ class CreateInspectionRequest(BaseModel):
     inspector_id: Optional[str] = Field(None, description="Assigned Inspector User ID")
     inspection_date: Optional[datetime] = Field(None, description="Scheduled inspection timestamp")
     due_date: Optional[datetime] = Field(None, description="Due date timestamp")
+    inspection_method: Optional[str] = Field(None, description="e.g. walkdown, drone, dslr, smartphone")
     parent_inspection_id: Optional[str] = None
     notes: Optional[str] = None
 
@@ -91,6 +92,7 @@ def create_inspection(
         inspection_date=insp_date,
         due_date=d_date,
         status="assigned",
+        method=req.inspection_method or "walkdown",
         parent_inspection_id=req.parent_inspection_id,
         notes=req.notes
     )
