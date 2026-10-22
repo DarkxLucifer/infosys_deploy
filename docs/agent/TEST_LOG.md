@@ -18,3 +18,4 @@
 
 
 
+| 2026-10-22 08:42:10 | MULTI-ROLE-SYNC-01 | inspect@infrascan.local, engineer, manager, maintenance | Create inspection with minimal fields (asset + method + notes), upload high-res field photo, verify cross-role visibility (Engineer, Manager, Maintenance) for inspection details, image list, and thumbnails | Status 201 Created on inspection and image upload; Engineer, Manager, and Maintenance all retrieve inspection, images, and thumbnails (200 OK) | PASS | None | None | N/A | Fixed inspection creation crash (added method column to Inspection model & DB migration) and enabled cross-role image visibility across all authorized roles |
