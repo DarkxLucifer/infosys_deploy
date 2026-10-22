@@ -75,14 +75,22 @@ async def upload_inspection_image(
     # Validation & Abuse check (Check J4, J6)
     is_valid, qual_status, metrics, pil_img = validate_inspection_image(file_bytes, filename)
     if not is_valid:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={
-                "code": metrics.get("error", "IMAGE_VALIDATION_FAILED"),
-                "message": metrics.get("message", "Image validation failed."),
-                "metrics": metrics
-            }
-        )
+        # If user explicitly allowed warnings (e.g. live camera snap or field condition override)
+        # and image is valid image data (not corrupt, empty, or an abuse file)
+        if allow_warning and metrics.get("error") in ("QUALITY_DEFECT_MULTIPLE", "LOW_LIGHT_DETECTED", "BLUR_DETECTED") and pil_img is not None:
+            is_valid = True
+            qual_status = "valid"
+            metrics["user_override"] = True
+            metrics["override_reason"] = "Field inspector confirmed image despite low lighting or blur"
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={
+                    "code": metrics.get("error", "IMAGE_VALIDATION_FAILED"),
+                    "message": metrics.get("message", "Image validation failed."),
+                    "metrics": metrics
+                }
+            )
 
     if qual_status == "warned" and not allow_warning:
         raise HTTPException(
@@ -142,9 +150,12 @@ async def upload_inspection_image(
         height=metrics.get("height", pil_img.height),
         file_size=len(file_bytes),
         source=source,
-        status=qual_status,
+        status="valid" if (allow_warning and qual_status == "warned") else qual_status,
         quality_report=metrics
     )
+    if allow_warning and qual_status == "warned":
+        metrics["confirmed_by"] = current_user.id
+        metrics["confirmed_at"] = datetime.now(timezone.utc).isoformat()
     db.add(img_record)
     db.flush()
 

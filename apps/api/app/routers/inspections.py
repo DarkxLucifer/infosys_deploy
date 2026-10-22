@@ -358,19 +358,23 @@ def submit_inspection_for_review(
         InspectionImage.is_deleted == False
     ).all()
 
-    valid_images = [img for img in images if img.status == "valid"]
+    valid_images = [img for img in images if img.status in ("valid", "accepted")]
     warned_images = [img for img in images if img.status == "warned"]
+
+    # When the inspector submits, any warned images are confirmed for engineering triage
+    if len(warned_images) > 0:
+        for w_img in warned_images:
+            w_img.status = "valid"
+            qr = w_img.quality_report or {}
+            qr["confirmed_by"] = current_user.id
+            qr["confirmed_at"] = datetime.now(timezone.utc).isoformat()
+            w_img.quality_report = qr
+        valid_images.extend(warned_images)
 
     if len(valid_images) == 0:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={"code": "NO_VALID_IMAGES", "message": "At least one accepted image is required to submit for review."}
-        )
-
-    if len(warned_images) > 0:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={"code": "UNCONFIRMED_WARNINGS", "message": f"{len(warned_images)} image(s) have unconfirmed quality warnings. Confirm or replace them first."}
+            detail={"code": "NO_VALID_IMAGES", "message": "At least one accepted image is required to submit for review. Please capture or upload a field photo first."}
         )
 
     inspection.status = "pending_review"

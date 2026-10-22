@@ -225,7 +225,7 @@ export function InspectionDetailPage() {
         } catch {}
       }
 
-      await api.uploadInspectionImage(id, blob, "smartphone", false, gpsCoord);
+      await api.uploadInspectionImage(id, blob, "smartphone", true, gpsCoord);
       toast.success("Camera photo captured & preprocessed", {
         description: "Image uploaded and initial crack enhancement preprocessing pipeline completed.",
       });
