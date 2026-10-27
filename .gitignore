@@ -13,6 +13,12 @@ storage/processed/*
 !storage/uploads/.gitkeep
 !storage/thumbnails/.gitkeep
 !storage/processed/.gitkeep
+apps/api/storage/uploads/*
+apps/api/storage/thumbnails/*
+apps/api/storage/processed/*
+!apps/api/storage/uploads/.gitkeep
+!apps/api/storage/thumbnails/.gitkeep
+!apps/api/storage/processed/.gitkeep
 *.db-shm
 *.db-wal
 .env.local

@@ -1,0 +1,187 @@
+openapi: 3.0.3
+info:
+  title: InfraScan Image Quality & Preprocessing API (Milestone 2)
+  version: 2.0.0
+  description: |
+    API Contract for image quality assessment (PDF §5.3) and classical CV preprocessing pipeline (PDF §5.4).
+    All processing is deterministic standard image processing (OpenCV, PIL, NumPy) — NOT AI.
+
+paths:
+  /api/v1/config/image-limits:
+    get:
+      summary: Retrieve server-side quality assessment limits and thresholds
+      responses:
+        '200':
+          description: Dynamic limit configuration
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  max_file_size_bytes:
+                    type: integer
+                  min_resolution:
+                    type: object
+                    properties:
+                      width: { type: integer }
+                      height: { type: integer }
+                  thresholds:
+                    type: object
+
+  /api/v1/images/assess:
+    post:
+      summary: Assess quality of image bytes without persisting (dry-run check)
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                inspection_id:
+                  type: string
+      responses:
+        '200':
+          description: Quality report with 7 checks and metrics
+        '401':
+          description: Unauthorized
+
+  /api/v1/images/upload:
+    post:
+      summary: Upload, quality-audit, and preprocess field inspection image
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                inspection_id:
+                  type: string
+                allow_warning:
+                  type: boolean
+                source:
+                  type: string
+                  enum: [camera, upload, mobile, drone]
+                gps_lat:
+                  type: number
+                gps_lng:
+                  type: number
+      responses:
+        '201':
+          description: Image created, quality-audited, and enhanced copy generated
+        '422':
+          description: Image quality rejected (hard fail) with structured report
+        '403':
+          description: Cross-organization or unauthorized upload
+
+  /api/v1/images/{id}:
+    get:
+      summary: Get full image details, 7-check quality report, and preprocessing run
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Detailed image object
+        '403':
+          description: Forbidden (Managers and Maintenance cannot view unreviewed/intermediate quality data)
+        '404':
+          description: Image not found
+
+  /api/v1/images/{id}/file:
+    get:
+      summary: Retrieve binary image file (original, processed, or thumbnail)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: variant
+          in: query
+          schema:
+            type: string
+            enum: [original, processed, thumbnail]
+            default: original
+      responses:
+        '200':
+          content:
+            image/jpeg:
+              schema: { type: string, format: binary }
+            image/png:
+              schema: { type: string, format: binary }
+
+  /api/v1/images/{id}/quality/confirm:
+    post:
+      summary: Confirm warning ('Continue anyway') and trigger preprocessing
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Warning confirmed and preprocessing complete
+
+  /api/v1/images/{id}/processing/retry:
+    post:
+      summary: Retry failed preprocessing run
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Preprocessing retried successfully
+
+  /api/v1/images/{id}/calibration:
+    post:
+      summary: Save optical scale calibration (mm per pixel)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [method]
+              properties:
+                method: { type: string }
+                reference_line_length_mm: { type: number }
+                pixel_length: { type: number }
+                mm_per_pixel: { type: number }
+      responses:
+        '200':
+          description: Scale calibrated and audited
+
+  /api/v1/images/{id}/replace:
+    post:
+      summary: Replace a rejected or substandard image with a fresh file
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        '200':
+          description: Replacement image validated and preprocessed

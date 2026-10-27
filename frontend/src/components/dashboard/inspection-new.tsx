@@ -9,11 +9,12 @@ import {
   MapPin,
   Navigation,
   Plus,
-  Smartphone,
   Upload,
   X,
   AlertCircle,
   UserCheck,
+  Ruler,
+  RefreshCw,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/store/auth-context";
@@ -39,6 +40,11 @@ import {
 } from "@/components/ui/select";
 import { api } from "@/lib/api";
 import { ComplianceNote, PageHeader, PageShell } from "./page-shell";
+import {
+  ImageQualityCard,
+  BatchSummaryCard,
+  ImageTransformModal,
+} from "@/components/inspection/image-quality-components";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -46,10 +52,21 @@ interface UploadedPhoto {
   id: string;
   name: string;
   previewUrl: string;
+  processedUrl?: string | null;
   status: "uploading" | "valid" | "warning" | "error";
+  quality_status: "checking" | "accepted" | "warning" | "rejected";
+  processing_status: "not_started" | "queued" | "running" | "complete" | "failed" | "skipped";
   qualityNote?: string;
-  source: "camera" | "upload";
+  qualityReport?: any;
+  processingRun?: any;
+  warningConfirmed?: boolean;
+  clientError?: string;
+  source: string;
   gps?: { lat: number; lng: number };
+  width?: number;
+  height?: number;
+  calibration?: any;
+  drone?: { altitude?: number; gimbalPitch?: number };
 }
 
 // ─── Camera Capture Modal ─────────────────────────────────────────────────────
@@ -69,6 +86,7 @@ function CameraCaptureModal({
   const [ready, setReady] = useState(false);
   const [captured, setCaptured] = useState<string | null>(null);
   const [capturedBlob, setCapturedBlob] = useState<Blob | null>(null);
+  const [facingMode, setFacingMode] = useState<"environment" | "user">("environment");
 
   useEffect(() => {
     if (!open) {
@@ -80,12 +98,12 @@ function CameraCaptureModal({
     }
     startCamera();
     return () => stopStream();
-  }, [open]);
+  }, [open, facingMode]);
 
   const startCamera = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 1080 } },
+        video: { facingMode, width: { ideal: 1920 }, height: { ideal: 1080 } },
       });
       streamRef.current = stream;
       if (videoRef.current) {
@@ -101,6 +119,12 @@ function CameraCaptureModal({
   const stopStream = () => {
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
+  };
+
+  const toggleFacingMode = () => {
+    stopStream();
+    setReady(false);
+    setFacingMode((prev) => (prev === "environment" ? "user" : "environment"));
   };
 
   const handleSnap = () => {
@@ -138,14 +162,26 @@ function CameraCaptureModal({
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
       <DialogContent className="sm:max-w-2xl p-0 overflow-hidden bg-black border-border">
-        <DialogHeader className="p-4 bg-card/90">
-          <DialogTitle className="text-sm flex items-center gap-2">
-            <Camera className="size-4 text-primary" />
-            Field Camera Capture
-          </DialogTitle>
-          <DialogDescription className="text-xs">
-            Point at the infrastructure surface. Frame the area clearly before snapping.
-          </DialogDescription>
+        <DialogHeader className="p-4 bg-card/90 flex flex-row items-center justify-between">
+          <div>
+            <DialogTitle className="text-sm flex items-center gap-2">
+              <Camera className="size-4 text-primary" />
+              Field Camera Capture
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Point at the infrastructure surface. Frame the area clearly before snapping.
+            </DialogDescription>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={toggleFacingMode}
+            className="h-7 text-[11px] gap-1 px-2 border-border"
+          >
+            <RefreshCw className="size-3" />
+            <span>{facingMode === "environment" ? "Front Cam" : "Back Cam"}</span>
+          </Button>
         </DialogHeader>
 
         <div className="relative aspect-video bg-black flex items-center justify-center">
@@ -195,73 +231,6 @@ function CameraCaptureModal({
   );
 }
 
-// ─── Photo Thumbnail Card ──────────────────────────────────────────────────────
-
-function PhotoCard({ photo, onRemove }: { photo: UploadedPhoto; onRemove: (id: string) => void }) {
-  const statusColors: Record<UploadedPhoto["status"], string> = {
-    uploading: "bg-blue-500/10 text-blue-400 border-blue-500/30",
-    valid: "bg-emerald-500/10 text-emerald-400 border-emerald-500/30",
-    warning: "bg-yellow-500/10 text-yellow-400 border-yellow-500/30",
-    error: "bg-destructive/10 text-destructive border-destructive/30",
-  };
-
-  const statusLabel: Record<UploadedPhoto["status"], string> = {
-    uploading: "Uploading…",
-    valid: "Valid",
-    warning: "Warning",
-    error: "Failed",
-  };
-
-  return (
-    <div className="relative rounded-xl overflow-hidden border border-border bg-card group">
-      <img
-        src={photo.previewUrl}
-        alt={photo.name}
-        className="w-full aspect-video object-cover"
-      />
-      {/* Overlay badges */}
-      <div className="absolute top-2 left-2 flex gap-1.5">
-        <span
-          className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${statusColors[photo.status]}`}
-        >
-          {statusLabel[photo.status]}
-        </span>
-        {photo.source === "camera" && (
-          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full border bg-primary/10 text-primary border-primary/30">
-            Camera
-          </span>
-        )}
-      </div>
-      {photo.gps && (
-        <div className="absolute bottom-0 left-0 right-0 px-2 py-1 bg-black/60 text-[10px] text-primary/90 font-mono flex items-center gap-1">
-          <MapPin className="size-2.5" />
-          {photo.gps.lat.toFixed(5)}, {photo.gps.lng.toFixed(5)}
-        </div>
-      )}
-      {/* Upload spinner overlay */}
-      {photo.status === "uploading" && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/50">
-          <Loader2 className="size-6 text-primary animate-spin" />
-        </div>
-      )}
-      {/* Remove button */}
-      {photo.status !== "uploading" && (
-        <button
-          onClick={() => onRemove(photo.id)}
-          className="absolute top-2 right-2 size-6 rounded-full bg-destructive/80 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-        >
-          <X className="size-3" />
-        </button>
-      )}
-      {photo.qualityNote && (
-        <div className="px-2 py-1 text-[10px] text-muted-foreground border-t border-border bg-card/80 truncate">
-          {photo.qualityNote}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ─── Main Component ────────────────────────────────────────────────────────────
 
 export function InspectionNewPage() {
@@ -286,10 +255,50 @@ export function InspectionNewPage() {
   const [gpsLabel, setGpsLabel] = useState<string>("Not acquired");
   const [gpsAcquiring, setGpsAcquiring] = useState(false);
 
-  // Step 2 — photos
+  // Step 2 — photos & limits
   const [photos, setPhotos] = useState<UploadedPhoto[]>([]);
   const [cameraOpen, setCameraOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const replaceFileInputRef = useRef<HTMLInputElement>(null);
+  const [replaceTargetId, setReplaceTargetId] = useState<string | null>(null);
+  const [calibratingPhotoId, setCalibratingPhotoId] = useState<string | null>(null);
+  const [calibMm, setCalibMm] = useState<number>(50);
+  const [calibPx, setCalibPx] = useState<number>(100);
+  const [limits, setLimits] = useState<any>(null);
+
+  // Role-based inspector assignment
+  const { user: authUser } = useAuth();
+  const [inspectors, setInspectors] = useState<any[]>([]);
+  const [assignedInspectorId, setAssignedInspectorId] = useState<string>("");
+
+  useEffect(() => {
+    if (authUser?.id) setAssignedInspectorId(authUser.id);
+    api
+      .getInspectors()
+      .then((data) => {
+        if (Array.isArray(data) && data.length > 0) {
+          setInspectors(data);
+          if (!authUser?.id) setAssignedInspectorId(data[0].id);
+        }
+      })
+      .catch(() => {});
+  }, [authUser]);
+
+  // Interactive transform modal state
+  const [transformModalOpen, setTransformModalOpen] = useState(false);
+  const [transformPhoto, setTransformPhoto] = useState<any | null>(null);
+
+  // Load image quality limits dynamically from backend
+  useEffect(() => {
+    api
+      .getImageLimits()
+      .then((data) => {
+        if (data) setLimits(data);
+      })
+      .catch(() => {
+        // Fallback silently if offline
+      });
+  }, []);
 
   // Quick asset creation modal
   const [quickAssetOpen, setQuickAssetOpen] = useState(false);
@@ -415,9 +424,9 @@ export function InspectionNewPage() {
     try {
       const created = await api.createInspection({
         asset_id: assetId,
+        inspector_id: assignedInspectorId || undefined,
         inspection_method: method,
         notes: notes.trim() || undefined,
-        // inspector_id, inspection_date, due_date all auto-default on backend
       });
       setCreatedInspectionId(created.id);
       toast.success("Inspection created — now capture field photos");
@@ -431,8 +440,61 @@ export function InspectionNewPage() {
 
   // ── Step 2: Photo Upload ───────────────────────────────────────────────────
 
+  // ── Step 2: Quality Assessment, Upload & Preprocessing ─────────────────────
+
+  const clientPreCheck = useCallback(
+    async (
+      fileOrBlob: File | Blob
+    ): Promise<{ passed: boolean; reason?: string; width?: number; height?: number }> => {
+      // 1. File size check
+      const maxBytes = limits?.max_file_size_bytes || 52428800; // 50MB
+      if (fileOrBlob.size > maxBytes) {
+        const mb = (fileOrBlob.size / (1024 * 1024)).toFixed(1);
+        const maxMb = (maxBytes / (1024 * 1024)).toFixed(0);
+        return {
+          passed: false,
+          reason: `File size (${mb} MB) exceeds maximum allowed limit of ${maxMb} MB.`,
+        };
+      }
+
+      // 2. MIME type check
+      if (fileOrBlob instanceof File && fileOrBlob.type) {
+        const allowed = ["image/jpeg", "image/jpg", "image/png", "image/tiff", "image/heic"];
+        if (!allowed.includes(fileOrBlob.type.toLowerCase()) && !fileOrBlob.type.startsWith("image/")) {
+          return {
+            passed: false,
+            reason: `Format '${fileOrBlob.type}' is not supported. Please use JPEG, PNG, or TIFF.`,
+          };
+        }
+      }
+
+      // 3. Resolution standardization (resolution limits removed per specification)
+      return new Promise((resolve) => {
+        const url = URL.createObjectURL(fileOrBlob);
+        const img = new Image();
+        img.onload = () => {
+          const width = img.naturalWidth;
+          const height = img.naturalHeight;
+          URL.revokeObjectURL(url);
+          resolve({ passed: true, width, height });
+        };
+        img.onerror = () => {
+          URL.revokeObjectURL(url);
+          resolve({ passed: true }); // Server will check completeness/corruption
+        };
+        img.src = url;
+      });
+    },
+    [limits]
+  );
+
   const uploadPhoto = useCallback(
-    async (fileOrBlob: File | Blob, source: "camera" | "upload") => {
+    async (
+      fileOrBlob: File | Blob,
+      source: string = "upload",
+      allowWarning: boolean = false,
+      drone?: { altitude?: number; gimbalPitch?: number }
+    ) => {
       if (!createdInspectionId) return;
 
       const tempId = crypto.randomUUID();
@@ -440,10 +502,36 @@ export function InspectionNewPage() {
       const name =
         fileOrBlob instanceof File
           ? fileOrBlob.name
-          : `camera_${new Date().toISOString().replace(/[:.]/g, "-")}.jpg`;
+          : `${source}_${new Date().toISOString().replace(/[:.]/g, "-")}.jpg`;
 
       const gps = cachedGpsRef.current ?? undefined;
 
+      // 1. Client Pre-Check
+      const preCheck = await clientPreCheck(fileOrBlob);
+      if (!preCheck.passed) {
+        setPhotos((prev) => [
+          ...prev,
+          {
+            id: tempId,
+            name,
+            previewUrl,
+            status: "error",
+            quality_status: "rejected",
+            processing_status: "skipped",
+            clientError: preCheck.reason,
+            qualityNote: preCheck.reason,
+            source,
+            gps,
+            drone,
+            width: preCheck.width,
+            height: preCheck.height,
+          },
+        ]);
+        toast.error(`Image rejected: ${preCheck.reason}`);
+        return;
+      }
+
+      // 2. Add as checking / uploading
       setPhotos((prev) => [
         ...prev,
         {
@@ -451,44 +539,82 @@ export function InspectionNewPage() {
           name,
           previewUrl,
           status: "uploading",
+          quality_status: "checking",
+          processing_status: "queued",
           source,
           gps,
+          drone,
+          width: preCheck.width,
+          height: preCheck.height,
         },
       ]);
 
       try {
-        const result = await api.uploadInspectionImage(
-          createdInspectionId,
+        const result = await api.uploadAssessedImage(
           fileOrBlob,
+          createdInspectionId,
+          allowWarning,
           source,
-          true, // allow_warning
-          gps
+          gps,
+          drone
         );
 
-        const serverStatus = result?.status === "valid" ? "valid" : result?.status === "warning" ? "warning" : "valid";
-        const qualityNote = result?.quality_check_result
-          ? `Resolution: ${result.quality_check_result.resolution ?? "OK"} · Blur: ${result.quality_check_result.blur_score?.toFixed(1) ?? "OK"}`
-          : undefined;
+        const qualityStatus = result.quality_status || (result.quality_report?.overall === "warning" ? "warning" : "accepted");
+        const processingStatus = result.processing_status || (qualityStatus === "accepted" ? "complete" : "not_started");
+        const processedUrl = result.preview_url || (result.processed_path ? `/api/v1/images/${result.id}/file?variant=processed` : null);
 
         setPhotos((prev) =>
           prev.map((p) =>
             p.id === tempId
-              ? { ...p, id: result?.id ?? tempId, status: serverStatus, qualityNote }
+              ? {
+                  ...p,
+                  id: result.id,
+                  status: qualityStatus === "warning" ? "warning" : "valid",
+                  quality_status: qualityStatus,
+                  processing_status: processingStatus,
+                  qualityNote: result.quality_report?.reason,
+                  qualityReport: result.quality_report,
+                  processingRun: result.processing_run,
+                  processedUrl: processedUrl,
+                  warningConfirmed: Boolean(result.warning_confirmed_by),
+                  width: result.width || p.width,
+                  height: result.height || p.height,
+                  source: result.source || source,
+                  drone: result.quality_report?.drone || drone,
+                }
               : p
           )
         );
 
-        toast.success("Photo uploaded successfully");
+        if (qualityStatus === "warning") {
+          toast.warning("Quality warning detected", {
+            description: result.quality_report?.reason || "Confirm warning to proceed.",
+          });
+        } else {
+          toast.success("Image accepted & enhanced");
+        }
       } catch (err: any) {
+        const rep = err.response?.detail?.report;
+        const msg = err.response?.detail?.message || err.message || "Quality assessment failed";
+
         setPhotos((prev) =>
           prev.map((p) =>
-            p.id === tempId ? { ...p, status: "error", qualityNote: err.message } : p
+            p.id === tempId
+              ? {
+                  ...p,
+                  status: "error",
+                  quality_status: "rejected",
+                  processing_status: "skipped",
+                  qualityNote: msg,
+                  qualityReport: rep,
+                }
+              : p
           )
         );
-        toast.error(`Upload failed: ${err.message}`);
+        toast.error(`Image rejected: ${msg}`);
       }
     },
-    [createdInspectionId]
+    [createdInspectionId, clientPreCheck]
   );
 
   const handleCameraCapture = useCallback(
@@ -507,13 +633,171 @@ export function InspectionNewPage() {
     [uploadPhoto]
   );
 
-  const handleRemovePhoto = (id: string) => {
-    setPhotos((prev) => {
-      const photo = prev.find((p) => p.id === id);
-      if (photo) URL.revokeObjectURL(photo.previewUrl);
-      return prev.filter((p) => p.id !== id);
-    });
-  };
+  const handlePhotoTransformed = useCallback((result: any) => {
+    const timestamp = Date.now();
+    const updatedPreview = result.previewUrl
+      ? `${result.previewUrl}&t=${timestamp}`
+      : undefined;
+    setPhotos((prev) =>
+      prev.map((p) =>
+        p.id === result.imageId
+          ? {
+              ...p,
+              width: result.width || p.width,
+              height: result.height || p.height,
+              previewUrl: updatedPreview || p.previewUrl,
+              processedUrl: updatedPreview || p.processedUrl,
+              qualityReport: result.qualityReport || p.qualityReport,
+              quality_status:
+                result.quality_status ||
+                (result.qualityReport?.overall === "rejected" ? "warning" : "accepted"),
+              status:
+                result.quality_status === "warning" ||
+                result.qualityReport?.overall === "warning"
+                  ? "warning"
+                  : "valid",
+              processing_status: "complete",
+            }
+          : p
+      )
+    );
+  }, []);
+
+  const handleConfirmWarning = useCallback(async (id: string) => {
+    try {
+      const res = await api.confirmImageWarning(id);
+      setPhotos((prev) =>
+        prev.map((p) =>
+          p.id === id
+            ? {
+                ...p,
+                status: "valid",
+                quality_status: "accepted",
+                processing_status: "complete",
+                warningConfirmed: true,
+                processedUrl: res.preview_url || `/api/v1/images/${id}/file?variant=processed`,
+                processingRun: res.processing_run,
+              }
+            : p
+        )
+      );
+      toast.success("Warning confirmed. Preprocessing complete.");
+    } catch (err: any) {
+      toast.error(`Failed to confirm warning: ${err.message}`);
+    }
+  }, []);
+
+  const handleRetryProcessing = useCallback(async (id: string) => {
+    try {
+      setPhotos((prev) =>
+        prev.map((p) => (p.id === id ? { ...p, processing_status: "running" } : p))
+      );
+      const res = await api.retryImageProcessing(id);
+      setPhotos((prev) =>
+        prev.map((p) =>
+          p.id === id
+            ? {
+                ...p,
+                processing_status: "complete",
+                processedUrl: res.preview_url || `/api/v1/images/${id}/file?variant=processed`,
+                processingRun: res.processing_run,
+              }
+            : p
+        )
+      );
+      toast.success("Processing retried successfully");
+    } catch (err: any) {
+      setPhotos((prev) =>
+        prev.map((p) => (p.id === id ? { ...p, processing_status: "failed" } : p))
+      );
+      toast.error(`Retry failed: ${err.message}`);
+    }
+  }, []);
+
+  const handleReplaceClick = useCallback((id: string) => {
+    setReplaceTargetId(id);
+    replaceFileInputRef.current?.click();
+  }, []);
+
+  const handleReplaceFileChange = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file || !replaceTargetId) return;
+      const targetId = replaceTargetId;
+      e.target.value = "";
+
+      try {
+        toast.info("Replacing image and re-assessing quality…");
+        const res = await api.replaceImage(targetId, file);
+        const newPreview = URL.createObjectURL(file);
+        setPhotos((prev) =>
+          prev.map((p) =>
+            p.id === targetId
+              ? {
+                  ...p,
+                  name: file.name,
+                  previewUrl: newPreview,
+                  status: res.quality_status === "warning" ? "warning" : "valid",
+                  quality_status: res.quality_status,
+                  processing_status: res.processing_status,
+                  qualityNote: res.quality_report?.reason,
+                  qualityReport: res.quality_report,
+                  processingRun: res.processing_run,
+                  processedUrl: res.preview_url || `/api/v1/images/${res.id}/file?variant=processed`,
+                  warningConfirmed: Boolean(res.warning_confirmed_by),
+                }
+              : p
+          )
+        );
+        toast.success("Image replaced successfully");
+      } catch (err: any) {
+        toast.error(`Replacement rejected: ${err.message}`);
+      } finally {
+        setReplaceTargetId(null);
+      }
+    },
+    [replaceTargetId]
+  );
+
+  const handleCalibrate = useCallback((id: string) => {
+    setCalibratingPhotoId(id);
+  }, []);
+
+  const handleSaveCalibration = useCallback(async () => {
+    if (!calibratingPhotoId || !createdInspectionId) return;
+    try {
+      const res = await api.calibrateImage(createdInspectionId, calibratingPhotoId, {
+        method: "reference_line",
+        reference_line_length_mm: calibMm,
+        pixel_length: calibPx,
+      });
+      setPhotos((prev) =>
+        prev.map((p) =>
+          p.id === calibratingPhotoId ? { ...p, calibration: res.calibration } : p
+        )
+      );
+      toast.success(`Scale calibrated: ${res.calibration.mm_per_pixel} mm/px`);
+      setCalibratingPhotoId(null);
+    } catch (err: any) {
+      toast.error(err.message || "Failed to save calibration");
+    }
+  }, [calibratingPhotoId, createdInspectionId, calibMm, calibPx]);
+
+  const handleRemovePhoto = useCallback(
+    async (id: string) => {
+      setPhotos((prev) => {
+        const photo = prev.find((p) => p.id === id);
+        if (photo) URL.revokeObjectURL(photo.previewUrl);
+        return prev.filter((p) => p.id !== id);
+      });
+      try {
+        await api.deleteImage(id, createdInspectionId || undefined);
+      } catch {
+        // Ignored
+      }
+    },
+    [createdInspectionId]
+  );
 
   const handleFinish = () => {
     if (createdInspectionId) {
@@ -522,7 +806,43 @@ export function InspectionNewPage() {
   };
 
   const selectedAsset = assets.find((a) => a.id === assetId);
-  const validPhotos = photos.filter((p) => p.status === "valid" || p.status === "warning");
+
+  // Section 6.3 Status line and button enablement rules
+  const acceptedPhotos = photos.filter(
+    (p) => p.quality_status === "accepted" || (p.quality_status === "warning" && p.warningConfirmed)
+  );
+  const rejectedPhotos = photos.filter(
+    (p) => p.quality_status === "rejected" || p.status === "error" || p.clientError
+  );
+  const unconfirmedWarnings = photos.filter(
+    (p) => p.quality_status === "warning" && !p.warningConfirmed
+  );
+  const isBatchWorking = photos.some(
+    (p) => p.status === "uploading" || p.processing_status === "running" || p.processing_status === "queued"
+  );
+
+  const getStatusLine = () => {
+    if (photos.length === 0) {
+      return "No photos added yet. Take a photo or upload files to begin.";
+    }
+    if (isBatchWorking) {
+      return "Uploading and checking batch… processing in progress.";
+    }
+    if (rejectedPhotos.length > 0) {
+      return `${rejectedPhotos.length} rejected photo(s) must be replaced or removed before review.`;
+    }
+    if (unconfirmedWarnings.length > 0) {
+      return `${unconfirmedWarnings.length} photo(s) have warnings. Confirm or replace them to proceed.`;
+    }
+    return `${acceptedPhotos.length} of ${photos.length} photo(s) accepted and preprocessed. Ready for engineer review.`;
+  };
+
+  const isDoneDisabled =
+    photos.length === 0 ||
+    isBatchWorking ||
+    rejectedPhotos.length > 0 ||
+    unconfirmedWarnings.length > 0 ||
+    acceptedPhotos.length === 0;
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
@@ -635,6 +955,33 @@ export function InspectionNewPage() {
                 </Select>
               </div>
 
+              {/* Role-Based Inspector Assignment (Engineers, Managers, Admins) */}
+              {["admin", "manager", "engineer", "civil-engineer"].includes(
+                (authUser?.role || "").toLowerCase()
+              ) && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="inspector-select" className="text-xs font-semibold">
+                    Assigned Field Inspector <span className="text-muted-foreground font-normal">(role-based delegation)</span>
+                  </Label>
+                  <Select
+                    value={assignedInspectorId}
+                    onValueChange={setAssignedInspectorId}
+                  >
+                    <SelectTrigger id="inspector-select" className="h-10 rounded-xl text-xs font-medium">
+                      <SelectValue placeholder="Choose inspector…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {inspectors.map((ins) => (
+                        <SelectItem key={ins.id} value={ins.id} className="text-xs">
+                          <span className="font-semibold text-foreground">{ins.name || ins.email}</span>{" "}
+                          <span className="text-muted-foreground font-mono text-[10px]">({ins.email})</span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
               {/* Notes */}
               <div className="space-y-1.5">
                 <Label htmlFor="inspection-notes" className="text-xs font-semibold">
@@ -652,9 +999,12 @@ export function InspectionNewPage() {
 
               {/* Auto-defaults notice */}
               <div className="flex items-start gap-2 p-3 rounded-lg bg-muted/50 border border-border/60 text-[11px] text-muted-foreground">
-                <CheckCircle2 className="size-3.5 mt-0.5 shrink-0 text-emerald-400" />
+                <CheckCircle2 className="size-3.5 mt-0.5 shrink-0 text-foreground" />
                 <span>
-                  Inspector defaults to <strong className="text-foreground">you</strong>. Inspection date = today, due date = +14 days. All auto-set.
+                  Inspection date = today, due date = +14 days. Assigned to:{" "}
+                  <strong className="text-foreground">
+                    {inspectors.find((i) => i.id === assignedInspectorId)?.name || (authUser?.name ?? "you")}
+                  </strong>
                 </span>
               </div>
 
@@ -780,7 +1130,7 @@ export function InspectionNewPage() {
               </div>
 
               {/* Upload actions */}
-              <div className="flex flex-wrap gap-3">
+              <div className="flex flex-wrap gap-2.5">
                 <Button
                   type="button"
                   onClick={() => setCameraOpen(true)}
@@ -799,18 +1149,6 @@ export function InspectionNewPage() {
                   <Upload className="size-4" />
                   Upload Files
                 </Button>
-
-                <label className="inline-flex items-center gap-2 h-10 px-4 rounded-xl text-xs font-semibold border border-border bg-card hover:bg-muted cursor-pointer transition-colors">
-                  <Smartphone className="size-4" />
-                  Mobile Cam
-                  <input
-                    type="file"
-                    accept="image/*"
-                    capture="environment"
-                    className="hidden"
-                    onChange={handleFileInput}
-                  />
-                </label>
 
                 <input
                   ref={fileInputRef}
@@ -846,10 +1184,10 @@ export function InspectionNewPage() {
                   <div className="text-center">
                     <p className="text-sm font-semibold text-foreground">Drop images here</p>
                     <p className="text-xs text-muted-foreground mt-1">
-                      or use the buttons above to take / upload photos
+                      or use the buttons above to capture or upload field photos
                     </p>
                     <p className="text-[11px] text-muted-foreground mt-0.5">
-                      Min 1080p · JPG, PNG, TIFF, HEIC
+                      Standardized for deep learning crack assessment
                     </p>
                   </div>
                 </label>
@@ -859,7 +1197,19 @@ export function InspectionNewPage() {
               {photos.length > 0 && (
                 <div className="grid grid-cols-2 gap-3">
                   {photos.map((photo) => (
-                    <PhotoCard key={photo.id} photo={photo} onRemove={handleRemovePhoto} />
+                    <ImageQualityCard
+                      key={photo.id}
+                      photo={photo}
+                      onRemove={handleRemovePhoto}
+                      onReplace={handleReplaceClick}
+                      onConfirmWarning={handleConfirmWarning}
+                      onRetryProcessing={handleRetryProcessing}
+                      onCalibrate={handleCalibrate}
+                      onTransform={(p) => {
+                        setTransformPhoto(p);
+                        setTransformModalOpen(true);
+                      }}
+                    />
                   ))}
 
                   {/* Add more tile */}
@@ -880,9 +1230,7 @@ export function InspectionNewPage() {
               {/* Summary & actions */}
               <div className="flex items-center justify-between pt-4 border-t border-border gap-4">
                 <div className="text-xs text-muted-foreground">
-                  {photos.length === 0
-                    ? "No photos yet — capture at least one field photo"
-                    : `${validPhotos.length} of ${photos.length} photo${photos.length !== 1 ? "s" : ""} uploaded successfully`}
+                  {getStatusLine()}
                 </div>
                 <div className="flex gap-3">
                   <Button
@@ -895,7 +1243,7 @@ export function InspectionNewPage() {
                   </Button>
                   <Button
                     type="button"
-                    disabled={validPhotos.length === 0}
+                    disabled={isDoneDisabled}
                     onClick={handleFinish}
                     className="h-10 px-5 rounded-xl text-xs font-semibold flex items-center gap-2"
                   >
@@ -910,27 +1258,27 @@ export function InspectionNewPage() {
             <div className="space-y-4 lg:col-span-2">
               {/* Inspection summary */}
               {createdInspectionId && (
-                <div className="rounded-2xl border border-border bg-card p-4 space-y-3">
+                <div className="rounded-2xl border-2 border-foreground/30 bg-card p-4 space-y-3 shadow-xs">
                   <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
-                    <CheckCircle2 className="size-4 text-emerald-400" />
+                    <CheckCircle2 className="size-4 text-foreground" />
                     Inspection Created
                   </h3>
                   <div className="space-y-1.5 text-xs text-muted-foreground">
                     <div className="flex gap-2">
                       <span className="font-semibold text-foreground w-20 shrink-0">ID</span>
-                      <code className="font-mono text-primary text-[11px]">{createdInspectionId}</code>
+                      <code className="font-mono text-foreground font-semibold text-[11px]">{createdInspectionId}</code>
                     </div>
                     <div className="flex gap-2">
                       <span className="font-semibold text-foreground w-20 shrink-0">Asset</span>
-                      <span>{selectedAsset?.name ?? assetId}</span>
+                      <span className="text-foreground">{selectedAsset?.name ?? assetId}</span>
                     </div>
                     <div className="flex gap-2">
                       <span className="font-semibold text-foreground w-20 shrink-0">Method</span>
-                      <span className="capitalize">{method}</span>
+                      <span className="capitalize text-foreground">{method}</span>
                     </div>
                     <div className="flex gap-2">
                       <span className="font-semibold text-foreground w-20 shrink-0">Status</span>
-                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-mono h-4">
+                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-mono h-4 border-foreground/40 text-foreground">
                         assigned
                       </Badge>
                     </div>
@@ -938,29 +1286,37 @@ export function InspectionNewPage() {
                 </div>
               )}
 
-              {/* Quality guide */}
-              <div className="rounded-2xl border border-border bg-card p-5 space-y-3">
-                <h3 className="text-sm font-bold text-foreground">Photo Quality Guide</h3>
-                <ul className="space-y-2 text-xs text-muted-foreground">
+              {/* Batch quality & preprocessing summary */}
+              <BatchSummaryCard photos={photos} />
+
+              {/* Quality guide (dynamic from server limits) */}
+              <div className="rounded-2xl border-2 border-foreground/30 bg-card p-5 space-y-3 shadow-xs">
+                <h3 className="text-sm font-bold text-foreground tracking-tight">Photo Quality Guide</h3>
+                <ul className="space-y-2 text-xs text-foreground/80">
                   <li className="flex gap-2">
-                    <CheckCircle2 className="size-3.5 text-emerald-400 mt-0.5 shrink-0" />
-                    Minimum resolution: <strong className="text-foreground">1080p</strong>
+                    <CheckCircle2 className="size-3.5 text-foreground mt-0.5 shrink-0" />
+                    <span>
+                      Resolution:{" "}
+                      <strong className="text-foreground">
+                        Any resolution accepted (standardized to model input)
+                      </strong>
+                    </span>
                   </li>
                   <li className="flex gap-2">
-                    <CheckCircle2 className="size-3.5 text-emerald-400 mt-0.5 shrink-0" />
-                    Sharp focus on defect area (not blurry)
+                    <CheckCircle2 className="size-3.5 text-foreground mt-0.5 shrink-0" />
+                    <span>Sharp focus on defect area (blur score ≥ {limits?.thresholds?.blur_variance_warn || 80})</span>
                   </li>
                   <li className="flex gap-2">
-                    <CheckCircle2 className="size-3.5 text-emerald-400 mt-0.5 shrink-0" />
-                    Adequate lighting — avoid harsh shadows
+                    <CheckCircle2 className="size-3.5 text-foreground mt-0.5 shrink-0" />
+                    <span>Adequate lighting (brightness ≥ {limits?.thresholds?.mean_brightness_warn || 70})</span>
                   </li>
                   <li className="flex gap-2">
-                    <CheckCircle2 className="size-3.5 text-emerald-400 mt-0.5 shrink-0" />
-                    Frame the full defect region in shot
+                    <CheckCircle2 className="size-3.5 text-foreground mt-0.5 shrink-0" />
+                    <span>Frame the full defect region in shot</span>
                   </li>
                   <li className="flex gap-2">
-                    <CheckCircle2 className="size-3.5 text-emerald-400 mt-0.5 shrink-0" />
-                    Include reference scale ruler when possible
+                    <CheckCircle2 className="size-3.5 text-foreground mt-0.5 shrink-0" />
+                    <span>Max file size: {Math.round((limits?.max_file_size_bytes || 52428800) / (1024 * 1024))} MB (JPEG, PNG, TIFF)</span>
                   </li>
                 </ul>
                 <p className="text-[11px] text-muted-foreground border-t border-border pt-2">
@@ -1085,6 +1441,79 @@ export function InspectionNewPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Hidden File Input for Image Replacement */}
+      <input
+        ref={replaceFileInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={handleReplaceFileChange}
+      />
+
+      {/* Scale Calibration Dialog */}
+      <Dialog open={Boolean(calibratingPhotoId)} onOpenChange={(v) => !v && setCalibratingPhotoId(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-bold flex items-center gap-2">
+              <Ruler className="size-4 text-primary" />
+              Optical Scale Calibration
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Calibrate physical units (mm per pixel) using a known reference ruler or marker in this image.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2 text-xs">
+            <div className="space-y-1.5">
+              <Label htmlFor="calib-mm" className="text-xs">Known Physical Length (mm)</Label>
+              <Input
+                id="calib-mm"
+                type="number"
+                value={calibMm}
+                onChange={(e) => setCalibMm(Number(e.target.value))}
+                className="rounded-lg text-xs"
+                min={1}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="calib-px" className="text-xs">Measured Pixel Length (px)</Label>
+              <Input
+                id="calib-px"
+                type="number"
+                value={calibPx}
+                onChange={(e) => setCalibPx(Number(e.target.value))}
+                className="rounded-lg text-xs"
+                min={1}
+              />
+            </div>
+
+            {calibPx > 0 && (
+              <div className="p-3 rounded-lg bg-muted/60 border border-border text-[11px] font-mono">
+                Computed Scale: <strong className="text-primary">{(calibMm / calibPx).toFixed(5)} mm / pixel</strong>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setCalibratingPhotoId(null)} className="text-xs">
+              Cancel
+            </Button>
+            <Button size="sm" onClick={handleSaveCalibration} className="text-xs font-semibold">
+              Save Calibration
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Interactive Image Transform Modal (Crop, Rotate, Orientation) */}
+      <ImageTransformModal
+        open={transformModalOpen}
+        onOpenChange={setTransformModalOpen}
+        photo={transformPhoto}
+        onTransformed={handlePhotoTransformed}
+      />
     </PageShell>
   );
 }

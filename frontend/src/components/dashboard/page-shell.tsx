@@ -38,7 +38,7 @@ export function PageHeader({
 }: {
   title: ReactNode;
   description?: ReactNode;
-  eyebrow?: string;
+  eyebrow?: ReactNode;
   actions?: ReactNode;
   backHref?: string;
   backLabel?: string;

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { CalendarDays, Pencil, Ruler, ScanLine, MapPin, Loader2 } from "lucide-react";
+import { CalendarDays, Pencil, Ruler, ScanLine, MapPin, Loader2, UserCheck } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
+import { useAuth } from "@/store/auth-context";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -51,11 +52,19 @@ import {
   PageShell,
   StatCard,
 } from "./page-shell";
+import { AssignAssetDialog } from "./assets";
 
 export function AssetDetailPage({ assetId }: { assetId: string }) {
-  const { state, assetById, updateAsset } = useAppStore();
+  const { updateAsset } = useAppStore();
   const { navigate } = useDashboardNavigation();
+  const { user: authUser } = useAuth();
   const [editOpen, setEditOpen] = useState(false);
+  const [assignOpen, setAssignOpen] = useState(false);
+
+  const canAssign = useMemo(() => {
+    const role = (authUser?.role || "").toLowerCase();
+    return ["admin", "manager", "engineer", "civil-engineer", "lead_inspector"].includes(role);
+  }, [authUser]);
 
   const [dbAsset, setDbAsset] = useState<any | null>(null);
   const [dbInspections, setDbInspections] = useState<any[]>([]);
@@ -69,7 +78,11 @@ export function AssetDetailPage({ assetId }: { assetId: string }) {
     ]).then(([resAsset, resInspections]) => {
       if (!mounted) return;
       if (resAsset) setDbAsset(resAsset);
-      if (resInspections?.items) setDbInspections(resInspections.items);
+      if (resInspections?.items && resInspections.items.length > 0) {
+        setDbInspections(resInspections.items);
+      } else if (resAsset?.inspections) {
+        setDbInspections(resAsset.inspections);
+      }
       setLoading(false);
     });
     return () => {
@@ -77,33 +90,34 @@ export function AssetDetailPage({ assetId }: { assetId: string }) {
     };
   }, [assetId]);
 
-  const storeAsset = assetById(assetId);
-
   const asset = useMemo(() => {
     if (dbAsset) {
       return {
         id: dbAsset.id,
         name: dbAsset.name,
-        kind: (dbAsset.assetType?.toLowerCase() || "bridge") as any,
+        kind: (dbAsset.assetType?.toLowerCase() || dbAsset.asset_type?.toLowerCase() || "bridge") as any,
         condition: (dbAsset.importance === "critical"
-          ? "critical"
-          : dbAsset.importance === "high"
           ? "poor"
-          : "fair") as AssetCondition,
+          : dbAsset.importance === "high"
+          ? "fair"
+          : "good") as AssetCondition,
         location:
           dbAsset.address ||
           (dbAsset.latitude
-            ? `${dbAsset.latitude.toFixed(4)}, ${dbAsset.longitude?.toFixed(4)}`
+            ? `GPS: ${dbAsset.latitude.toFixed(4)}, ${dbAsset.longitude?.toFixed(4)}`
             : "Site coordinates"),
-        builtYear: dbAsset.constructionYear || 2018,
+        builtYear: dbAsset.constructionYear || dbAsset.construction_year || 2018,
         material: dbAsset.material || "Reinforced Concrete",
         spanLengthM: 120,
         lastInspection: dbAsset.createdAt || new Date().toISOString(),
+        assignedInspectorId: dbAsset.assignedInspectorId,
+        assignedInspectorName: dbAsset.assignedInspectorName,
+        assignedInspectorEmail: dbAsset.assignedInspectorEmail,
         notes: dbAsset.notes || "",
       };
     }
-    return storeAsset;
-  }, [dbAsset, storeAsset]);
+    return null;
+  }, [dbAsset]);
 
   const assetInspections = useMemo(() => {
     const list: any[] = [];
@@ -111,12 +125,12 @@ export function AssetDetailPage({ assetId }: { assetId: string }) {
       for (const d of dbInspections) {
         list.push({
           id: d.id,
-          title: d.title || `Inspection ${d.id}`,
+          title: d.title || `${d.assetName || d.assetId || assetId} Inspection`,
           assetId: d.assetId || assetId,
-          inspector: d.inspectorId || "Inspector",
-          method: "walkdown",
+          inspector: d.inspectorName || d.inspectorId || "Assigned Inspector",
+          method: d.method || "walkdown",
           status:
-            d.status === "in_progress" || d.status === "images_uploaded"
+            d.status === "in_progress" || d.status === "images_uploaded" || d.status === "draft"
               ? "in-progress"
               : d.status === "pending_review" || d.status === "submitted"
               ? "awaiting-review"
@@ -124,25 +138,18 @@ export function AssetDetailPage({ assetId }: { assetId: string }) {
               ? "reviewed"
               : "in-progress",
           startedAt: d.inspectionDate || d.createdAt,
+          imageCount: d.imageCount ?? 0,
+          findingsCount: d.findingsCount ?? 0,
           findings: [],
         });
       }
     }
-    const storeItems = state.inspections.filter((inspection) => inspection.assetId === assetId);
-    for (const si of storeItems) {
-      if (!list.some((li) => li.id === si.id)) {
-        list.push(si);
-      }
-    }
     return list.sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
-  }, [dbInspections, state.inspections, assetId]);
+  }, [dbInspections, assetId]);
 
   const assetWorkOrders = useMemo(
-    () =>
-      state.workOrders.filter(
-        (order) => order.assetId === assetId && order.status !== "closed",
-      ),
-    [state.workOrders, assetId],
+    () => dbAsset?.maintenanceHistory || [],
+    [dbAsset],
   );
 
   const recentFindings = useMemo(() => {
@@ -172,7 +179,7 @@ export function AssetDetailPage({ assetId }: { assetId: string }) {
           title={`Asset ${assetId} is not in the register`}
           description="It may have been removed, or the link is from an older demo session."
           action={
-            <Button onClick={() => navigate("/dashboard/assets")}>
+            <Button onClick={() => navigate("/app/assets")}>
               Back to asset register
             </Button>
           }
@@ -182,35 +189,38 @@ export function AssetDetailPage({ assetId }: { assetId: string }) {
   }
 
   const pendingFindings = assetInspections.reduce(
-    (sum, inspection) =>
-      sum + (inspection.findings || []).filter((finding: any) => finding.review === "pending").length,
+    (sum, inspection) => sum + (inspection.findingsCount || (inspection.findings || []).filter((finding: any) => finding.review === "pending").length),
     0,
   );
-  const criticalFindings = assetInspections.reduce(
-    (sum, inspection) =>
-      sum +
-      (inspection.findings || []).filter((finding: any) => finding.severity === "critical" || finding.severity === "high")
-        .length,
-    0,
-  );
+  const criticalFindings = asset.condition === "poor" ? 1 : 0;
 
   const kindLabel = assetKindLabels[asset.kind as AssetKind] || asset.kind;
 
   return (
     <PageShell wide>
       <PageHeader
-        backHref="/dashboard/assets"
+        backHref="/app/assets"
         backLabel="Asset register"
         eyebrow={assetId}
         title={asset.name}
         description={`${kindLabel} · ${asset.material}`}
         actions={
           <>
+            {canAssign && (
+              <Button
+                variant="outline"
+                className="gap-1.5 border-primary/30 text-primary hover:bg-primary/10"
+                onClick={() => setAssignOpen(true)}
+              >
+                <UserCheck className="size-4" />
+                Assign to Inspector
+              </Button>
+            )}
             <Button variant="outline" onClick={() => setEditOpen(true)}>
               <Pencil className="size-4" />
               Edit details
             </Button>
-            <Button onClick={() => navigate(`/dashboard/inspections/new?asset=${asset.id}`)}>
+            <Button onClick={() => navigate(`/app/inspections/new?asset=${asset.id}`)}>
               <ScanLine className="size-4" />
               New inspection
             </Button>
@@ -271,6 +281,27 @@ export function AssetDetailPage({ assetId }: { assetId: string }) {
               />
             ) : null}
             <MetaItem label="Last inspection" value={fmtDate(asset.lastInspection)} />
+            <MetaItem
+              label="Assigned Field Inspector"
+              value={
+                <div className="flex items-center justify-between gap-1.5">
+                  <span className="inline-flex items-center gap-1.5 font-semibold text-foreground">
+                    <UserCheck className="size-3.5 text-primary shrink-0" />
+                    <span>{asset.assignedInspectorName || "Unassigned"}</span>
+                  </span>
+                  {canAssign && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-6 px-2 text-[11px] font-medium text-primary hover:bg-primary/10"
+                      onClick={() => setAssignOpen(true)}
+                    >
+                      {asset.assignedInspectorName ? "Reassign" : "Assign"}
+                    </Button>
+                  )}
+                </div>
+              }
+            />
           </div>
           {asset.notes ? (
             <div className="mt-5 rounded-xl bg-muted/60 px-3.5 py-3">
@@ -304,7 +335,7 @@ export function AssetDetailPage({ assetId }: { assetId: string }) {
               </div>
             ) : (
               <div className="divide-y">
-                {assetWorkOrders.map((order) => (
+                {assetWorkOrders.map((order: any) => (
                   <div key={order.id} className="flex flex-wrap items-center gap-2 px-5 py-3">
                     <span className="font-mono text-[13px] font-semibold text-primary">
                       {order.id}
@@ -361,14 +392,14 @@ export function AssetDetailPage({ assetId }: { assetId: string }) {
         <Table>
           <TableHeader>
             <TableRow className="bg-secondary/20">
-              <TableHead className="pl-5">Inspection</TableHead>
+              <TableHead className="pl-5">Inspection ID</TableHead>
               <TableHead className="hidden md:table-cell">Title</TableHead>
               <TableHead>Method</TableHead>
               <TableHead className="hidden sm:table-cell">Inspector</TableHead>
-              <TableHead className="hidden lg:table-cell">Started</TableHead>
+              <TableHead className="hidden lg:table-cell">Date</TableHead>
               <TableHead>Findings</TableHead>
               <TableHead>Status</TableHead>
-              <TableHead className="pr-5 text-right">Open</TableHead>
+              <TableHead className="pr-5 text-right">Action</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -389,7 +420,7 @@ export function AssetDetailPage({ assetId }: { assetId: string }) {
                 <TableCell className="hidden text-xs text-muted-foreground lg:table-cell">
                   {fmtDateTime(inspection.startedAt)}
                 </TableCell>
-                <TableCell className="tabular-nums">{inspection.findings.length}</TableCell>
+                <TableCell className="tabular-nums font-mono">{inspection.findingsCount ?? 0}</TableCell>
                 <TableCell>
                   <InspectionStatusBadge status={inspection.status} />
                 </TableCell>
@@ -398,15 +429,9 @@ export function AssetDetailPage({ assetId }: { assetId: string }) {
                     size="sm"
                     variant="outline"
                     className="h-8 rounded-lg"
-                    onClick={() =>
-                      navigate(
-                        inspection.status === "in-progress"
-                          ? `/dashboard/inspections/${inspection.id}`
-                          : `/dashboard/analysis/${inspection.id}`,
-                      )
-                    }
+                    onClick={() => navigate(`/app/inspections/${inspection.id}`)}
                   >
-                    {inspection.status === "in-progress" ? "Prepare" : "Review"}
+                    Open Inspection
                   </Button>
                 </TableCell>
               </TableRow>
@@ -424,12 +449,51 @@ export function AssetDetailPage({ assetId }: { assetId: string }) {
         name={asset.name}
         condition={asset.condition}
         notes={asset.notes ?? ""}
-        onSave={(condition, notes) => {
+        onSave={async (condition, notes) => {
           updateAsset(asset.id, { condition, notes: notes || undefined });
+          try {
+            const importanceMap: Record<AssetCondition, string> = {
+              poor: "critical",
+              fair: "high",
+              good: "medium"
+            };
+            await api.updateAsset(asset.id, {
+              importance: importanceMap[condition],
+              notes: notes || undefined
+            });
+            const refreshed = await api.getAsset(asset.id);
+            if (refreshed) setDbAsset(refreshed);
+          } catch (e) {
+            console.warn("Failed to persist asset edit to backend:", e);
+          }
           setEditOpen(false);
           toast.success("Asset updated", {
             description: `${asset.id} · condition set to ${condition}.`,
           });
+        }}
+      />
+
+      <AssignAssetDialog
+        open={assignOpen}
+        onOpenChange={setAssignOpen}
+        assets={dbAsset ? [{
+          id: dbAsset.id,
+          name: dbAsset.name,
+          location: dbAsset.address || dbAsset.location,
+          assignedInspectorId: dbAsset.assignedInspectorId
+        }] : [{ id: asset.id, name: asset.name, location: asset.location }]}
+        defaultAssetId={asset.id}
+        onAssigned={async () => {
+          const [resAsset, resInspections] = await Promise.all([
+            api.getAsset(assetId).catch(() => null),
+            api.getInspections({ asset_id: assetId }).catch(() => ({ items: [] })),
+          ]);
+          if (resAsset) setDbAsset(resAsset);
+          if (resInspections?.items && resInspections.items.length > 0) {
+            setDbInspections(resInspections.items);
+          } else if (resAsset?.inspections) {
+            setDbInspections(resAsset.inspections);
+          }
         }}
       />
     </PageShell>

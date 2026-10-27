@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { Plus, Search, ScanLine, MapPin, Loader2, Navigation } from "lucide-react";
+import { Plus, Search, ScanLine, MapPin, Loader2, Navigation, UserCheck } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
+import { useAuth } from "@/store/auth-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -53,11 +54,19 @@ type KindFilter = "all" | AssetKind;
 export function AssetsPage() {
   const { state, registerAsset } = useAppStore();
   const { navigate } = useDashboardNavigation();
+  const { user: authUser } = useAuth();
   const [liveAssets, setLiveAssets] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [kindFilter, setKindFilter] = useState<KindFilter>("all");
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [assignDialogOpen, setAssignDialogOpen] = useState(false);
+  const [selectedAssetForAssign, setSelectedAssetForAssign] = useState<string>("");
+
+  const canAssign = useMemo(() => {
+    const role = (authUser?.role || "").toLowerCase();
+    return ["admin", "manager", "engineer", "civil-engineer", "lead_inspector"].includes(role);
+  }, [authUser]);
 
   const fetchLiveAssets = async () => {
     try {
@@ -76,26 +85,23 @@ export function AssetsPage() {
     fetchLiveAssets();
   }, []);
 
-  // Merge live assets with store assets
+  // Map live DB assets directly (no mock fallback injection)
   const combinedAssets = useMemo(() => {
-    if (liveAssets.length === 0) return state.assets;
-    // Map live DB assets to UI format
-    const dbMapped = liveAssets.map((a: any) => ({
+    return liveAssets.map((a: any) => ({
       id: a.id,
       name: a.name,
       kind: (a.asset_type || a.assetType || "bridge").toLowerCase() as AssetKind,
       material: a.material || "Reinforced concrete",
       location: a.address || `GPS: ${a.latitude?.toFixed(4)}, ${a.longitude?.toFixed(4)}`,
       builtYear: a.construction_year || a.constructionYear || 2018,
-      condition: (a.latest_severity === "critical" ? "poor" : a.latest_severity === "high" ? "fair" : "good") as AssetCondition,
+      condition: (a.importance === "critical" ? "poor" : a.importance === "high" ? "fair" : "good") as AssetCondition,
       lastInspection: a.created_at || new Date().toISOString(),
+      assignedInspectorId: a.assignedInspectorId,
+      assignedInspectorName: a.assignedInspectorName,
+      assignedInspectorEmail: a.assignedInspectorEmail,
       spanLengthM: undefined,
     }));
-    // Include any in state not in liveAssets
-    const liveIds = new Set(dbMapped.map((a) => a.id));
-    const extra = state.assets.filter((a) => !liveIds.has(a.id));
-    return [...dbMapped, ...extra];
-  }, [liveAssets, state.assets]);
+  }, [liveAssets]);
 
   const openFindingCount = useMemo(() => {
     const counts = new Map<string, number>();
@@ -129,10 +135,25 @@ export function AssetsPage() {
         title="Infrastructure assets"
         description="Every bridge, road, tunnel and structure in the demo network. Select an asset to see its inspection history, findings and work orders."
         actions={
-          <Button onClick={() => setDialogOpen(true)}>
-            <Plus className="size-4" />
-            Register asset
-          </Button>
+          <div className="flex items-center gap-2">
+            {canAssign && (
+              <Button
+                variant="outline"
+                className="gap-1.5 border-primary/30 text-primary hover:bg-primary/10"
+                onClick={() => {
+                  setSelectedAssetForAssign(combinedAssets[0]?.id || "");
+                  setAssignDialogOpen(true);
+                }}
+              >
+                <UserCheck className="size-4" />
+                Assign Asset to Inspector
+              </Button>
+            )}
+            <Button onClick={() => setDialogOpen(true)}>
+              <Plus className="size-4" />
+              Register asset
+            </Button>
+          </div>
         }
       />
 
@@ -187,6 +208,7 @@ export function AssetsPage() {
                 <TableHead className="hidden xl:table-cell">Material</TableHead>
                 <TableHead>Condition</TableHead>
                 <TableHead className="hidden lg:table-cell">Open findings</TableHead>
+                <TableHead className="hidden lg:table-cell">Assigned Inspector</TableHead>
                 <TableHead className="hidden lg:table-cell">Last inspection</TableHead>
                 <TableHead className="pr-5 text-right">Actions</TableHead>
               </TableRow>
@@ -196,7 +218,7 @@ export function AssetsPage() {
                 <TableRow
                   key={asset.id}
                   className="cursor-pointer"
-                  onClick={() => navigate(`/dashboard/assets/${asset.id}`)}
+                  onClick={() => navigate(`/app/assets/${asset.id}`)}
                 >
                   <TableCell className="pl-5 font-mono text-[13px] font-semibold text-primary">
                     {asset.id}
@@ -217,17 +239,41 @@ export function AssetsPage() {
                   <TableCell className="hidden tabular-nums lg:table-cell">
                     {openFindingCount.get(asset.id) ?? 0}
                   </TableCell>
+                  <TableCell className="hidden text-xs lg:table-cell">
+                    {asset.assignedInspectorName ? (
+                      <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
+                        <UserCheck className="size-3 text-primary shrink-0" />
+                        <span className="truncate max-w-32">{asset.assignedInspectorName}</span>
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </TableCell>
                   <TableCell className="hidden text-muted-foreground lg:table-cell">
                     {relativeTime(asset.lastInspection)}
                   </TableCell>
                   <TableCell className="pr-5 text-right" onClick={(event) => event.stopPropagation()}>
                     <div className="flex justify-end gap-1.5">
+                      {canAssign && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-8 rounded-lg text-primary border-primary/30 hover:bg-primary/10 gap-1 text-xs"
+                          onClick={() => {
+                            setSelectedAssetForAssign(asset.id);
+                            setAssignDialogOpen(true);
+                          }}
+                        >
+                          <UserCheck className="size-3.5" />
+                          Assign
+                        </Button>
+                      )}
                       <Button
                         size="sm"
                         variant="outline"
                         className="h-8 rounded-lg"
                         onClick={() =>
-                          navigate(`/dashboard/inspections/new?asset=${asset.id}`)
+                          navigate(`/app/inspections/new?asset=${asset.id}`)
                         }
                       >
                         <ScanLine className="size-3.5" />
@@ -237,7 +283,7 @@ export function AssetsPage() {
                         size="sm"
                         variant="secondary"
                         className="h-8 rounded-lg"
-                        onClick={() => navigate(`/dashboard/assets/${asset.id}`)}
+                        onClick={() => navigate(`/app/assets/${asset.id}`)}
                       >
                         View
                       </Button>
@@ -258,6 +304,16 @@ export function AssetsPage() {
         existingIds={combinedAssets.map((asset) => asset.id)}
         onRegister={async (input) => {
           registerAsset(input);
+          await fetchLiveAssets();
+        }}
+      />
+
+      <AssignAssetDialog
+        open={assignDialogOpen}
+        onOpenChange={setAssignDialogOpen}
+        assets={combinedAssets}
+        defaultAssetId={selectedAssetForAssign}
+        onAssigned={async () => {
           await fetchLiveAssets();
         }}
       />
@@ -526,6 +582,238 @@ function RegisterAssetDialog({
             )}
           </Button>
         </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Role-Based Asset Assignment to Inspector Dialog                    */
+/* ------------------------------------------------------------------ */
+
+export function AssignAssetDialog({
+  open,
+  onOpenChange,
+  assets,
+  defaultAssetId,
+  onAssigned,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  assets: any[];
+  defaultAssetId?: string;
+  onAssigned?: (result: any) => void;
+}) {
+  const [assetId, setAssetId] = useState(defaultAssetId || "");
+  const [inspectors, setInspectors] = useState<any[]>([]);
+  const [inspectorId, setInspectorId] = useState("");
+  const [method, setMethod] = useState("walkdown");
+  const [dueDate, setDueDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 14);
+    return d.toISOString().split("T")[0];
+  });
+  const [notes, setNotes] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [loadingInspectors, setLoadingInspectors] = useState(false);
+
+  useEffect(() => {
+    const targetId = defaultAssetId || (assets.length > 0 ? assets[0].id : "");
+    if (targetId) {
+      setAssetId(targetId);
+      const target = assets.find((a) => a.id === targetId);
+      if (target?.assignedInspectorId) {
+        setInspectorId(target.assignedInspectorId);
+      }
+    }
+  }, [defaultAssetId, assets]);
+
+  useEffect(() => {
+    if (open) {
+      setLoadingInspectors(true);
+      api
+        .getInspectors()
+        .then((list) => {
+          if (Array.isArray(list)) {
+            setInspectors(list);
+            const currentAsset = assets.find((a) => a.id === (assetId || defaultAssetId));
+            if (currentAsset?.assignedInspectorId && list.some((i) => i.id === currentAsset.assignedInspectorId)) {
+              setInspectorId(currentAsset.assignedInspectorId);
+            } else if (list.length > 0 && !inspectorId) {
+              setInspectorId(list[0].id);
+            }
+          }
+        })
+        .catch(() => toast.error("Failed to load active field inspectors"))
+        .finally(() => setLoadingInspectors(false));
+    }
+  }, [open, assetId, defaultAssetId]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!assetId) {
+      toast.error("Please select an infrastructure asset.");
+      return;
+    }
+    if (!inspectorId) {
+      toast.error("Please select a field inspector.");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const res = await api.assignAssetToInspector(assetId, {
+        inspector_id: inspectorId,
+        inspection_method: method,
+        due_date: dueDate ? new Date(dueDate).toISOString() : undefined,
+        notes: notes.trim() || undefined,
+      });
+
+      toast.success(res.message || "Asset successfully assigned to inspector!");
+      onAssigned?.(res);
+      onOpenChange(false);
+    } catch (err: any) {
+      toast.error(err.message || "Failed to assign asset");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const selectedAsset = assets.find((a) => a.id === assetId);
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <UserCheck className="size-4 text-primary" />
+            Assign Asset to Inspector
+          </DialogTitle>
+          <DialogDescription className="text-xs">
+            Role-based delegation: schedule a field crack & damage inspection and assign it to an active inspector.
+          </DialogDescription>
+        </DialogHeader>
+
+        <form onSubmit={handleSubmit} className="space-y-4 py-1 text-xs">
+          {/* Target Asset */}
+          <div className="space-y-1.5">
+            <Label htmlFor="assign-asset">Target Infrastructure Asset</Label>
+            <Select value={assetId} onValueChange={(val) => {
+              setAssetId(val);
+              const found = assets.find((a) => a.id === val);
+              if (found?.assignedInspectorId) {
+                setInspectorId(found.assignedInspectorId);
+              }
+            }}>
+              <SelectTrigger id="assign-asset" className="h-9 rounded-xl text-xs">
+                <SelectValue placeholder="Select asset…" />
+              </SelectTrigger>
+              <SelectContent className="max-h-56">
+                {assets.map((a) => (
+                  <SelectItem key={a.id} value={a.id} className="text-xs">
+                    <span className="font-mono font-bold text-primary">{a.id}</span> · {a.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {selectedAsset && (
+              <p className="text-[11px] text-muted-foreground">{selectedAsset.location}</p>
+            )}
+          </div>
+
+          {/* Assigned Inspector */}
+          <div className="space-y-1.5">
+            <Label htmlFor="assign-inspector">Assigned Field Inspector</Label>
+            {loadingInspectors ? (
+              <div className="h-9 rounded-xl bg-muted animate-pulse" />
+            ) : (
+              <Select value={inspectorId} onValueChange={setInspectorId}>
+                <SelectTrigger id="assign-inspector" className="h-9 rounded-xl text-xs">
+                  <SelectValue placeholder="Choose field inspector…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {inspectors.map((ins) => (
+                    <SelectItem key={ins.id} value={ins.id} className="text-xs">
+                      <span className="font-semibold text-foreground">{ins.name || ins.email}</span> ·{" "}
+                      <span className="text-muted-foreground">{ins.email}</span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          </div>
+
+          {/* Method & Due Date */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="assign-method">Inspection Method</Label>
+              <Select value={method} onValueChange={setMethod}>
+                <SelectTrigger id="assign-method" className="h-9 rounded-xl text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="walkdown" className="text-xs">Walkdown</SelectItem>
+                  <SelectItem value="drone" className="text-xs">Drone Survey</SelectItem>
+                  <SelectItem value="dslr" className="text-xs">DSLR Camera</SelectItem>
+                  <SelectItem value="smartphone" className="text-xs">Smartphone</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="assign-due">Due Date</Label>
+              <Input
+                id="assign-due"
+                type="date"
+                value={dueDate}
+                onChange={(e) => setDueDate(e.target.value)}
+                className="h-9 rounded-xl text-xs font-mono"
+              />
+            </div>
+          </div>
+
+          {/* Field Instructions */}
+          <div className="space-y-1.5">
+            <Label htmlFor="assign-notes">Field Instructions / Focus Areas</Label>
+            <Textarea
+              id="assign-notes"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="e.g. Inspect south pier joints, capture scale calibration line, check for shear cracks…"
+              className="min-h-16 rounded-xl text-xs"
+            />
+          </div>
+
+          <DialogFooter className="gap-2 pt-2 border-t border-border">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => onOpenChange(false)}
+              className="text-xs"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              size="sm"
+              disabled={submitting || !assetId || !inspectorId}
+              className="text-xs font-semibold gap-1.5"
+            >
+              {submitting ? (
+                <>
+                  <Loader2 className="size-3.5 animate-spin" />
+                  <span>Assigning…</span>
+                </>
+              ) : (
+                <>
+                  <UserCheck className="size-3.5" />
+                  <span>Assign Asset to Inspector</span>
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   );

@@ -136,13 +136,12 @@ export function AnalysisDetailPage() {
   const storeAsset = storeInspection ? assetById(storeInspection.assetId) : undefined;
 
   const inspection = useMemo(() => {
-    if (storeInspection) return storeInspection;
-    if (!dbInspection) return null;
-    return {
-      id: dbInspection.id,
-      title: `Inspection ${dbInspection.id.slice(0, 8)}`,
-      assetId: dbInspection.assetId,
-      inspector: dbInspection.inspectorId || "Civil Engineer",
+    if (dbInspection) {
+      return {
+        id: dbInspection.id,
+        title: `Inspection ${dbInspection.id.slice(0, 8)}`,
+        assetId: dbInspection.assetId,
+        inspector: dbInspection.inspector?.name || dbInspection.inspectorName || dbInspection.inspectorId || "Civil Engineer",
       method: "walkdown" as const,
       status: (dbInspection.status === "in_progress"
         ? "in-progress"
@@ -193,7 +192,10 @@ export function AnalysisDetailPage() {
         geometryVerified: d.geometry_verified,
       })),
     };
-  }, [storeInspection, dbInspection, dbImages, dbDetections]);
+  }
+  if (storeInspection) return storeInspection;
+  return null;
+}, [storeInspection, dbInspection, dbImages, dbDetections]);
 
   const asset = storeAsset || dbAsset || (inspection ? { id: inspection.assetId, name: inspection.assetId, location: "Inspection site", material: "Reinforced Concrete", kind: "bridge" as const } : undefined);
 

@@ -241,10 +241,14 @@ export function CivilEngineerDashboard() {
                   return (
                     <tr key={item.inspectionId} className="hover:bg-muted/40 transition-colors">
                       <td className="py-2.5 px-4">
-                        <Link to={`/app/inspections/${item.inspectionId}`} className="hover:underline">
-                          <span className="font-semibold text-foreground">{item.assetCode}</span>
-                          <span className="text-muted-foreground ml-2 truncate max-w-36 inline-block align-bottom">{item.assetName}</span>
-                        </Link>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <Link to={`/app/assets/${item.assetCode}`} className="font-semibold text-primary hover:underline">
+                            {item.assetCode}
+                          </Link>
+                          <Link to={`/app/inspections/${item.inspectionId}`} className="text-muted-foreground hover:text-foreground hover:underline text-xs truncate max-w-44 inline-block">
+                            · {item.assetName}
+                          </Link>
+                        </div>
                       </td>
                       <td className="py-2.5 px-4">
                         <div className="font-medium text-foreground capitalize">{item.method || "Walkdown"}</div>
@@ -284,7 +288,7 @@ export function CivilEngineerDashboard() {
           <h2 className="text-sm font-bold text-foreground">Damage analysis by crack type</h2>
           <div className="space-y-3">
             {crackTypeCounts.map((c) => (
-              <div key={c.code} className="space-y-1">
+              <div key={`${c.code}-${c.type}`} className="space-y-1">
                 <div className="flex items-center justify-between text-xs">
                   <span className="font-medium text-foreground">{c.type}</span>
                   <span className="font-mono text-muted-foreground">{c.count} findings</span>

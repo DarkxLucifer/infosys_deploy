@@ -41,6 +41,10 @@ class UpdateInspectionStatusRequest(BaseModel):
     status: str = Field(..., description="Target status in lifecycle")
     notes: Optional[str] = None
 
+class ReassignInspectionRequest(BaseModel):
+    inspector_id: str = Field(..., description="Target inspector user ID")
+    notes: Optional[str] = None
+
 class ConfirmPriorityRequest(BaseModel):
     priority: str = Field(..., description="routine_monitoring, low, medium, high, urgent_engineering_review")
     reason: Optional[str] = None
@@ -163,7 +167,7 @@ def list_inspections(
         query = query.filter(Inspection.status == status_filter.lower())
 
     total = query.count()
-    inspections = query.order_by(desc(Inspection.inspection_date)).offset((page - 1) * page_size).limit(page_size).all()
+    inspections = query.order_by(desc(Inspection.created_at), desc(Inspection.inspection_date)).offset((page - 1) * page_size).limit(page_size).all()
 
     items = []
     for i in inspections:
@@ -279,6 +283,7 @@ def get_inspection_detail(
             "email": inspector.email
         } if inspector else None,
         "status": inspection.status,
+        "method": inspection.method or "walkdown",
         "analysisStatus": inspection.analysis_status or "skipped_no_model",
         "claimedBy": inspection.claimed_by,
         "claimedByName": claimant.name if claimant else None,
@@ -346,6 +351,89 @@ def update_inspection_status(
         "id": inspection.id,
         "status": inspection.status,
         "previousStatus": current_status
+    }
+
+@router.patch("/{inspection_id}/reassign")
+def reassign_inspection(
+    inspection_id: str,
+    req: ReassignInspectionRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Role-based delegation: Civil Engineers, Infrastructure Managers, and Admins
+    reassign an existing inspection to an active Field Inspector.
+    """
+    user_role = (current_user.role or "").lower()
+    if user_role not in ("admin", "manager", "engineer", "civil-engineer", "lead_inspector"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "ACCESS_DENIED", "message": "Only Civil Engineers, Infrastructure Managers, or Admins can reassign inspections."}
+        )
+
+    inspection = db.query(Inspection).filter(
+        Inspection.id == inspection_id,
+        Inspection.organization_id == current_user.organization_id
+    ).first()
+    if not inspection:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection not found")
+
+    new_inspector = db.query(User).filter(
+        User.id == req.inspector_id,
+        User.organization_id == current_user.organization_id
+    ).first()
+    if not new_inspector:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "INSPECTOR_NOT_FOUND", "message": "Selected inspector not found."}
+        )
+
+    old_inspector_id = inspection.inspector_id
+    inspection.inspector_id = new_inspector.id
+    if req.notes:
+        inspection.notes = (inspection.notes or "") + f"\n[Reassigned to {new_inspector.name}]: {req.notes}"
+
+    # Update associated asset assigned inspector as well
+    if inspection.asset:
+        inspection.asset.assigned_inspector_id = new_inspector.id
+
+    notif = Notification(
+        user_id=new_inspector.id,
+        organization_id=current_user.organization_id,
+        title="Inspection Reassigned to You",
+        message=f"{current_user.name or current_user.email} reassigned inspection {inspection.id} to you.",
+        link=f"/app/inspections/{inspection.id}",
+        event_type="inspection_reassigned"
+    )
+    db.add(notif)
+
+    audit = AuditLog(
+        user_id=current_user.id,
+        actor_email=current_user.email,
+        action="INSPECTION_REASSIGN",
+        entity_type="inspection",
+        entity_id=inspection.id,
+        details={
+            "old_inspector_id": old_inspector_id,
+            "new_inspector_id": new_inspector.id,
+            "new_inspector_name": new_inspector.name,
+            "reassigned_by": current_user.email
+        }
+    )
+    db.add(audit)
+    db.commit()
+    db.refresh(inspection)
+
+    return {
+        "id": inspection.id,
+        "inspectorId": new_inspector.id,
+        "inspector": {
+            "id": new_inspector.id,
+            "name": new_inspector.name,
+            "email": new_inspector.email
+        },
+        "inspectorName": new_inspector.name,
+        "message": f"Inspection {inspection.id} successfully reassigned to {new_inspector.name}."
     }
 
 @router.post("/{inspection_id}/submit")

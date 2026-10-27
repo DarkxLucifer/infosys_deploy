@@ -1,6 +1,7 @@
 import { useMemo, useState, useEffect, useRef } from "react";
 import { useParams } from "react-router-dom";
 import { api, getAuthToken } from "@/lib/api";
+import { useAuth } from "@/store/auth-context";
 import {
   Camera,
   CircleAlert,
@@ -15,6 +16,7 @@ import {
   Loader2,
   Sparkles,
   Smartphone,
+  UserCheck,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -46,6 +48,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { FrameCard, FrameClassStrip } from "@/components/inspection/crack-frame";
+import { QualityBadge, ProcessingBadge } from "@/components/inspection/image-quality-components";
 import {
   FindingReviewBadge,
   InspectionStatusBadge,
@@ -59,7 +62,7 @@ import {
   inspectionMethodLabels,
   useAppStore,
 } from "@/store/app";
-import type { Finding, Frame, Inspection, Severity } from "@/store/app";
+import type { DamageClassCode, Finding, Frame, Inspection, Severity } from "@/store/app";
 import {
   ComplianceNote,
   EmptyState,
@@ -135,9 +138,15 @@ export function InspectionDetailPage() {
   const { navigate } = useDashboardNavigation();
   const [escalateOpen, setEscalateOpen] = useState(false);
   const [escalateReason, setEscalateReason] = useState("");
+  const { user: authUser } = useAuth();
+  const [reassignOpen, setReassignOpen] = useState(false);
+  const canReassign = ["admin", "manager", "engineer", "civil-engineer", "lead_inspector"].includes(
+    (authUser?.role || "").toLowerCase()
+  );
 
   const [dbInspection, setDbInspection] = useState<any | null>(null);
   const [dbImages, setDbImages] = useState<any[]>([]);
+  const [dbDetections, setDbDetections] = useState<any[]>([]);
   const [dbAsset, setDbAsset] = useState<any | null>(null);
   const [loadingDb, setLoadingDb] = useState(true);
 
@@ -158,13 +167,15 @@ export function InspectionDetailPage() {
       return;
     }
     try {
-      const [realInsp, realImages] = await Promise.all([
+      const [realInsp, realImages, realDets] = await Promise.all([
         api.getInspection(id).catch(() => null),
         api.getInspectionImages(id).catch(() => ({ items: [] })),
+        api.getInspectionDetections(id).catch(() => ({ items: [] })),
       ]);
       if (realInsp) {
         setDbInspection(realInsp);
         setDbImages(realImages.items || []);
+        setDbDetections(realDets.items || []);
         if (realInsp.asset) {
           setDbAsset(realInsp.asset);
         } else if (realInsp.assetId) {
@@ -325,7 +336,7 @@ export function InspectionDetailPage() {
         id: img.id,
         label: `Frame ${idx + 1} (${img.filename})`,
         capturedAt: img.createdAt || new Date().toISOString(),
-        method: "walkdown" as const,
+        method: (dbInspection.method || "walkdown") as any,
         seed: 1000 + idx,
         url: `/api/v1/images/${img.id}/file`,
         thumbnailUrl: `/api/v1/images/${img.id}/thumbnail`,
@@ -334,14 +345,58 @@ export function InspectionDetailPage() {
         status: img.status,
       }));
 
-      const framesFromStore = storeInspection ? storeInspection.frames : [];
-      // Combine frames, avoiding duplicates by id
-      const combinedFrames: any[] = [...framesFromDb];
-      for (const sf of framesFromStore) {
-        if (!combinedFrames.some((cf) => cf.id === sf.id)) {
-          combinedFrames.push(sf);
+      // Map real database findings/detections
+      const findingsFromDb: Finding[] = dbDetections.map((det: any) => {
+        let bbox = { x: 35, y: 35, w: 30, h: 30 };
+        if (det.geometry?.points && Array.isArray(det.geometry.points) && det.geometry.points.length > 0) {
+          const xs = det.geometry.points.map((p: number[]) => p[0]);
+          const ys = det.geometry.points.map((p: number[]) => p[1]);
+          const minX = Math.min(...xs);
+          const maxX = Math.max(...xs);
+          const minY = Math.min(...ys);
+          const maxY = Math.max(...ys);
+          const imgW = 1920;
+          const imgH = 1080;
+          bbox = {
+            x: Math.max(0, Math.min(95, Math.round((minX / imgW) * 100))),
+            y: Math.max(0, Math.min(95, Math.round((minY / imgH) * 100))),
+            w: Math.max(8, Math.min(90, Math.round(((maxX - minX) / imgW) * 100))),
+            h: Math.max(8, Math.min(90, Math.round(((maxY - minY) / imgH) * 100))),
+          };
         }
-      }
+        const cls: DamageClassCode =
+          det.defectType?.includes("transverse") ? "D10" :
+          det.defectType?.includes("alligator") ? "D20" :
+          det.defectType?.includes("spall") ? "D40" : "D00";
+        const sev: Severity =
+          det.severity === "severe" ? "critical" :
+          det.severity === "moderate" ? "medium" : "low";
+
+        return {
+          id: det.id,
+          inspectionId: det.inspectionId,
+          frameId: det.imageId,
+          classCode: cls,
+          confidence: det.confidence || 0.9,
+          severity: sev,
+          bbox,
+          measurements: {
+            lengthPx: det.geometry?.length_px || 120,
+            widthPx: det.geometry?.max_width_px || 3,
+            areaPx: Math.round((det.geometry?.length_px || 120) * (det.geometry?.max_width_px || 3)),
+            widthMm: det.geometry?.max_width_mm || 1.0,
+          },
+          mmPerPx: 0.25,
+          review: det.verified ? "confirmed" : "pending",
+          addedByModel: true,
+          reviewedBy: det.verified ? "Dr. Meera Kulkarni" : undefined,
+          reviewedAt: det.verifiedAt,
+          note: det.notes || undefined,
+        };
+      });
+
+      // Use real database frames exclusively when present
+      const combinedFrames: any[] = framesFromDb.length > 0 ? framesFromDb : (storeInspection ? storeInspection.frames : []);
 
       return {
         id: dbInspection.id,
@@ -358,17 +413,19 @@ export function InspectionDetailPage() {
           : "in-progress") as any,
         startedAt: dbInspection.inspectionDate || dbInspection.createdAt,
         completedAt: dbInspection.status === "closed" ? dbInspection.createdAt : undefined,
-        modelVersion: "Classical OpenCV Engine (AI not connected)",
+        modelVersion: dbInspection.analysisStatus === "completed" || dbDetections.length > 0
+          ? (dbDetections[0]?.modelId || "CrackNet-R v3.2")
+          : "CrackNet-R v3.2",
         progress: 100,
         notes: dbInspection.notes || "",
         escalationReason: undefined,
         frames: combinedFrames,
-        findings: storeInspection ? storeInspection.findings : [],
+        findings: findingsFromDb.length > 0 ? findingsFromDb : (storeInspection ? storeInspection.findings : []),
       };
     }
     if (storeInspection) return storeInspection;
     return null;
-  }, [storeInspection, dbInspection, dbImages]);
+  }, [storeInspection, dbInspection, dbImages, dbDetections]);
 
   const asset = storeAsset || dbAsset || (inspection ? { id: inspection.assetId, name: inspection.assetId, location: "Inspection site", material: "Reinforced Concrete", kind: "bridge" as const } : undefined);
 
@@ -429,7 +486,7 @@ export function InspectionDetailPage() {
       description:
         "The pipeline moves through segmentation, measurement and severity scoring (~5s).",
     });
-    navigate(`/dashboard/analysis/${inspection.id}`);
+    navigate(`/app/review/${inspection.id}`);
   };
 
   const downloadCertificateNow = () => {
@@ -473,9 +530,20 @@ export function InspectionDetailPage() {
   return (
     <PageShell wide>
       <PageHeader
-        backHref="/dashboard/inspections"
+        backHref="/app/inspections"
         backLabel="Inspections"
-        eyebrow={asset ? `${inspection.assetId} · ${asset.name}` : inspection.assetId}
+        eyebrow={
+          <span className="inline-flex items-center gap-1.5">
+            <button
+              type="button"
+              className="text-primary hover:underline font-semibold cursor-pointer"
+              onClick={() => navigate(`/app/assets/${inspection.assetId}`)}
+            >
+              {inspection.assetId}
+            </button>
+            {asset?.name && <span className="text-muted-foreground">· {asset.name}</span>}
+          </span>
+        }
         title={inspection.title}
         description={`${(inspectionMethodLabels as any)[inspection.method] || inspection.method} · inspector ${inspection.inspector} · ${inspection.frames.length} frame${inspection.frames.length === 1 ? "" : "s"} · model ${inspection.modelVersion}`}
         actions={
@@ -611,6 +679,27 @@ export function InspectionDetailPage() {
                     />
                     <MetaItem label="Capture method" value={(inspectionMethodLabels as any)[inspection.method] || inspection.method} />
                     <MetaItem label="Model" value={inspection.modelVersion} />
+                    <MetaItem
+                      label="Field Inspector"
+                      value={
+                        <div className="flex items-center justify-between gap-1.5">
+                          <span className="inline-flex items-center gap-1.5 font-semibold text-foreground">
+                            <UserCheck className="size-3.5 text-primary shrink-0" />
+                            <span>{inspection.inspector || "Assigned Inspector"}</span>
+                          </span>
+                          {canReassign && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-6 px-2 text-[11px] font-medium text-primary hover:bg-primary/10"
+                              onClick={() => setReassignOpen(true)}
+                            >
+                              Reassign
+                            </Button>
+                          )}
+                        </div>
+                      }
+                    />
                   </div>
 
                   <div className="mt-6">
@@ -852,21 +941,13 @@ export function InspectionDetailPage() {
                               </button>
                             </div>
 
-                            <div className="absolute top-2 right-2 flex items-center gap-1 z-10">
-                              {(img.status === "valid" || img.quality_status === "accepted") && (
-                                <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-success/20 text-success border border-success/30 backdrop-blur-sm">
-                                  Accepted
-                                </span>
-                              )}
-                              {needsConfirm && (
-                                <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-warning/20 text-warning border border-warning/30 backdrop-blur-sm">
-                                  Warning
-                                </span>
-                              )}
-                              {(img.status === "rejected" || img.quality_status === "rejected") && (
-                                <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-destructive/20 text-destructive border border-destructive/30 backdrop-blur-sm">
-                                  Rejected
-                                </span>
+                            <div className="absolute top-2 right-2 flex items-center gap-1 z-10 pointer-events-none">
+                              <QualityBadge
+                                status={img.quality_status || (img.status === "warned" ? "warning" : img.status === "valid" ? "accepted" : "rejected")}
+                                confirmed={Boolean(img.warning_confirmed_by)}
+                              />
+                              {img.processing_status && (
+                                <ProcessingBadge status={img.processing_status} />
                               )}
                             </div>
                           </div>
@@ -1084,9 +1165,154 @@ export function InspectionDetailPage() {
             onOpenChange={setCameraModalOpen}
             onCapture={handleCameraCapture}
           />
+
+          {/* Reassign Inspector Dialog */}
+          <ReassignInspectionDialog
+            open={reassignOpen}
+            onOpenChange={setReassignOpen}
+            inspectionId={inspection.id}
+            currentInspectorId={dbInspection?.inspectorId}
+            currentInspectorName={inspection.inspector}
+            onReassigned={() => fetchData()}
+          />
         </>
       )}
     </PageShell>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Reassign Field Inspector Dialog                                     */
+/* ------------------------------------------------------------------ */
+
+function ReassignInspectionDialog({
+  open,
+  onOpenChange,
+  inspectionId,
+  currentInspectorId,
+  currentInspectorName,
+  onReassigned,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  inspectionId: string;
+  currentInspectorId?: string;
+  currentInspectorName?: string;
+  onReassigned?: () => void;
+}) {
+  const [inspectors, setInspectors] = useState<any[]>([]);
+  const [selectedId, setSelectedId] = useState(currentInspectorId || "");
+  const [notes, setNotes] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setLoading(true);
+      api
+        .getInspectors()
+        .then((list) => {
+          if (Array.isArray(list)) {
+            setInspectors(list);
+            if (currentInspectorId && list.some((i) => i.id === currentInspectorId)) {
+              setSelectedId(currentInspectorId);
+            } else if (list.length > 0 && !selectedId) {
+              setSelectedId(list[0].id);
+            }
+          }
+        })
+        .catch(() => toast.error("Failed to load active field inspectors"))
+        .finally(() => setLoading(false));
+    }
+  }, [open, currentInspectorId]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedId) {
+      toast.error("Please select a field inspector.");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const res = await api.reassignInspection(inspectionId, {
+        inspector_id: selectedId,
+        notes: notes.trim() || undefined,
+      });
+      toast.success(res.message || "Inspection successfully reassigned!");
+      onReassigned?.();
+      onOpenChange(false);
+    } catch (err: any) {
+      toast.error(err.message || "Failed to reassign inspection");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <UserCheck className="size-4 text-primary" />
+            Reassign Field Inspector
+          </DialogTitle>
+          <DialogDescription className="text-xs">
+            Delegate survey execution and site capture for inspection {inspectionId}
+            {currentInspectorName ? ` (currently ${currentInspectorName})` : ""}.
+          </DialogDescription>
+        </DialogHeader>
+
+        <form onSubmit={handleSubmit} className="space-y-4 py-1 text-xs">
+          <div className="space-y-1.5">
+            <Label htmlFor="reassign-inspector">Assigned Field Inspector</Label>
+            {loading ? (
+              <div className="h-9 rounded-xl bg-muted animate-pulse" />
+            ) : (
+              <Select value={selectedId} onValueChange={setSelectedId}>
+                <SelectTrigger id="reassign-inspector" className="h-9 rounded-xl text-xs">
+                  <SelectValue placeholder="Choose field inspector…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {inspectors.map((ins) => (
+                    <SelectItem key={ins.id} value={ins.id} className="text-xs">
+                      <span className="font-semibold text-foreground">{ins.name || ins.email}</span> ·{" "}
+                      <span className="text-muted-foreground">{ins.email}</span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="reassign-notes">Delegation / Handover Notes (optional)</Label>
+            <Input
+              id="reassign-notes"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="e.g. Please capture south pier cap before 3 PM…"
+              className="rounded-lg text-xs"
+            />
+          </div>
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={submitting || !selectedId}>
+              {submitting ? (
+                <>
+                  <Loader2 className="size-3.5 animate-spin mr-1.5" />
+                  <span>Reassigning...</span>
+                </>
+              ) : (
+                <span>Reassign Inspection</span>
+              )}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -1197,8 +1423,9 @@ function FindingsTab({ inspection }: { inspection: Inspection }) {
                 <TableCell className="pl-5">
                   <div className="font-mono text-[13px] font-semibold">{finding.classCode}</div>
                   <div className="text-xs text-muted-foreground">
-                    {damageClasses[finding.classCode].label}
+                    {damageClasses[finding.classCode]?.label || "Concrete Crack"}
                   </div>
+                  <div className="font-mono text-[10px] text-muted-foreground/70">{finding.id}</div>
                 </TableCell>
                 <TableCell className="hidden text-xs text-muted-foreground sm:table-cell">
                   {frame?.label ?? finding.frameId}

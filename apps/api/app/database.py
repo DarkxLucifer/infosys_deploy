@@ -55,6 +55,20 @@ def ensure_schema_upgrades(engine):
             except Exception:
                 pass
 
+            try:
+                cols = [row[1] for row in conn.execute(text("PRAGMA table_info(inspection_images)")).fetchall()]
+                if "quality_status" not in cols:
+                    conn.execute(text("ALTER TABLE inspection_images ADD COLUMN quality_status VARCHAR(32) DEFAULT 'accepted'"))
+                if "processing_status" not in cols:
+                    conn.execute(text("ALTER TABLE inspection_images ADD COLUMN processing_status VARCHAR(32) DEFAULT 'complete'"))
+                if "warning_confirmed_by" not in cols:
+                    conn.execute(text("ALTER TABLE inspection_images ADD COLUMN warning_confirmed_by VARCHAR(64) DEFAULT NULL"))
+                if "warning_confirmed_at" not in cols:
+                    conn.execute(text("ALTER TABLE inspection_images ADD COLUMN warning_confirmed_at DATETIME DEFAULT NULL"))
+                conn.commit()
+            except Exception:
+                pass
+
     # Seed development defaults
     try:
         from app.models.all_models import SeverityRule, PriorityRule, RepairTaskTemplate

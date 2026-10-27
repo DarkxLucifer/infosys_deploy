@@ -87,17 +87,22 @@ export function InspectionStatusBadge({ status }: { status: InspectionStatus }) 
 /* -------------------------------- severity -------------------------------- */
 
 const severityTone: Record<
-  Severity,
+  string,
   { tone: Tone; label: string; solid?: boolean }
 > = {
   low: { tone: "success", label: "Low" },
+  minor: { tone: "success", label: "Minor" },
   medium: { tone: "warning", label: "Medium" },
+  moderate: { tone: "warning", label: "Moderate" },
   high: { tone: "danger", label: "High" },
+  severe: { tone: "danger", label: "Severe" },
   critical: { tone: "danger", label: "Critical", solid: true },
+  none: { tone: "neutral", label: "None" },
 };
 
-export function SeverityBadge({ severity }: { severity: Severity }) {
-  const config = severityTone[severity];
+export function SeverityBadge({ severity }: { severity: Severity | string }) {
+  const key = (severity || "low").toLowerCase();
+  const config = severityTone[key] || { tone: "neutral", label: severity || "Normal" };
 
   if (config.solid) {
     return (

@@ -464,132 +464,36 @@ export interface AdminDashboardPayload {
 
 export const MOCK_ASSETS: Asset[] = [
   {
-    id: "asset-1",
-    code: "INF-001",
-    name: "Bridge deck A (Riverside Expressway)",
+    id: "BR-101",
+    code: "BR-101",
+    name: "Riverside Expressway Viaduct",
     type: "bridge",
     material: "Reinforced Concrete",
-    address: "Pier 4, Mile Marker 18.4, North Corridor",
-    latitude: 40.7831,
-    longitude: -73.9712,
-    construction_year: 1998,
-    department: "Roads & Bridges",
-    inspection_frequency_months: 6,
+    address: "West River Parkway, Pier 4-6, New York (40.7128, -74.0060)",
+    latitude: 40.7128,
+    longitude: -74.0060,
+    construction_year: 2014,
+    department: "Infrastructure Engineering",
+    inspection_frequency_months: 12,
     importance: "high",
     latest_severity: "moderate",
     open_work_orders_count: 1,
   },
   {
-    id: "asset-2",
-    code: "INF-002",
-    name: "Road section 12 (Arterial Bypass)",
-    type: "road",
-    material: "Asphalt Concrete",
-    address: "Km 42+200 westbound carriageway",
-    latitude: 40.8122,
-    longitude: -73.9351,
-    construction_year: 2012,
-    department: "Highways Authority",
-    inspection_frequency_months: 12,
-    importance: "medium",
-    latest_severity: "minor",
-    open_work_orders_count: 1,
-  },
-  {
-    id: "asset-3",
-    code: "INF-003",
-    name: "Retaining wall 3 (Palisades Cut)",
-    type: "retaining_wall",
-    material: "Mass Concrete / Gabion",
-    address: "North Bluffs, Section B",
-    latitude: 40.8445,
-    longitude: -73.9211,
-    construction_year: 2005,
-    department: "Geotechnical Division",
-    inspection_frequency_months: 6,
-    importance: "medium",
-    latest_severity: "no_visible_damage",
-    open_work_orders_count: 0,
-  },
-  {
-    id: "asset-4",
-    code: "INF-004",
-    name: "Harbor Tunnel South Tube",
+    id: "TU-204",
+    code: "TU-204",
+    name: "Hudson River North Tunnel",
     type: "tunnel",
-    material: "Precast Concrete Lining",
-    address: "Station 11+400 Lower Portal",
-    latitude: 40.7412,
-    longitude: -74.0045,
-    construction_year: 1989,
-    department: "Tunnel & Transit",
-    inspection_frequency_months: 3,
-    importance: "high",
-    latest_severity: "severe",
-    open_work_orders_count: 2,
-  },
-  {
-    id: "asset-5",
-    code: "INF-005",
-    name: "Overpass Pier 7 - North Junction",
-    type: "bridge",
-    material: "Prestressed Concrete",
-    address: "Highway 9A interchange",
-    latitude: 40.8651,
-    longitude: -73.8992,
-    construction_year: 1994,
-    department: "Roads & Bridges",
+    material: "Precast Concrete Liners",
+    address: "Hudson River Crossing, Bore 2, New York (40.7589, -73.9851)",
+    latitude: 40.7589,
+    longitude: -73.9851,
+    construction_year: 2018,
+    department: "Tunnel Operations",
     inspection_frequency_months: 6,
     importance: "high",
-    latest_severity: "critical",
-    open_work_orders_count: 1,
-  },
-  {
-    id: "asset-6",
-    code: "INF-006",
-    name: "Canyon Spillway Concrete Apron",
-    type: "dam",
-    material: "Mass Concrete",
-    address: "Reservoir Discharge Sector 2",
-    latitude: 40.8912,
-    longitude: -73.8741,
-    construction_year: 1976,
-    department: "Water Resources",
-    inspection_frequency_months: 6,
-    importance: "high",
-    latest_severity: "severe",
-    open_work_orders_count: 1,
-  },
-  {
-    id: "asset-7",
-    code: "INF-007",
-    name: "Municipal Transit Headquarters Column 4B",
-    type: "building",
-    material: "Cast-in-place Concrete",
-    address: "Central Concourse Sub-grade",
-    latitude: 40.7555,
-    longitude: -73.9866,
-    construction_year: 2001,
-    department: "Facilities & Assets",
-    inspection_frequency_months: 12,
-    importance: "medium",
     latest_severity: "minor",
     open_work_orders_count: 0,
-  },
-  {
-    id: "asset-8",
-    code: "INF-008",
-    name: "Northway Viaduct Span 14",
-    type: "bridge",
-    material: "Steel / Concrete Composite",
-    address: "Mile Marker 26 North Corridor",
-    latitude: 40.8755,
-    longitude: -73.9115,
-    construction_year: 1982,
-    department: "Roads & Bridges",
-    inspection_frequency_months: 6,
-    importance: "high",
-    latest_severity: "severe",
-    open_work_orders_count: 1,
   },
 ];
 
@@ -2126,6 +2030,36 @@ export const apiService = {
     return res.json();
   },
 
+  async updateAsset(id: string, payload: {
+    name?: string;
+    asset_type?: string;
+    address?: string;
+    latitude?: number;
+    longitude?: number;
+    construction_year?: number;
+    material?: string;
+    department?: string;
+    inspection_frequency?: string;
+    importance?: string;
+    assigned_inspector_id?: string;
+    notes?: string;
+  }): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/assets/${id}`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(),
+      },
+      credentials: "include",
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail?.message || (typeof err.detail === "string" ? err.detail : "Failed to update asset"));
+    }
+    return res.json();
+  },
+
   async getInspections(params?: { status?: string; asset_id?: string; page?: number; page_size?: number }): Promise<any> {
     const searchParams = new URLSearchParams();
     if (params?.status && params.status !== "all") searchParams.append("status", params.status);
@@ -2187,6 +2121,50 @@ export const apiService = {
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       const msg = err.detail?.message || (typeof err.detail === "string" ? err.detail : err.message || `Failed to create inspection (${res.status})`);
+      throw new Error(msg);
+    }
+    return res.json();
+  },
+
+  async assignAssetToInspector(assetId: string, payload: {
+    inspector_id: string;
+    inspection_method?: string;
+    due_date?: string;
+    notes?: string;
+  }): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/assets/${assetId}/assign`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(),
+      },
+      credentials: "include",
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      const msg = err.detail?.message || (typeof err.detail === "string" ? err.detail : err.message || `Failed to assign asset (${res.status})`);
+      throw new Error(msg);
+    }
+    return res.json();
+  },
+
+  async reassignInspection(inspectionId: string, payload: {
+    inspector_id: string;
+    notes?: string;
+  }): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/inspections/${inspectionId}/reassign`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(),
+      },
+      credentials: "include",
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      const msg = err.detail?.message || (typeof err.detail === "string" ? err.detail : err.message || `Failed to reassign inspection (${res.status})`);
       throw new Error(msg);
     }
     return res.json();
@@ -2420,12 +2398,168 @@ export const apiService = {
     return res.json();
   },
 
+  async getImageLimits(): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/config/image-limits`, {
+      headers: authHeaders(),
+      credentials: "include",
+    });
+    if (!res.ok) return null;
+    return res.json();
+  },
+
+  async assessImageQuality(file: File | Blob, inspectionId?: string): Promise<any> {
+    const formData = new FormData();
+    if (file instanceof File) {
+      formData.append("file", file);
+    } else {
+      formData.append("file", file, "capture.jpg");
+    }
+    if (inspectionId) {
+      formData.append("inspection_id", inspectionId);
+    }
+    const headers = authHeaders();
+    delete headers["Content-Type"];
+
+    const res = await fetch(`${API_BASE_URL}/images/assess`, {
+      method: "POST",
+      headers,
+      credentials: "include",
+      body: formData,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const err: any = new Error(data.detail?.message || data.detail || "Quality assessment failed");
+      err.response = data;
+      err.status = res.status;
+      throw err;
+    }
+    return data;
+  },
+
+  async uploadAssessedImage(
+    file: File | Blob,
+    inspectionId?: string,
+    allowWarning: boolean = false,
+    source: string = "upload",
+    gps?: { lat: number; lng: number },
+    drone?: { altitude?: number; gimbalPitch?: number }
+  ): Promise<any> {
+    const formData = new FormData();
+    if (file instanceof File) {
+      formData.append("file", file);
+    } else {
+      formData.append("file", file, "capture.jpg");
+    }
+    if (inspectionId) {
+      formData.append("inspection_id", inspectionId);
+    }
+    formData.append("source", source);
+    formData.append("allow_warning", String(allowWarning));
+    if (gps) {
+      formData.append("gps_lat", String(gps.lat));
+      formData.append("gps_lng", String(gps.lng));
+    }
+    if (drone) {
+      if (drone.altitude !== undefined) formData.append("drone_altitude", String(drone.altitude));
+      if (drone.gimbalPitch !== undefined) formData.append("drone_gimbal_pitch", String(drone.gimbalPitch));
+    }
+
+    const headers = authHeaders();
+    delete headers["Content-Type"];
+
+    const res = await fetch(`${API_BASE_URL}/images/upload`, {
+      method: "POST",
+      headers,
+      credentials: "include",
+      body: formData,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const err: any = new Error(data.detail?.message || data.detail || "Image upload failed");
+      err.response = data;
+      err.status = res.status;
+      throw err;
+    }
+    return data;
+  },
+
+  async getImageDetails(imageId: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/images/${imageId}`, {
+      headers: authHeaders(),
+      credentials: "include",
+    });
+    if (!res.ok) {
+      const err: any = new Error("Failed to load image details");
+      err.status = res.status;
+      throw err;
+    }
+    return res.json();
+  },
+
+  async retryImageProcessing(imageId: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/images/${imageId}/processing/retry`, {
+      method: "POST",
+      headers: authHeaders(),
+      credentials: "include",
+    });
+    if (!res.ok) {
+      const err: any = new Error("Failed to retry preprocessing");
+      err.status = res.status;
+      throw err;
+    }
+    return res.json();
+  },
+
+  async replaceImage(imageId: string, file: File | Blob, allowWarning: boolean = false): Promise<any> {
+    const formData = new FormData();
+    if (file instanceof File) {
+      formData.append("file", file);
+    } else {
+      formData.append("file", file, "replace.jpg");
+    }
+    formData.append("allow_warning", String(allowWarning));
+    const headers = authHeaders();
+    delete headers["Content-Type"];
+
+    const res = await fetch(`${API_BASE_URL}/images/${imageId}/replace`, {
+      method: "POST",
+      headers,
+      credentials: "include",
+      body: formData,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const err: any = new Error(data.detail?.message || data.detail || "Failed to replace image");
+      err.response = data;
+      err.status = res.status;
+      throw err;
+    }
+    return data;
+  },
+
+  async deleteImage(imageId: string, inspectionId?: string): Promise<any> {
+    const url = inspectionId
+      ? `${API_BASE_URL}/inspections/${inspectionId}/images/${imageId}`
+      : `${API_BASE_URL}/images/${imageId}`;
+    const res = await fetch(url, {
+      method: "DELETE",
+      headers: authHeaders(),
+      credentials: "include",
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail?.message || err.detail || "Failed to delete image");
+    }
+    return res.json();
+  },
+
   async uploadInspectionImage(
     inspectionId: string,
     file: File | Blob,
     source: string = "upload",
     allowWarning: boolean = false,
-    gps?: { lat: number; lng: number }
+    gps?: { lat: number; lng: number },
+    drone?: { altitude?: number; gimbalPitch?: number }
   ): Promise<any> {
     const formData = new FormData();
     if (file instanceof File) {
@@ -2438,6 +2572,10 @@ export const apiService = {
     if (gps) {
       formData.append("gps_lat", String(gps.lat));
       formData.append("gps_lng", String(gps.lng));
+    }
+    if (drone) {
+      if (drone.altitude !== undefined) formData.append("drone_altitude", String(drone.altitude));
+      if (drone.gimbalPitch !== undefined) formData.append("drone_gimbal_pitch", String(drone.gimbalPitch));
     }
 
     const headers = authHeaders();
@@ -2452,6 +2590,78 @@ export const apiService = {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       const err: any = new Error(data.detail?.message || data.detail || "Image upload failed");
+      err.response = data;
+      err.status = res.status;
+      throw err;
+    }
+    return data;
+  },
+
+  async transformImage(
+    imageId: string,
+    payload: {
+      rotation_deg?: number;
+      crop_x?: number;
+      crop_y?: number;
+      crop_w?: number;
+      crop_h?: number;
+      flip_h?: boolean;
+      flip_v?: boolean;
+      src_quad?: number[][];
+    }
+  ): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/images/${imageId}/transform`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      credentials: "include",
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const err: any = new Error(data.detail?.message || data.detail || "Failed to transform image");
+      err.response = data;
+      err.status = res.status;
+      throw err;
+    }
+    return data;
+  },
+
+  async getImageAugmentations(imageId: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/images/${imageId}/augmentations`, {
+      headers: authHeaders(),
+      credentials: "include",
+    });
+    if (!res.ok) {
+      const err: any = new Error("Failed to load augmentations");
+      err.status = res.status;
+      throw err;
+    }
+    return res.json();
+  },
+
+  async getDatasetSamples(): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/images/datasets/samples`, {
+      headers: authHeaders(),
+      credentials: "include",
+    });
+    if (!res.ok) {
+      const err: any = new Error("Failed to load dataset samples");
+      err.status = res.status;
+      throw err;
+    }
+    return res.json();
+  },
+
+  async importDatasetSample(sampleId: string, inspectionId: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/images/datasets/import`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      credentials: "include",
+      body: JSON.stringify({ sample_id: sampleId, inspection_id: inspectionId }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const err: any = new Error(data.detail?.message || data.detail || "Failed to import dataset sample");
       err.response = data;
       err.status = res.status;
       throw err;

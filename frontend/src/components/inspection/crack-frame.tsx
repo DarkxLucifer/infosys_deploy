@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Layers, ScanSearch, Flame } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { getAuthToken } from "@/lib/api";
 import {
   damageClasses,
   fmtDateTime,
@@ -79,6 +80,7 @@ export type FrameMode = "annotated" | "mask" | "heat";
 
 export function CrackFrame({
   seed,
+  imageUrl,
   findings = [],
   mode = "annotated",
   selectedFindingId,
@@ -86,6 +88,7 @@ export function CrackFrame({
   className,
 }: {
   seed: number;
+  imageUrl?: string;
   findings?: Finding[];
   mode?: FrameMode;
   selectedFindingId?: string | null;
@@ -95,6 +98,15 @@ export function CrackFrame({
   const geometry = useMemo(() => buildCrackGeom(seed), [seed]);
   const W = 640;
   const H = 400;
+
+  const token = getAuthToken();
+  const fullImageUrl = imageUrl
+    ? token
+      ? imageUrl.includes("?")
+        ? `${imageUrl}&token=${encodeURIComponent(token)}`
+        : `${imageUrl}?token=${encodeURIComponent(token)}`
+      : imageUrl
+    : undefined;
 
   const aggregate = useMemo(() => {
     const rnd = mulberry32(seed + 17);
@@ -135,34 +147,43 @@ export function CrackFrame({
         </linearGradient>
       </defs>
 
-      {/* concrete base */}
-      <rect width={W} height={H} fill={`url(#concrete-${seed})`} />
-      {patchShadows.map((patch, index) => (
-        <ellipse
-          key={index}
-          cx={patch.x}
-          cy={patch.y}
-          rx={patch.rx}
-          ry={patch.ry}
-          fill="#8f8a80"
-          opacity={patch.o}
+      {/* photographic real image or concrete fallback */}
+      {fullImageUrl ? (
+        <image
+          href={fullImageUrl}
+          width={W}
+          height={H}
+          preserveAspectRatio="xMidYMid slice"
         />
-      ))}
-      {aggregate.map((dot, index) => (
-        <circle key={index} cx={dot.x} cy={dot.y} r={dot.r} fill="#6e6a61" opacity={dot.o} />
-      ))}
-
-      {/* grout lines for a panelled surface feel */}
-      <line x1="0" y1={H * 0.62} x2={W} y2={H * 0.62} stroke="#a9a49a" strokeWidth="1.4" opacity="0.55" />
-      <line
-        x1={W * (0.18 + (seed % 3) * 0.1)}
-        y1="0"
-        x2={W * (0.18 + (seed % 3) * 0.1) + 12}
-        y2={H}
-        stroke="#a9a49a"
-        strokeWidth="1.2"
-        opacity="0.4"
-      />
+      ) : (
+        <>
+          <rect width={W} height={H} fill={`url(#concrete-${seed})`} />
+          {patchShadows.map((patch, index) => (
+            <ellipse
+              key={index}
+              cx={patch.x}
+              cy={patch.y}
+              rx={patch.rx}
+              ry={patch.ry}
+              fill="#8f8a80"
+              opacity={patch.o}
+            />
+          ))}
+          {aggregate.map((dot, index) => (
+            <circle key={index} cx={dot.x} cy={dot.y} r={dot.r} fill="#6e6a61" opacity={dot.o} />
+          ))}
+          <line x1="0" y1={H * 0.62} x2={W} y2={H * 0.62} stroke="#a9a49a" strokeWidth="1.4" opacity="0.55" />
+          <line
+            x1={W * (0.18 + (seed % 3) * 0.1)}
+            y1="0"
+            x2={W * (0.18 + (seed % 3) * 0.1) + 12}
+            y2={H}
+            stroke="#a9a49a"
+            strokeWidth="1.2"
+            opacity="0.4"
+          />
+        </>
+      )}
 
       {/* crack geometry */}
       <g
@@ -399,6 +420,7 @@ export function FrameCard({
       <div className="relative">
         <CrackFrame
           seed={scene.seed}
+          imageUrl={(scene as any).url || (scene as any).thumbnailUrl}
           findings={findings}
           mode={mode}
           selectedFindingId={selectedFindingId}

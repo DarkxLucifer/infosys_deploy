@@ -1,6 +1,6 @@
 import csv
 import io
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Response, status
 from pydantic import BaseModel, Field
@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_, desc, asc
 
 from app.database import get_db
-from app.models.all_models import Asset, Inspection, AuditLog, User
+from app.models.all_models import Asset, Inspection, AuditLog, User, InspectionImage, Detection, WorkOrder, Notification
 from app.security.jwt import get_current_user
 
 
@@ -57,6 +57,7 @@ class AssetCreateRequest(BaseModel):
     department: Optional[str] = Field(None, max_length=128)
     inspection_frequency: Optional[str] = Field(None, max_length=64)
     importance: Optional[str] = Field(None, max_length=64)
+    assigned_inspector_id: Optional[str] = Field(None, max_length=64)
     notes: Optional[str] = None
 
 class AssetUpdateRequest(BaseModel):
@@ -70,6 +71,7 @@ class AssetUpdateRequest(BaseModel):
     department: Optional[str] = None
     inspection_frequency: Optional[str] = None
     importance: Optional[str] = None
+    assigned_inspector_id: Optional[str] = None
     notes: Optional[str] = None
 
 def sanitize_csv_cell(value: Any) -> str:
@@ -127,6 +129,15 @@ def create_asset(
     lng = req.longitude if req.longitude is not None else -74.0060
     addr = req.address.strip() if (req.address and req.address.strip()) else f"Field GPS ({lat:.4f}, {lng:.4f})"
 
+    target_inspector_id = req.assigned_inspector_id
+    if target_inspector_id:
+        insp_check = db.query(User).filter(
+            User.id == target_inspector_id,
+            User.organization_id == current_user.organization_id
+        ).first()
+        if not insp_check:
+            target_inspector_id = None
+
     asset = Asset(
         id=asset_id_clean,
         organization_id=current_user.organization_id,
@@ -140,6 +151,7 @@ def create_asset(
         department=req.department.strip() if req.department else "Civil Infrastructure Division",
         inspection_frequency=req.inspection_frequency.strip() if req.inspection_frequency else "Quarterly",
         importance=req.importance.strip() if req.importance else "medium",
+        assigned_inspector_id=target_inspector_id,
         notes=req.notes,
         is_active=True
     )
@@ -216,25 +228,31 @@ def list_assets(
 
     assets = query.offset((page - 1) * page_size).limit(page_size).all()
 
+    items = []
+    for a in assets:
+        insp_id = a.assigned_inspector_id or (a.inspections[0].inspector_id if a.inspections else None)
+        insp_user = a.assigned_inspector or (a.inspections[0].inspector if a.inspections else None)
+        items.append({
+            "id": a.id,
+            "name": a.name,
+            "assetType": a.asset_type,
+            "address": a.address,
+            "latitude": a.latitude,
+            "longitude": a.longitude,
+            "constructionYear": a.construction_year,
+            "material": a.material,
+            "department": a.department,
+            "inspectionFrequency": a.inspection_frequency,
+            "importance": a.importance,
+            "isActive": a.is_active,
+            "assignedInspectorId": insp_id,
+            "assignedInspectorName": insp_user.name if insp_user else None,
+            "assignedInspectorEmail": insp_user.email if insp_user else None,
+            "createdAt": a.created_at.isoformat() if a.created_at else None
+        })
+
     return {
-        "items": [
-            {
-                "id": a.id,
-                "name": a.name,
-                "assetType": a.asset_type,
-                "address": a.address,
-                "latitude": a.latitude,
-                "longitude": a.longitude,
-                "constructionYear": a.construction_year,
-                "material": a.material,
-                "department": a.department,
-                "inspectionFrequency": a.inspection_frequency,
-                "importance": a.importance,
-                "isActive": a.is_active,
-                "createdAt": a.created_at.isoformat() if a.created_at else None
-            }
-            for a in assets
-        ],
+        "items": items,
         "total": total,
         "page": page,
         "pageSize": page_size
@@ -258,7 +276,51 @@ def get_asset_detail(
     inspections = db.query(Inspection).filter(
         Inspection.asset_id == asset.id,
         Inspection.organization_id == current_user.organization_id
-    ).order_by(desc(Inspection.inspection_date)).all()
+    ).order_by(desc(Inspection.created_at), desc(Inspection.inspection_date)).all()
+
+    formatted_inspections = []
+    for i in inspections:
+        img_count = db.query(InspectionImage).filter(
+            InspectionImage.inspection_id == i.id,
+            InspectionImage.is_deleted == False
+        ).count()
+        findings_count = db.query(Detection).filter(Detection.inspection_id == i.id).count()
+        inspector = db.query(User).filter(User.id == i.inspector_id).first()
+        formatted_inspections.append({
+            "id": i.id,
+            "title": f"{asset.name} - {(i.method or 'walkdown').capitalize()} Survey",
+            "status": i.status,
+            "method": i.method or "walkdown",
+            "inspectionDate": i.inspection_date.isoformat(),
+            "dueDate": i.due_date.isoformat(),
+            "inspectorId": i.inspector_id,
+            "inspectorName": inspector.name if inspector else "Field Inspector",
+            "imageCount": img_count,
+            "findingsCount": findings_count,
+            "notes": i.notes
+        })
+
+    wos = db.query(WorkOrder).filter(
+        WorkOrder.asset_id == asset.id,
+        WorkOrder.organization_id == current_user.organization_id
+    ).order_by(desc(WorkOrder.created_at)).all()
+
+    formatted_wos = [
+        {
+            "id": w.id,
+            "title": w.action,
+            "action": w.action,
+            "priority": w.priority,
+            "status": w.status,
+            "team": w.team,
+            "dueDate": w.due_date.isoformat() if w.due_date else None,
+            "createdAt": w.created_at.isoformat() if w.created_at else None
+        }
+        for w in wos
+    ]
+
+    insp_id = asset.assigned_inspector_id or (inspections[0].inspector_id if inspections else None)
+    insp_user = asset.assigned_inspector or (inspections[0].inspector if inspections else None)
 
     return {
         "id": asset.id,
@@ -273,19 +335,13 @@ def get_asset_detail(
         "inspectionFrequency": asset.inspection_frequency,
         "importance": asset.importance,
         "isActive": asset.is_active,
+        "assignedInspectorId": insp_id,
+        "assignedInspectorName": insp_user.name if insp_user else None,
+        "assignedInspectorEmail": insp_user.email if insp_user else None,
         "notes": asset.notes,
         "createdAt": asset.created_at.isoformat() if asset.created_at else None,
-        "inspections": [
-            {
-                "id": i.id,
-                "status": i.status,
-                "inspectionDate": i.inspection_date.isoformat(),
-                "dueDate": i.due_date.isoformat(),
-                "inspectorId": i.inspector_id,
-            }
-            for i in inspections
-        ],
-        "maintenanceHistory": []  # Connected to real maintenance work orders when present
+        "inspections": formatted_inspections,
+        "maintenanceHistory": formatted_wos
     }
 
 @router.put("/{asset_id}")
@@ -339,6 +395,17 @@ def update_asset(
         asset.inspection_frequency = req.inspection_frequency.strip()
     if req.importance is not None:
         asset.importance = req.importance.strip()
+    if req.assigned_inspector_id is not None:
+        if req.assigned_inspector_id.strip():
+            target_ins = db.query(User).filter(
+                User.id == req.assigned_inspector_id.strip(),
+                User.organization_id == current_user.organization_id
+            ).first()
+            if not target_ins:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assigned inspector not found")
+            asset.assigned_inspector_id = target_ins.id
+        else:
+            asset.assigned_inspector_id = None
     if req.notes is not None:
         asset.notes = req.notes
 
@@ -386,6 +453,109 @@ def deactivate_asset(
     db.commit()
 
     return {"status": "deactivated", "id": asset.id}
+
+class AssetAssignRequest(BaseModel):
+    inspector_id: str
+    inspection_method: Optional[str] = "walkdown"
+    due_date: Optional[datetime] = None
+    notes: Optional[str] = None
+
+@router.post("/{asset_id}/assign", status_code=status.HTTP_201_CREATED)
+def assign_asset_to_inspector(
+    asset_id: str,
+    req: AssetAssignRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Role-based workflow: Civil Engineers, Infrastructure Managers, and Admins
+    assign an infrastructure asset to an active Field Inspector by scheduling an inspection.
+    """
+    user_role = (current_user.role or "").lower()
+    if user_role not in ("admin", "manager", "engineer", "civil-engineer", "lead_inspector"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "ACCESS_DENIED", "message": "Only Civil Engineers, Infrastructure Managers, or Admins can assign assets to inspectors."}
+        )
+
+    asset = db.query(Asset).filter(
+        Asset.id == asset_id,
+        Asset.organization_id == current_user.organization_id
+    ).first()
+    if not asset:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "ASSET_NOT_FOUND", "message": f"Asset '{asset_id}' not found."}
+        )
+
+    inspector = db.query(User).filter(
+        User.id == req.inspector_id,
+        User.organization_id == current_user.organization_id
+    ).first()
+    if not inspector:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "INSPECTOR_NOT_FOUND", "message": "Selected inspector not found."}
+        )
+
+    now_utc = datetime.now(timezone.utc)
+    due = req.due_date or (now_utc + timedelta(days=14))
+
+    inspection = Inspection(
+        organization_id=current_user.organization_id,
+        asset_id=asset.id,
+        inspector_id=inspector.id,
+        inspection_date=now_utc,
+        due_date=due,
+        status="assigned",
+        method=req.inspection_method or "walkdown",
+        notes=req.notes
+    )
+    db.add(inspection)
+
+    # Persist assigned inspector directly on the asset
+    asset.assigned_inspector_id = inspector.id
+    asset.updated_at = now_utc
+
+    db.flush()
+
+    notif = Notification(
+        user_id=inspector.id,
+        organization_id=current_user.organization_id,
+        title="Asset Assigned for Inspection",
+        message=f"{current_user.name or current_user.email} assigned asset {asset.name} ({asset.id}) to you.",
+        link=f"/app/inspections/{inspection.id}",
+        event_type="asset_assigned"
+    )
+    db.add(notif)
+
+    audit = AuditLog(
+        user_id=current_user.id,
+        actor_email=current_user.email,
+        action="ASSET_ASSIGN_INSPECTOR",
+        entity_type="asset",
+        entity_id=asset.id,
+        details={
+            "inspection_id": inspection.id,
+            "assigned_by": current_user.email,
+            "assigned_to": inspector.email,
+            "inspector_name": inspector.name
+        }
+    )
+    db.add(audit)
+    db.commit()
+    db.refresh(inspection)
+
+    return {
+        "status": "success",
+        "message": f"Asset '{asset.name}' successfully assigned to {inspector.name}.",
+        "inspectionId": inspection.id,
+        "assetId": asset.id,
+        "inspectorId": inspector.id,
+        "inspectorName": inspector.name,
+        "dueDate": inspection.due_date.isoformat(),
+        "inspectionStatus": inspection.status
+    }
 
 @router.post("/import-csv")
 async def import_assets_csv(

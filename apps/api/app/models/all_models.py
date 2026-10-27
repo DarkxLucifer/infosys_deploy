@@ -180,6 +180,7 @@ class Asset(Base):
     material = Column(String(128), nullable=False)
     department = Column(String(128), nullable=False, index=True)
     region = Column(String(128), default="Central", nullable=False, index=True)
+    assigned_inspector_id = Column(String(64), ForeignKey("users.id"), nullable=True, index=True)
     inspection_frequency = Column(String(64), nullable=False)
     importance = Column(String(64), nullable=False)
     is_active = Column(Boolean, default=True, index=True)
@@ -188,6 +189,7 @@ class Asset(Base):
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
     organization = relationship("Organization")
+    assigned_inspector = relationship("User", foreign_keys=[assigned_inspector_id])
     inspections = relationship("Inspection", back_populates="asset")
     work_orders = relationship("WorkOrder", back_populates="asset")
 
@@ -245,6 +247,10 @@ class InspectionImage(Base):
     exif_captured_at = Column(DateTime(timezone=True), nullable=True)
     source = Column(String(32), default="upload")
     status = Column(String(32), default="valid")  # valid, warned, rejected, deleted
+    quality_status = Column(String(32), default="accepted")  # pending, checking, accepted, warning, rejected
+    processing_status = Column(String(32), default="complete")  # not_started, queued, running, complete, failed, skipped
+    warning_confirmed_by = Column(String(64), nullable=True)
+    warning_confirmed_at = Column(DateTime(timezone=True), nullable=True)
     quality_report = Column(JSON, nullable=True)
     calibration = Column(JSON, nullable=True)
     is_deleted = Column(Boolean, default=False)
@@ -253,6 +259,45 @@ class InspectionImage(Base):
     inspection = relationship("Inspection", back_populates="images")
     uploader = relationship("User", foreign_keys=[uploader_id])
     processed_versions = relationship("ProcessedImage", back_populates="image")
+
+class ImageQualityReport(Base):
+    __tablename__ = "image_quality_reports"
+
+    id = Column(String(64), primary_key=True, default=generate_uuid)
+    image_id = Column(String(64), ForeignKey("inspection_images.id"), nullable=False, index=True)
+    overall = Column(String(32), nullable=False)  # accepted, warning, rejected
+    checks = Column(JSON, nullable=False)
+    config_snapshot = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+
+    image = relationship("InspectionImage", backref="quality_reports")
+
+class ImageProcessingRun(Base):
+    __tablename__ = "image_processing_runs"
+
+    id = Column(String(64), primary_key=True, default=generate_uuid)
+    image_id = Column(String(64), ForeignKey("inspection_images.id"), nullable=False, index=True)
+    profile = Column(String(64), default="general_v1")
+    profile_version = Column(String(32), default="1.0.0")
+    status = Column(String(32), default="complete")  # queued, running, complete, failed, skipped
+    steps = Column(JSON, nullable=False)
+    metrics_before = Column(JSON, nullable=True)
+    metrics_after = Column(JSON, nullable=True)
+    transform = Column(JSON, nullable=True)
+    tiles = Column(JSON, nullable=True)
+    processed_path = Column(String(512), nullable=False)
+    thumbnail_path = Column(String(512), nullable=True)
+    processed_sha256 = Column(String(64), nullable=False)
+    width = Column(Integer, nullable=True)
+    height = Column(Integer, nullable=True)
+    opencv_version = Column(String(32), nullable=True)
+    started_at = Column(DateTime(timezone=True), default=utcnow)
+    finished_at = Column(DateTime(timezone=True), default=utcnow)
+    retry_count = Column(Integer, default=0)
+    error_code = Column(String(64), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+
+    image = relationship("InspectionImage", backref="processing_runs")
 
 class ProcessedImage(Base):
     __tablename__ = "processed_images"

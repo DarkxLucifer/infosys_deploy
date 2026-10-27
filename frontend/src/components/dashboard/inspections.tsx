@@ -1,10 +1,21 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, Search, Loader2, RefreshCw, CheckCircle2, Clock, AlertTriangle, Camera } from "lucide-react";
+import { Plus, Search, Loader2, RefreshCw, CheckCircle2, Clock, AlertTriangle, Camera, UserCheck } from "lucide-react";
+import { toast } from "sonner";
 import { api } from "@/lib/api";
+import { useAuth } from "@/store/auth-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Select,
   SelectContent,
@@ -94,6 +105,11 @@ export function InspectionsPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const { user: authUser } = useAuth();
+  const canReassign = ["admin", "manager", "engineer", "civil-engineer", "lead_inspector"].includes(
+    (authUser?.role || "").toLowerCase()
+  );
+  const [selectedForReassign, setSelectedForReassign] = useState<any | null>(null);
 
   const fetchLiveInspections = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
@@ -264,8 +280,11 @@ export function InspectionsPage() {
                       {insp.method || "walkdown"}
                     </TableCell>
 
-                    <TableCell className="hidden lg:table-cell text-xs text-muted-foreground">
-                      {insp.inspectorName || "Assigned Inspector"}
+                    <TableCell className="hidden lg:table-cell text-xs">
+                      <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
+                        <UserCheck className="size-3 text-primary shrink-0" />
+                        <span>{insp.inspectorName || "Field Inspector"}</span>
+                      </span>
                     </TableCell>
 
                     <TableCell className="text-center">
@@ -301,24 +320,37 @@ export function InspectionsPage() {
                     </TableCell>
 
                     <TableCell className="pr-5 text-right" onClick={(e) => e.stopPropagation()}>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-8 rounded-lg text-xs font-medium"
-                        onClick={() => {
-                          if (insp.status === "pending_review" || insp.status === "reviewed") {
-                            navigate(`/app/review/${insp.id}`);
-                          } else {
-                            navigate(`/app/inspections/${insp.id}`);
-                          }
-                        }}
-                      >
-                        {insp.status === "pending_review"
-                          ? "Review"
-                          : insp.status === "assigned"
-                          ? "Capture"
-                          : "Workspace"}
-                      </Button>
+                      <div className="flex items-center justify-end gap-1.5">
+                        {canReassign && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-8 rounded-lg text-xs font-medium text-primary hover:bg-primary/10 gap-1 px-2.5"
+                            onClick={() => setSelectedForReassign(insp)}
+                          >
+                            <UserCheck className="size-3.5" />
+                            <span>Reassign</span>
+                          </Button>
+                        )}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-8 rounded-lg text-xs font-medium"
+                          onClick={() => {
+                            if (insp.status === "pending_review" || insp.status === "reviewed") {
+                              navigate(`/app/review/${insp.id}`);
+                            } else {
+                              navigate(`/app/inspections/${insp.id}`);
+                            }
+                          }}
+                        >
+                          {insp.status === "pending_review"
+                            ? "Review"
+                            : insp.status === "assigned"
+                            ? "Capture"
+                            : "Workspace"}
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 );
@@ -327,6 +359,150 @@ export function InspectionsPage() {
           </Table>
         </div>
       )}
+
+      {selectedForReassign && (
+        <ReassignInspectionDialog
+          open={!!selectedForReassign}
+          onOpenChange={(open) => {
+            if (!open) setSelectedForReassign(null);
+          }}
+          inspectionId={selectedForReassign.id}
+          currentInspectorId={selectedForReassign.inspectorId}
+          currentInspectorName={selectedForReassign.inspectorName}
+          onReassigned={() => fetchLiveInspections(true)}
+        />
+      )}
     </PageShell>
+  );
+}
+
+function ReassignInspectionDialog({
+  open,
+  onOpenChange,
+  inspectionId,
+  currentInspectorId,
+  currentInspectorName,
+  onReassigned,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  inspectionId: string;
+  currentInspectorId?: string;
+  currentInspectorName?: string;
+  onReassigned?: () => void;
+}) {
+  const [inspectors, setInspectors] = useState<any[]>([]);
+  const [selectedId, setSelectedId] = useState(currentInspectorId || "");
+  const [notes, setNotes] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setLoading(true);
+      api
+        .getInspectors()
+        .then((list) => {
+          if (Array.isArray(list)) {
+            setInspectors(list);
+            if (currentInspectorId && list.some((i) => i.id === currentInspectorId)) {
+              setSelectedId(currentInspectorId);
+            } else if (list.length > 0 && !selectedId) {
+              setSelectedId(list[0].id);
+            }
+          }
+        })
+        .catch(() => toast.error("Failed to load active field inspectors"))
+        .finally(() => setLoading(false));
+    }
+  }, [open, currentInspectorId]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedId) {
+      toast.error("Please select a field inspector.");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const res = await api.reassignInspection(inspectionId, {
+        inspector_id: selectedId,
+        notes: notes.trim() || undefined,
+      });
+      toast.success(res.message || "Inspection successfully reassigned!");
+      onReassigned?.();
+      onOpenChange(false);
+    } catch (err: any) {
+      toast.error(err.message || "Failed to reassign inspection");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <UserCheck className="size-4 text-primary" />
+            Reassign Field Inspector
+          </DialogTitle>
+          <DialogDescription className="text-xs">
+            Delegate survey execution and site capture for inspection {inspectionId}
+            {currentInspectorName ? ` (currently ${currentInspectorName})` : ""}.
+          </DialogDescription>
+        </DialogHeader>
+
+        <form onSubmit={handleSubmit} className="space-y-4 py-1 text-xs">
+          <div className="space-y-1.5">
+            <Label htmlFor="reassign-inspec-select">Assigned Field Inspector</Label>
+            {loading ? (
+              <div className="h-9 rounded-xl bg-muted animate-pulse" />
+            ) : (
+              <Select value={selectedId} onValueChange={setSelectedId}>
+                <SelectTrigger id="reassign-inspec-select" className="h-9 rounded-xl text-xs">
+                  <SelectValue placeholder="Choose field inspector…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {inspectors.map((ins) => (
+                    <SelectItem key={ins.id} value={ins.id} className="text-xs">
+                      <span className="font-semibold text-foreground">{ins.name || ins.email}</span> ·{" "}
+                      <span className="text-muted-foreground">{ins.email}</span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="reassign-inspec-notes">Delegation / Handover Notes (optional)</Label>
+            <Input
+              id="reassign-inspec-notes"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="e.g. Please capture south pier cap before 3 PM…"
+              className="rounded-lg text-xs"
+            />
+          </div>
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={submitting || !selectedId}>
+              {submitting ? (
+                <>
+                  <Loader2 className="size-3.5 animate-spin mr-1.5" />
+                  <span>Reassigning...</span>
+                </>
+              ) : (
+                <span>Reassign Inspection</span>
+              )}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }

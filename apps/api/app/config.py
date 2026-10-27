@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     SUPPORT_EMAIL: Optional[str] = "support@infrascan.local"
 
     # Database
-    DATABASE_URL: str = "sqlite:///./infrascan_dev.db"
+    DATABASE_URL: str = f"sqlite:///{BASE_DIR.as_posix()}/infrascan_dev.db"
 
     # Security
     JWT_SECRET: str = secrets.token_hex(32)
@@ -38,6 +38,27 @@ class Settings(BaseSettings):
 
     # Setup Token (Generated on start if no admin exists, Section S.5)
     SETUP_TOKEN: str = secrets.token_urlsafe(32)
+
+    # Image Quality Assessment & Limits (Section 4 & 7) - Resolution limit removed
+    MAX_FILE_SIZE_MB: int = 50
+    MIN_LONG_SIDE: int = 0
+    MIN_SHORT_SIDE: int = 0
+    BLUR_WARN: float = 80.0
+    BLUR_FAIL: float = 30.0
+    LIGHT_WARN: float = 70.0
+    LIGHT_FAIL: float = 40.0
+    DUP_HAMMING_MAX: int = 5
+
+    # Image Preprocessing (Section 5 & 7)
+    PROCESSED_MAX_SIDE: int = 2048
+    TILE_THRESHOLD_PX: int = 4096
+    TILE_SIZE: int = 1024
+    TILE_OVERLAP: float = 0.20
+    PREPROCESS_TIMEOUT_S: int = 120
+    PREPROCESS_NOISE_THRESHOLD: float = 8.0
+    PREPROCESS_CLAHE_CLIP: float = 2.0
+    PREPROCESS_CLAHE_GRID: int = 8
+    PREPROCESS_SHARPEN_STRENGTH: float = 0.6
 
     model_config = SettingsConfigDict(
         env_file=str(BASE_DIR.parent.parent / ".env"),

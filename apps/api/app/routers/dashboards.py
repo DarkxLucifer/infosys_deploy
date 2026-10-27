@@ -143,6 +143,7 @@ def get_role_dashboard_metrics(
                 InspectionImage.is_deleted == False
             ).count()
             det_count = db.query(Detection).filter(Detection.inspection_id == i.id).count()
+            insp_user = db.query(User).filter(User.id == i.inspector_id).first()
             formatted_my_inspections.append({
                 "id": i.id,
                 "asset_id": i.asset_id,
@@ -150,7 +151,7 @@ def get_role_dashboard_metrics(
                 "asset_name": asset.name if asset else "Infrastructure Asset",
                 "asset_type": asset.asset_type if asset else "bridge",
                 "inspector_id": i.inspector_id or current_user.id,
-                "inspector_name": current_user.name,
+                "inspector_name": insp_user.name if insp_user else current_user.name,
                 "date": i.inspection_date.strftime("%Y-%m-%d") if i.inspection_date else now.strftime("%Y-%m-%d"),
                 "status": i.status,
                 "next_due_date": (i.inspection_date.replace(year=i.inspection_date.year + 1)).strftime("%Y-%m-%d") if i.inspection_date else now.strftime("%Y-%m-%d"),
