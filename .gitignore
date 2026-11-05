@@ -7,20 +7,27 @@ __pycache__/
 .pytest_cache/
 .coverage
 htmlcov/
-storage/uploads/*
-storage/thumbnails/*
-storage/processed/*
-!storage/uploads/.gitkeep
-!storage/thumbnails/.gitkeep
-!storage/processed/.gitkeep
-apps/api/storage/uploads/*
-apps/api/storage/thumbnails/*
-apps/api/storage/processed/*
-!apps/api/storage/uploads/.gitkeep
-!apps/api/storage/thumbnails/.gitkeep
-!apps/api/storage/processed/.gitkeep
+
+# Model weights & binaries (should be hosted on Hugging Face / storage releases)
+*.pth
+*.pt
+*.onnx
+storage/models/*
+apps/api/storage/models/*
+
+# Dynamic storage, generated images and reports
+storage/
+apps/api/storage/
+apps/api/uploads/reports/
+!storage/.gitkeep
+!apps/api/storage/.gitkeep
+
+# Temporary test databases
+test_model_integration.db
+apps/api/test_model_integration.db
 *.db-shm
 *.db-wal
+
 .env.local
 .DS_Store
 Thumbs.db

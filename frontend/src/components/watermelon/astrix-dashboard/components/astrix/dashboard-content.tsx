@@ -303,7 +303,7 @@ function PipelineSection() {
               Model:{" "}
               {activeModel
                 ? `${activeModel.name} ${activeModel.version}`
-                : "CrackNet-R v3.2"}
+                : "InfraScan Model v1.0 (ResNet50)"}
             </span>
           </div>
         </div>
@@ -614,7 +614,7 @@ function ComplianceBand() {
         orders are committed to an asset owner. Outputs are traceable to model
         version{" "}
         <span className="font-mono text-xs">
-          {activeModel ? `${activeModel.name} ${activeModel.version}` : "CrackNet-R v3.2"}
+          {activeModel ? `${activeModel.name} ${activeModel.version}` : "InfraScan Model v1.0 (ResNet50)"}
         </span>
         .
       </p>

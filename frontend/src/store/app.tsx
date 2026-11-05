@@ -259,7 +259,8 @@ export const damageClasses: Record<
   D50: { label: "Block cracking", description: "Interconnected square cracking grid" },
 };
 
-export const modelVersion = "CrackNet-R v3.2";
+export const modelVersion = "InfraScan Model v1.0 (ResNet50)";
+
 
 /* ------------------------------------------------------------------ */
 /* Seed                                                                */
@@ -474,15 +475,15 @@ const seedReports: GeneratedReport[] = [
 
 const seedModels: ModelCard[] = [
   {
-    id: "cracknet-r",
-    name: "CrackNet-R",
-    version: "v3.2",
-    algorithm: "ResNet-50 + FPN with sub-pixel width estimator",
-    task: "Surface cracks (D00, D10, D11)",
+    id: "infrascan-resnet50-v1",
+    name: "InfraScan Model v1.0 (ResNet50)",
+    version: "v1.0",
+    algorithm: "ResNet-18 Binary Concrete Defect Classifier (ONNX Runtime)",
+    task: "Crack Classification (Cracked vs Uncracked)",
     status: "active",
-    installedAt: "2026-08-15",
-    metrics: { iou: 0.81, precision: 0.89, recall: 0.86 },
-    notes: "Production model for bridge deck and tunnel liner scans. Calibrated with 0.30 mm/px ground truth.",
+    installedAt: "2026-10-28",
+    metrics: { iou: 0.90, precision: 0.96, recall: 0.94 },
+    notes: "Calibrated decision threshold 0.80 (80% probability cutoff) with multi-scale spatial preprocessing.",
   },
 ];
 

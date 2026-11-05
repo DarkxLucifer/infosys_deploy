@@ -105,7 +105,15 @@ export interface InspectionImage {
   id: string;
   inspection_id: string;
   file_url: string;
-  quality_status: "passed" | "rejected";
+  originalUrl?: string;
+  previewUrl?: string;
+  processedUrl?: string;
+  enhancedUrl?: string;
+  yoloUrl?: string;
+  annotatedUrl?: string;
+  hasYolo?: boolean;
+  yoloDetection?: any;
+  quality_status: "passed" | "rejected" | "accepted" | "warning";
   rejection_reason?: "blur" | "low_light" | "duplicate" | "resolution_insufficient";
   mm_per_pixel: number | null;
   gps_lat?: number;
@@ -255,6 +263,22 @@ export interface InspectorDashboardPayload {
     text: string;
     type: "upload" | "analysis" | "review";
   }[];
+  recentAiClassifications?: RecentAiClassification[];
+}
+
+export interface RecentAiClassification {
+  imageId: string;
+  filename: string;
+  inspectionId: string;
+  assetCode: string;
+  assetName: string;
+  hasCrack: boolean;
+  predictedClass: "Cracked" | "Uncracked" | string;
+  confidence: number;
+  threshold: number;
+  modelName: string;
+  createdAt?: string;
+  thumbnailUrl: string;
 }
 
 export interface EngineerDashboardPayload {
@@ -266,6 +290,7 @@ export interface EngineerDashboardPayload {
     avgAiConfidence: number; // e.g. 91.2
     correctionRate: number;  // e.g. 14.5
   };
+  recentAiClassifications?: RecentAiClassification[];
   reviewQueue: {
     inspectionId: string;
     assetCode: string;
@@ -2496,6 +2521,34 @@ export const apiService = {
     return res.json();
   },
 
+  async getImageGeometry(imageId: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/images/${imageId}/geometry`, {
+      headers: authHeaders(),
+      credentials: "include",
+    });
+    if (!res.ok) {
+      const err: any = new Error("Failed to load crack geometry");
+      err.status = res.status;
+      throw err;
+    }
+    return res.json();
+  },
+
+  async calculateImageGeometry(imageId: string, payload?: { force_recompute?: boolean; mm_per_pixel?: number; min_region_area_px?: number }): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/images/${imageId}/geometry`, {
+      method: "POST",
+      headers: authHeaders(),
+      credentials: "include",
+      body: JSON.stringify(payload || {}),
+    });
+    if (!res.ok) {
+      const err: any = new Error("Failed to calculate crack geometry");
+      err.status = res.status;
+      throw err;
+    }
+    return res.json();
+  },
+
   async retryImageProcessing(imageId: string): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/images/${imageId}/processing/retry`, {
       method: "POST",
@@ -2552,6 +2605,99 @@ export const apiService = {
     }
     return res.json();
   },
+
+  async reviewImage(imageId: string, payload: {
+    decision: "accepted" | "rejected" | "warned" | "manual_review";
+    manual_classification?: "crack" | "no_crack" | "uncertain" | null;
+    override_reason?: string;
+    notes?: string;
+  }, inspectionId?: string): Promise<any> {
+    const url = inspectionId
+      ? `${API_BASE_URL}/inspections/${inspectionId}/images/${imageId}/review`
+      : `${API_BASE_URL}/images/${imageId}/review`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      credentials: "include",
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail?.message || err.detail || "Failed to update photo review");
+    }
+    return res.json();
+  },
+
+  async annotateImage(imageId: string, payload: {
+    bbox: { x: number; y: number; w: number; h: number };
+    defect_type?: string;
+    severity?: string;
+    notes?: string;
+  }, inspectionId?: string): Promise<any> {
+    const url = inspectionId
+      ? `${API_BASE_URL}/inspections/${inspectionId}/images/${imageId}/annotations`
+      : `${API_BASE_URL}/images/${imageId}/annotations`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      credentials: "include",
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail?.message || err.detail || "Failed to save defect annotation");
+    }
+    return res.json();
+  },
+
+  async triggerAIAnalysis(inspectionId: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/inspections/${inspectionId}/analyze`, {
+      method: "POST",
+      headers: authHeaders(),
+      credentials: "include",
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail?.message || err.detail || "Failed to run AI analysis");
+    }
+    return res.json();
+  },
+
+  async analyzeSingleImage(inspectionId: string, imageId: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/inspections/${inspectionId}/images/${imageId}/analyze`, {
+      method: "POST",
+      headers: authHeaders(),
+      credentials: "include",
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail?.message || err.detail || "Failed to analyze image");
+    }
+    return res.json();
+  },
+
+  async analyzeImage(imageId: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/images/${imageId}/analyze`, {
+      method: "POST",
+      headers: authHeaders(),
+      credentials: "include",
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail?.message || err.detail || "Failed to analyze image");
+    }
+    return res.json();
+  },
+
+  async getActiveModel(): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/models/active`, {
+      headers: authHeaders(),
+      credentials: "include",
+    });
+    if (!res.ok) return null;
+    return res.json();
+  },
+
 
   async uploadInspectionImage(
     inspectionId: string,

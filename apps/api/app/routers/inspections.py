@@ -1,5 +1,7 @@
+import os
+import json
 from datetime import datetime, timezone, timedelta
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -13,6 +15,7 @@ from app.models.all_models import (
 from app.security.jwt import get_current_user
 
 router = APIRouter(prefix="/inspections", tags=["Inspections"])
+
 
 # Enforced server-side status lifecycle transitions (Check I2)
 VALID_TRANSITIONS = {
@@ -436,6 +439,58 @@ def reassign_inspection(
         "message": f"Inspection {inspection.id} successfully reassigned to {new_inspector.name}."
     }
 
+def run_ai_analysis_for_inspection(inspection: Inspection, db: Session, user: User) -> Dict[str, Any]:
+    """Runs InfraScan Model v1.0 (ResNet50 Crack Classifier) on all valid inspection images."""
+    from app.services.classifier import get_classifier
+    clf = get_classifier()
+
+    images = db.query(InspectionImage).filter(
+        InspectionImage.inspection_id == inspection.id,
+        InspectionImage.is_deleted == False
+    ).all()
+
+    valid_images = [img for img in images if img.status in ("valid", "accepted", "warned")]
+
+    results = []
+    cracks_found = 0
+
+    for img in valid_images:
+        target_path = None
+        candidates = [
+            img.processed_path,
+            img.original_path,
+            os.path.join(os.getcwd(), "storage", "uploads", img.filename),
+            os.path.join(os.getcwd(), "storage", "processed", f"proc_{img.id}_general_v1.png")
+        ]
+        for candidate in candidates:
+            if candidate and os.path.exists(candidate):
+                target_path = candidate
+                break
+
+        if not target_path:
+            img.processing_status = "failed"
+            results.append({"imageId": img.id, "status": "failed", "error": "Image file missing from storage"})
+            continue
+
+        from app.routers.upload import run_and_persist_ai_classification
+        pred = run_and_persist_ai_classification(
+            image=img,
+            target_path=target_path,
+            db=db,
+            user_id=user.id,
+            inspection_id=inspection.id
+        )
+        img.processing_status = "complete" if (pred and pred.get("success")) else "failed"
+
+        if pred and pred.get("has_crack"):
+            cracks_found += 1
+
+        results.append({"imageId": img.id, "prediction": pred})
+
+    inspection.analysis_status = "completed"
+    db.commit()
+    return {"results": results, "cracks_found": cracks_found, "total_images": len(valid_images)}
+
 @router.post("/{inspection_id}/submit")
 def submit_inspection_for_review(
     inspection_id: str,
@@ -474,9 +529,12 @@ def submit_inspection_for_review(
             detail={"code": "NO_VALID_IMAGES", "message": "At least one accepted image is required to submit for review. Please capture or upload a field photo first."}
         )
 
+    # Run InfraScan ResNet50 Crack Classifier on all valid images
+    analysis_summary = run_ai_analysis_for_inspection(inspection, db, current_user)
+
     inspection.status = "pending_review"
     inspection.submitted_at = datetime.now(timezone.utc)
-    inspection.analysis_status = "skipped_no_model"
+    inspection.analysis_status = "completed"
 
     # Notify civil engineers
     engineers = db.query(User).filter(
@@ -489,8 +547,8 @@ def submit_inspection_for_review(
             user_id=eng.id,
             organization_id=current_user.organization_id,
             title="Inspection Ready for Engineering Review",
-            message=f"Inspection {inspection.id} has been submitted by {current_user.name} and is awaiting review.",
-            link=f"/dashboard/review",
+            message=f"Inspection {inspection.id} submitted with AI analysis ({analysis_summary['cracks_found']} crack detections). Awaiting review.",
+            link=f"/app/review",
             event_type="review_required"
         )
         db.add(notif)
@@ -501,12 +559,86 @@ def submit_inspection_for_review(
         action="INSPECTION_SUBMITTED",
         entity_type="inspection",
         entity_id=inspection.id,
-        details={"images_count": len(valid_images)}
+        details={
+            "images_count": len(valid_images),
+            "cracks_found": analysis_summary["cracks_found"],
+            "model": "InfraScan Model v1.0 (ResNet50)"
+        }
     )
     db.add(audit)
     db.commit()
 
-    return {"status": "pending_review", "submittedAt": inspection.submitted_at.isoformat()}
+    return {
+        "status": "pending_review",
+        "submittedAt": inspection.submitted_at.isoformat(),
+        "analysisStatus": "completed",
+        "analysisSummary": analysis_summary
+    }
+
+@router.post("/{inspection_id}/analyze")
+def trigger_ai_analysis(
+    inspection_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Explicitly triggers or re-runs InfraScan Model v1.0 (ResNet50) on an inspection's images."""
+    inspection = db.query(Inspection).filter(
+        Inspection.id == inspection_id,
+        Inspection.organization_id == current_user.organization_id
+    ).first()
+    if not inspection:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection not found")
+
+    summary = run_ai_analysis_for_inspection(inspection, db, current_user)
+    return {
+        "inspectionId": inspection.id,
+        "analysisStatus": inspection.analysis_status,
+        "summary": summary
+    }
+
+@router.post("/{inspection_id}/images/{image_id}/analyze")
+def analyze_single_image(
+    inspection_id: str,
+    image_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Runs InfraScan Model v1.0 inference on a single inspection photograph."""
+    from app.services.classifier import get_classifier
+    clf = get_classifier()
+
+    img = db.query(InspectionImage).filter(
+        InspectionImage.id == image_id,
+        InspectionImage.inspection_id == inspection_id,
+        InspectionImage.organization_id == current_user.organization_id,
+        InspectionImage.is_deleted == False
+    ).first()
+    if not img:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Photograph not found")
+
+    target_path = None
+    for candidate in [img.processed_path, img.original_path, os.path.join(os.getcwd(), "storage", "uploads", img.filename)]:
+        if candidate and os.path.exists(candidate):
+            target_path = candidate
+            break
+
+    if not target_path:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image file missing from storage disk")
+
+    from app.routers.upload import run_and_persist_ai_classification
+    pred = run_and_persist_ai_classification(
+        image=img,
+        target_path=target_path,
+        db=db,
+        user_id=current_user.id,
+        inspection_id=inspection_id
+    )
+    img.processing_status = "complete" if (pred and pred.get("success")) else "failed"
+
+    db.commit()
+    db.refresh(img)
+    return {"imageId": img.id, "prediction": pred}
+
 
 @router.post("/{inspection_id}/claim")
 def claim_inspection(
@@ -610,7 +742,10 @@ def sign_off_inspection(
             detail={"code": "FINDINGS_OR_NO_DEFECT_REQUIRED", "message": "At least one finding or a certified 'No defects recorded' entry is required before signoff."}
         )
 
-    unverified = [d for d in detections if not d.verified_by]
+    unverified = [
+        d for d in detections
+        if d.geometry and isinstance(d.geometry, dict) and d.geometry.get("type") not in ("image_classification", None) and not d.verified_by
+    ]
     if unverified:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,

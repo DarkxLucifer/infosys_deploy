@@ -14,11 +14,35 @@ import {
   Ruler,
   CheckCheck,
   Loader2,
-  Sparkles,
   Smartphone,
   UserCheck,
+  Maximize2,
+  Crop,
+  Trash2,
+  RefreshCw,
+  Tag,
+  Edit3,
+  Bot,
+  CheckCircle2,
+  AlertTriangle,
+  Sliders,
+  Sparkles,
+  Cpu,
 } from "lucide-react";
 import { toast } from "sonner";
+import {
+  PhotoZoomModal,
+  PhotoReplaceModal,
+  PhotoDeleteDialog,
+  PhotoManualClassificationModal,
+  PhotoAnnotationModal,
+  MultiFileUploadZone,
+} from "@/components/inspection/photo-inspection-suite";
+import {
+  ImageDetailsDrawer,
+  ImageTransformModal,
+} from "@/components/inspection/image-quality-components";
+
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -153,13 +177,127 @@ export function InspectionDetailPage() {
   const [uploadSource, setUploadSource] = useState("smartphone");
   const [isUploading, setIsUploading] = useState(false);
   const [cameraModalOpen, setCameraModalOpen] = useState(false);
-  const [viewMode, setViewMode] = useState<Record<string, "orig" | "proc">>({});
+  const [viewMode, setViewMode] = useState<Record<string, "orig" | "proc" | "rfdetr" | "unet">>({});
   const [preprocessingImgId, setPreprocessingImgId] = useState<string | null>(null);
   const [calibratingImageId, setCalibratingImageId] = useState<string | null>(null);
   const [mmPerPixel, setMmPerPixel] = useState("0.25");
   const [refLineLength, setRefLineLength] = useState("100");
   const [pixelLength, setPixelLength] = useState("400");
   const [calibrationMethod, setCalibrationMethod] = useState("mm_per_pixel");
+
+  // Advanced Photo Modal States
+  const [zoomPhoto, setZoomPhoto] = useState<any | null>(null);
+  const [replacePhotoId, setReplacePhotoId] = useState<string | null>(null);
+  const [deletePhoto, setDeletePhoto] = useState<any | null>(null);
+  const [manualReviewPhoto, setManualReviewPhoto] = useState<any | null>(null);
+  const [annotatePhoto, setAnnotatePhoto] = useState<any | null>(null);
+  const [transformPhoto, setTransformPhoto] = useState<any | null>(null);
+  const [drawerPhoto, setDrawerPhoto] = useState<any | null>(null);
+  const [analyzingImgId, setAnalyzingImgId] = useState<string | null>(null);
+
+  // Upload Queue for multi-file progress & retries
+  const [uploadQueue, setUploadQueue] = useState<Array<{
+    id: string;
+    file: File;
+    name: string;
+    size: number;
+    status: "uploading" | "success" | "error" | "warned";
+    error?: string;
+  }>>([]);
+
+  const handleBatchFiles = async (files: File[]) => {
+    if (!id || files.length === 0) return;
+    setIsUploading(true);
+
+    const newQueueItems = files.map((f, i) => ({
+      id: `upload-${Date.now()}-${i}`,
+      file: f,
+      name: f.name,
+      size: f.size,
+      status: "uploading" as const,
+    }));
+
+    setUploadQueue((prev) => [...newQueueItems, ...prev]);
+
+    let successCount = 0;
+    for (const item of newQueueItems) {
+      try {
+        await api.uploadInspectionImage(id, item.file, uploadSource, false);
+        setUploadQueue((prev) =>
+          prev.map((q) => (q.id === item.id ? { ...q, status: "success" } : q))
+        );
+        successCount++;
+      } catch (err: any) {
+        if (err.status === 422 && err.response?.detail?.warnings) {
+          setUploadQueue((prev) =>
+            prev.map((q) =>
+              q.id === item.id
+                ? { ...q, status: "warned", error: err.response.detail.warnings.join(", ") }
+                : q
+            )
+          );
+        } else {
+          setUploadQueue((prev) =>
+            prev.map((q) =>
+              q.id === item.id
+                ? { ...q, status: "error", error: err.message || "Upload failed" }
+                : q
+            )
+          );
+        }
+      }
+    }
+
+    if (successCount > 0) {
+      toast.success(`${successCount} photo${successCount === 1 ? "" : "s"} uploaded`);
+    }
+    setIsUploading(false);
+    fetchData();
+  };
+
+  const handleRetryQueueItem = async (item: typeof uploadQueue[0]) => {
+    if (!id) return;
+    setUploadQueue((prev) =>
+      prev.map((q) => (q.id === item.id ? { ...q, status: "uploading", error: undefined } : q))
+    );
+    try {
+      await api.uploadInspectionImage(id, item.file, uploadSource, false);
+      setUploadQueue((prev) =>
+        prev.map((q) => (q.id === item.id ? { ...q, status: "success" } : q))
+      );
+      toast.success(`Photo ${item.name} uploaded successfully`);
+      fetchData();
+    } catch (err: any) {
+      setUploadQueue((prev) =>
+        prev.map((q) => (q.id === item.id ? { ...q, status: "error", error: err.message } : q))
+      );
+      toast.error(`Retry failed for ${item.name}: ${err.message}`);
+    }
+  };
+
+  const handleSingleImageAnalyze = async (imgId: string) => {
+    if (!id) return;
+    setAnalyzingImgId(imgId);
+    try {
+      const res = await api.analyzeSingleImage(id, imgId);
+      const pred = res.prediction;
+      if (pred.has_crack) {
+        toast.warning("Concrete Crack Identified", {
+          description: `InfraScan ResNet50 v1.0: ${(pred.crack_probability * 100).toFixed(1)}% crack probability. Recorded in findings.`,
+        });
+      } else {
+        toast.success("No Crack Detected", {
+          description: `InfraScan ResNet50 v1.0: ${(pred.uncracked_probability * 100).toFixed(1)}% uncracked probability.`,
+        });
+      }
+      fetchData();
+    } catch (err: any) {
+      toast.error(err.message || "Failed to run AI analysis on photo");
+    } finally {
+      setAnalyzingImgId(null);
+    }
+  };
+
 
   const fetchData = async () => {
     if (!id || id === "new") {
@@ -414,8 +552,8 @@ export function InspectionDetailPage() {
         startedAt: dbInspection.inspectionDate || dbInspection.createdAt,
         completedAt: dbInspection.status === "closed" ? dbInspection.createdAt : undefined,
         modelVersion: dbInspection.analysisStatus === "completed" || dbDetections.length > 0
-          ? (dbDetections[0]?.modelId || "CrackNet-R v3.2")
-          : "CrackNet-R v3.2",
+          ? (dbDetections[0]?.modelId || "InfraScan Model v1.0 (ResNet50)")
+          : "InfraScan Model v1.0 (ResNet50)",
         progress: 100,
         notes: dbInspection.notes || "",
         escalationReason: undefined,
@@ -893,39 +1031,133 @@ export function InspectionDetailPage() {
                 </div>
               </div>
 
+              {/* Drag and Drop Batch Uploader */}
+              <div className="mb-4">
+                <MultiFileUploadZone onFilesSelected={handleBatchFiles} isUploading={isUploading} />
+              </div>
+
+              {/* Upload Queue Progress & Retry */}
+              {uploadQueue.length > 0 && (
+                <div className="mb-4 p-4 rounded-xl border border-border bg-card space-y-2">
+                  <div className="flex items-center justify-between text-xs font-semibold text-foreground">
+                    <span>Recent Upload Operations ({uploadQueue.length})</span>
+                    <button
+                      type="button"
+                      onClick={() => setUploadQueue([])}
+                      className="text-[11px] text-muted-foreground hover:text-foreground underline"
+                    >
+                      Clear queue
+                    </button>
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                    {uploadQueue.map((item) => (
+                      <div key={item.id} className="p-2.5 rounded-lg border bg-muted/40 text-xs space-y-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-mono truncate max-w-[150px] font-medium">{item.name}</span>
+                          <span className="text-[10px] text-muted-foreground">{(item.size / (1024 * 1024)).toFixed(2)} MB</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          {item.status === "uploading" && (
+                            <span className="text-[11px] text-primary flex items-center gap-1 font-semibold">
+                              <Loader2 className="size-3 animate-spin" /> Uploading…
+                            </span>
+                          )}
+                          {item.status === "success" && (
+                            <span className="text-[11px] text-emerald-500 flex items-center gap-1 font-semibold">
+                              <CheckCircle2 className="size-3" /> Uploaded & Validated
+                            </span>
+                          )}
+                          {item.status === "warned" && (
+                            <span className="text-[11px] text-amber-500 flex items-center gap-1 font-semibold">
+                              <AlertTriangle className="size-3" /> Quality Warning
+                            </span>
+                          )}
+                          {item.status === "error" && (
+                            <div className="flex items-center gap-2">
+                              <span className="text-[11px] text-rose-500 font-semibold truncate max-w-[120px]">
+                                {item.error || "Failed"}
+                              </span>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-6 px-1.5 text-[10px] text-primary"
+                                onClick={() => handleRetryQueueItem(item)}
+                              >
+                                Retry
+                              </Button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Uploaded Photos Grid with Individual Controls */}
               {dbImages.length > 0 ? (
-                <div className="mb-4 space-y-3">
-                  <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-1">
-                    Uploaded Image Assets ({dbImages.length})
-                  </h4>
-                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <div className="mb-6 space-y-3">
+                  <div className="flex items-center justify-between px-1">
+                    <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                      Staged Inspection Photographs ({dbImages.length})
+                    </h4>
+                    <span className="text-xs text-muted-foreground font-mono">
+                      {dbImages.filter((img) => img.status === "valid" || img.quality_status === "accepted").length} Valid ·{" "}
+                      {dbImages.filter((img) => img.status === "warned" || img.quality_status === "warning").length} Warnings
+                    </span>
+                  </div>
+
+                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                     {dbImages.map((img: any, idx: number) => {
                       const isCalibrated = img.calibration?.calibrated || (img.scale_calibration && img.scale_calibration.calibrated);
-                      const needsConfirm = img.status === "warned" || img.quality_status === "needs_confirmation";
-                      const mode = viewMode[img.id] || "orig";
-                      const isProc = mode === "proc";
+                      const needsConfirm = img.status === "warned" || img.quality_status === "warning" || img.quality_status === "needs_confirmation";
+                      const qr = img.qualityReport || img.quality_report || {};
+                      const aiPred = qr.ai_classification || qr.aiClassification || img.ai_classification || img.aiClassification || (img.aiDetection ? {
+                        has_crack: img.aiDetection.defectType === "crack",
+                        crack_probability: img.aiDetection.confidence,
+                        uncracked_probability: 1 - (img.aiDetection.confidence || 0),
+                        model_name: img.aiDetection.modelId || "InfraScan Model v1.0 (ResNet18)",
+                        threshold: 0.80,
+                        engine: "ONNXRuntime"
+                      } : null);
+                      const hasCrack = Boolean(aiPred?.has_crack || aiPred?.predicted_class === "Cracked" || (aiPred?.crack_probability ?? 0) >= 0.80);
+                      const rfdetrSeg = qr.rfdetr_detection || img.rfdetrDetection;
+                      const hasRfdetr = Boolean(img.hasRfdetr || (rfdetrSeg && rfdetrSeg.has_defect));
+                      const modelFallback = Boolean(img.modelFallback || img.model_fallback || (hasCrack && !hasRfdetr));
+                      const unetSeg = qr.unet_segmentation || img.unetSegmentation;
+                      const hasUnet = Boolean(img.hasUnet || unetSeg || hasCrack);
+                      const defaultMode = (hasRfdetr && !modelFallback) ? "rfdetr" : (hasCrack ? "unet" : "orig");
+                      const mode = viewMode[img.id] || defaultMode;
                       const tok = getAuthToken();
                       const tokQuery = tok ? `?token=${encodeURIComponent(tok)}` : "";
-                      const imgSrc = (isProc
-                        ? `/api/v1/images/${img.id}/processed`
-                        : `/api/v1/images/${img.id}/file`) + tokQuery;
+                      const vTag = `&v=${img.sha256 ? img.sha256.substring(0, 10) : (img.updated_at || Date.now())}`;
+                      const origUrl = `/api/v1/inspections/${id}/images/${img.id}/file${tokQuery}${vTag}`;
+                      const procUrl = `/api/v1/inspections/${id}/images/${img.id}/processed${tokQuery}${vTag}`;
+                      const rfdetrUrl = `/api/v1/inspections/${id}/images/${img.id}/file?variant=rfdetr${tok ? `&token=${encodeURIComponent(tok)}` : ""}${vTag}`;
+                      const unetUrl = `/api/v1/inspections/${id}/images/${img.id}/file?variant=unet${tok ? `&token=${encodeURIComponent(tok)}` : ""}${vTag}`;
+                      const enhancedUrl = `/api/v1/inspections/${id}/images/${img.id}/file?variant=enhanced${tok ? `&token=${encodeURIComponent(tok)}` : ""}${vTag}`;
+                      const imgSrc = mode === "rfdetr" ? (rfdetrUrl || unetUrl || procUrl) : mode === "unet" ? (unetUrl || procUrl) : mode === "proc" ? enhancedUrl : origUrl;
+
+                      const blurCheck = Array.isArray(qr.checks) ? qr.checks.find((c: any) => c.key === "blur" || c.key === "blur_variance") : null;
+                      const manual = qr.manual_review || img.manualReview;
 
                       return (
-                        <div key={img.id || idx} className="rounded-xl border bg-card p-3 space-y-2">
-                          <div className="aspect-video w-full rounded-lg bg-muted overflow-hidden relative group">
+                        <div key={img.id || idx} className="rounded-2xl border border-border bg-card p-3.5 space-y-3 shadow-xs hover:border-primary/40 transition-colors">
+                          {/* Image Box */}
+                          <div className="aspect-video w-full rounded-xl bg-black/90 overflow-hidden relative group cursor-pointer" onClick={() => setDrawerPhoto(img)}>
                             <img
                               src={imgSrc}
                               alt={img.filename}
-                              className="w-full h-full object-cover transition-all"
+                              className="w-full h-full object-cover transition-transform group-hover:scale-105 duration-300"
                             />
 
-                            {/* View Switch Pill (Original vs Preprocessed) */}
-                            <div className="absolute top-2 left-2 flex items-center bg-black/70 backdrop-blur-md rounded-md p-0.5 border border-white/10 text-[10px] z-10">
+                            {/* View Switch Pill */}
+                            <div className="absolute top-2 left-2 flex items-center bg-black/80 backdrop-blur-md rounded-lg p-0.5 border border-white/15 text-[10px] z-10" onClick={(e) => e.stopPropagation()}>
                               <button
                                 type="button"
                                 onClick={() => setViewMode((prev) => ({ ...prev, [img.id]: "orig" }))}
                                 className={`px-2 py-0.5 rounded font-medium transition-all ${
-                                  !isProc ? "bg-primary text-primary-foreground font-semibold shadow-xs" : "text-white/70 hover:text-white"
+                                  mode === "orig" ? "bg-primary text-primary-foreground font-semibold shadow-xs" : "text-white/70 hover:text-white"
                                 }`}
                               >
                                 Original
@@ -934,67 +1166,209 @@ export function InspectionDetailPage() {
                                 type="button"
                                 onClick={() => setViewMode((prev) => ({ ...prev, [img.id]: "proc" }))}
                                 className={`px-2 py-0.5 rounded font-medium transition-all ${
-                                  isProc ? "bg-emerald-600 text-white font-semibold shadow-xs" : "text-white/70 hover:text-white"
+                                  mode === "proc" ? "bg-card text-foreground font-semibold shadow-xs" : "text-white/70 hover:text-white"
                                 }`}
                               >
-                                Preprocessed
+                                Enhanced
                               </button>
+                              {hasRfdetr && (
+                                <button
+                                  type="button"
+                                  onClick={() => setViewMode((prev) => ({ ...prev, [img.id]: "rfdetr" }))}
+                                  className={`px-2 py-0.5 rounded font-medium transition-all flex items-center gap-1 ${
+                                    mode === "rfdetr" ? "bg-card text-foreground font-semibold shadow-xs" : "text-white/70 hover:text-white"
+                                  }`}
+                                >
+                                  <Cpu className="size-2.5 text-primary" />
+                                  RF-DETR
+                                </button>
+                              )}
+                              {hasUnet && (
+                                <button
+                                  type="button"
+                                  onClick={() => setViewMode((prev) => ({ ...prev, [img.id]: "unet" }))}
+                                  className={`px-2 py-0.5 rounded font-medium transition-all flex items-center gap-1 ${
+                                    mode === "unet" ? "bg-card text-foreground font-semibold shadow-xs" : "text-white/70 hover:text-white"
+                                  }`}
+                                >
+                                  <Sparkles className="size-2.5 text-primary" />
+                                  {modelFallback ? "UNet (Fallback)" : "UNet"}
+                                </button>
+                              )}
                             </div>
 
-                            <div className="absolute top-2 right-2 flex items-center gap-1 z-10 pointer-events-none">
-                              <QualityBadge
-                                status={img.quality_status || (img.status === "warned" ? "warning" : img.status === "valid" ? "accepted" : "rejected")}
-                                confirmed={Boolean(img.warning_confirmed_by)}
-                              />
-                              {img.processing_status && (
-                                <ProcessingBadge status={img.processing_status} />
-                              )}
-                            </div>
-                          </div>
-                          <div className="flex items-center justify-between text-xs">
-                            <span className="font-mono truncate max-w-[140px] text-foreground font-medium">{img.filename}</span>
-                            <span className="text-muted-foreground text-[11px]">{img.width}x{img.height}</span>
-                          </div>
-                          <div className="flex items-center justify-between pt-1 border-t border-border/60">
-                            <span className="text-[11px] text-muted-foreground">
-                              {isCalibrated ? `Scale: ${(img.calibration?.mm_per_pixel || 0.25).toFixed(2)} mm/px` : "Scale: Uncalibrated (px)"}
-                            </span>
-                            <div className="flex items-center gap-1">
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="h-7 text-[11px] px-2 text-primary border-primary/30 hover:bg-primary/10 gap-1"
-                                disabled={preprocessingImgId === img.id}
-                                onClick={() => handleRunPreprocess(img.id)}
-                              >
-                                {preprocessingImgId === img.id ? (
-                                  <Loader2 className="size-3 animate-spin" />
-                                ) : (
-                                  <Sparkles className="size-3" />
+                            {/* Top Right Badges */}
+                            <div className="absolute top-2 right-2 flex flex-col items-end gap-1 z-10 pointer-events-none">
+                              <div className="flex items-center gap-1">
+                                <QualityBadge
+                                  status={img.quality_status || (img.status === "warned" ? "warning" : img.status === "valid" ? "accepted" : "rejected")}
+                                  confirmed={Boolean(img.warning_confirmed_by)}
+                                />
+                                {img.processing_status && (
+                                  <ProcessingBadge status={img.processing_status} />
                                 )}
-                                <span>Preprocess</span>
-                              </Button>
-                              {needsConfirm && (
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  className="h-7 text-[11px] px-2 text-warning border-warning/40 hover:bg-warning/10"
-                                  onClick={() => handleConfirmWarning(img.id)}
+                              </div>
+                              {aiPred && (
+                                <span
+                                  className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold border shadow-xs ${
+                                    aiPred.has_crack
+                                      ? "bg-rose-950/90 text-rose-300 border-rose-500/40"
+                                      : "bg-emerald-950/90 text-emerald-300 border-emerald-500/40"
+                                  }`}
                                 >
-                                  <CircleCheck className="size-3" />
-                                  Confirm
-                                </Button>
+                                  {aiPred.has_crack ? `Crack Detected (${(aiPred.crack_probability * 100).toFixed(0)}%)` : `No Crack (${(aiPred.uncracked_probability * 100).toFixed(0)}%)`}
+                                </span>
                               )}
+                              {isCalibrated ? (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-950/90 text-blue-300 border border-blue-500/40">
+                                  Calibrated
+                                </span>
+                              ) : null}
+                            </div>
+
+                            {/* Zoom Hover Overlay Hint */}
+                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1.5 text-white text-xs font-semibold pointer-events-none">
+                              <Maximize2 className="size-4" />
+                              <span>Click to Zoom</span>
+                            </div>
+                          </div>
+
+                          {/* Image Metadata Row */}
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="font-mono truncate font-semibold text-foreground max-w-[160px]" title={img.filename}>
+                                {img.filename}
+                              </span>
+                              <span className="text-muted-foreground font-mono text-[11px]">
+                                {img.width} × {img.height}
+                              </span>
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+                              <span>{(img.file_size / (1024 * 1024)).toFixed(2)} MB</span>
+                              {blurCheck && (
+                                <span>Sharpness: <strong className="text-foreground">{blurCheck.value}</strong></span>
+                              )}
+                              <span>
+                                {img.exif_lat && img.exif_lng
+                                  ? `GPS: ${img.exif_lat.toFixed(3)}, ${img.exif_lng.toFixed(3)}`
+                                  : "GPS: Site Default"}
+                              </span>
+                            </div>
+
+                            {manual && (
+                              <div className="p-1.5 rounded bg-muted/60 text-[11px] text-foreground flex items-center justify-between">
+                                <span>Inspector Verdict: <strong className="capitalize">{manual.manual_classification || manual.decision}</strong></span>
+                                <span className="text-[10px] text-muted-foreground">{manual.reviewer_name}</span>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Individual Controls Toolbar */}
+                          <div className="pt-2 border-t border-border/70 flex flex-wrap items-center gap-1.5">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 px-2 text-[11px] gap-1"
+                              onClick={() => setZoomPhoto(img)}
+                              title="Full Screen Zoom & Pan"
+                            >
+                              <Maximize2 className="size-3" />
+                              <span>Zoom</span>
+                            </Button>
+
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 px-2 text-[11px] gap-1"
+                              onClick={() => setDrawerPhoto(img)}
+                              title="Open OpenCV Quality Checks & Preprocessing Stages"
+                            >
+                              <Sliders className="size-3 text-primary" />
+                              <span>Quality</span>
+                            </Button>
+
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 px-2 text-[11px] gap-1"
+                              onClick={() => setTransformPhoto(img)}
+                              title="Crop and Rotate Photo"
+                            >
+                              <Crop className="size-3" />
+                              <span>Crop/Rot</span>
+                            </Button>
+
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 px-2 text-[11px] gap-1 text-primary border-primary/30 hover:bg-primary/10"
+                              disabled={analyzingImgId === img.id || preprocessingImgId === img.id}
+                              onClick={() => handleSingleImageAnalyze(img.id)}
+                              title="Execute ResNet50 v1.0 inference on this photo"
+                            >
+                              {analyzingImgId === img.id ? (
+                                <Loader2 className="size-3 animate-spin" />
+                              ) : (
+                                <Bot className="size-3 text-primary" />
+                              )}
+                              <span>AI Test</span>
+                            </Button>
+
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 px-2 text-[11px] gap-1 text-amber-600 border-amber-500/30 hover:bg-amber-500/10"
+                              onClick={() => setManualReviewPhoto(img)}
+                              title="Record manual defect classification & override reason"
+                            >
+                              <Tag className="size-3" />
+                              <span>Classify</span>
+                            </Button>
+
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 px-2 text-[11px] gap-1 text-emerald-600 border-emerald-500/30 hover:bg-emerald-500/10"
+                              onClick={() => setAnnotatePhoto(img)}
+                              title="Draw manual defect bounding box annotation"
+                            >
+                              <Edit3 className="size-3" />
+                              <span>Box</span>
+                            </Button>
+
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 px-2 text-[11px] gap-1"
+                              onClick={() => setReplacePhotoId(img.id)}
+                              title="Replace photo with a fresh file"
+                            >
+                              <RefreshCw className="size-3" />
+                              <span>Replace</span>
+                            </Button>
+
+                            {needsConfirm && (
                               <Button
                                 size="sm"
                                 variant="outline"
-                                className="h-7 text-[11px] px-2"
-                                onClick={() => setCalibratingImageId(img.id)}
+                                className="h-7 text-[11px] px-2 text-warning border-warning/40 hover:bg-warning/10"
+                                onClick={() => handleConfirmWarning(img.id)}
                               >
-                                <Ruler className="size-3" />
-                                Scale
+                                <CircleCheck className="size-3 mr-1" />
+                                Confirm
                               </Button>
-                            </div>
+                            )}
+
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-7 px-1.5 text-[11px] text-destructive hover:bg-destructive/10 ml-auto"
+                              onClick={() => setDeletePhoto(img)}
+                              title="Remove photo"
+                            >
+                              <Trash2 className="size-3" />
+                            </Button>
                           </div>
                         </div>
                       );
@@ -1175,6 +1549,80 @@ export function InspectionDetailPage() {
             currentInspectorName={inspection.inspector}
             onReassigned={() => fetchData()}
           />
+
+          {/* Photo Inspection Suite Modals */}
+          <PhotoZoomModal
+            open={Boolean(zoomPhoto)}
+            onOpenChange={(open) => !open && setZoomPhoto(null)}
+            photo={zoomPhoto}
+            inspectionId={id || ""}
+          />
+
+          <PhotoReplaceModal
+            open={Boolean(replacePhotoId)}
+            onOpenChange={(open) => !open && setReplacePhotoId(null)}
+            photoId={replacePhotoId}
+            inspectionId={id || ""}
+            onSuccess={fetchData}
+          />
+
+          <PhotoDeleteDialog
+            open={Boolean(deletePhoto)}
+            onOpenChange={(open) => !open && setDeletePhoto(null)}
+            photoId={deletePhoto?.id || null}
+            inspectionId={id || ""}
+            filename={deletePhoto?.filename}
+            onSuccess={fetchData}
+          />
+
+          <PhotoManualClassificationModal
+            open={Boolean(manualReviewPhoto)}
+            onOpenChange={(open) => !open && setManualReviewPhoto(null)}
+            photo={manualReviewPhoto}
+            inspectionId={id || ""}
+            onSuccess={fetchData}
+          />
+
+          <PhotoAnnotationModal
+            open={Boolean(annotatePhoto)}
+            onOpenChange={(open) => !open && setAnnotatePhoto(null)}
+            photo={annotatePhoto}
+            inspectionId={id || ""}
+            existingAnnotations={dbDetections.filter((d: any) => d.image_id === annotatePhoto?.id)}
+            onSuccess={fetchData}
+          />
+
+          <ImageDetailsDrawer
+            open={Boolean(drawerPhoto)}
+            onOpenChange={(open) => !open && setDrawerPhoto(null)}
+            photo={drawerPhoto}
+            onConfirmWarning={handleConfirmWarning}
+            onRetryProcessing={handleRunPreprocess}
+            onCalibrate={(imgId) => setCalibratingImageId(imgId)}
+            onReplace={(imgId) => setReplacePhotoId(imgId)}
+            onRemove={(imgId) => setDeletePhoto(dbImages.find((img: any) => img.id === imgId) || { id: imgId })}
+            onTransform={(p) => setTransformPhoto(p)}
+            onTransformed={(updated) => {
+              fetchData();
+              setDrawerPhoto((prev: any) => (prev ? { ...prev, ...updated, version: Date.now() } : null));
+            }}
+            onUpdatePhoto={(updated) => {
+              fetchData();
+              setDrawerPhoto((prev: any) => (prev ? { ...prev, ...updated, version: Date.now() } : null));
+            }}
+          />
+
+          <ImageTransformModal
+            open={Boolean(transformPhoto)}
+            onOpenChange={(open) => !open && setTransformPhoto(null)}
+            photo={transformPhoto}
+            onTransformed={(updated) => {
+              fetchData();
+              setTransformPhoto(null);
+              setDrawerPhoto((prev: any) => (prev ? { ...prev, ...updated, version: Date.now() } : null));
+            }}
+          />
+
         </>
       )}
     </PageShell>

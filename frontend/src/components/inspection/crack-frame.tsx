@@ -263,6 +263,7 @@ export function CrackFrame({
       {/* finding annotations */}
       {mode === "annotated" || mode === "heat"
         ? findings.map((finding) => {
+            if (!finding?.bbox) return null;
             const box = {
               x: (finding.bbox.x / 100) * W,
               y: (finding.bbox.y / 100) * H,
@@ -270,7 +271,7 @@ export function CrackFrame({
               h: (finding.bbox.h / 100) * H,
             };
             const selected = selectedFindingId === finding.id;
-            const color = severityStroke[finding.severity];
+            const color = severityStroke[finding.severity] || "var(--primary)";
             const chipX = box.x;
             const chipY = Math.max(4, box.y - 22);
             const chipLabel = `${finding.classCode} · ${Math.round(finding.confidence * 100)}%`;
@@ -420,7 +421,7 @@ export function FrameCard({
       <div className="relative">
         <CrackFrame
           seed={scene.seed}
-          imageUrl={(scene as any).url || (scene as any).thumbnailUrl}
+          imageUrl={(scene as any).yoloUrl || (scene as any).unetUrl || (scene as any).annotatedUrl || (scene as any).url || (scene as any).thumbnailUrl}
           findings={findings}
           mode={mode}
           selectedFindingId={selectedFindingId}

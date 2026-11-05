@@ -170,7 +170,13 @@ export default function ReviewQueuePage() {
                       {row.defectType}
                     </td>
                     <td className="py-3 px-4 font-mono">
-                      {(row.confidence * 100).toFixed(0)}%
+                      {row.confidence > 0 ? (
+                        <span className="font-semibold text-foreground">
+                          {(row.confidence * 100).toFixed(0)}%
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground text-[11px]">Pending AI</span>
+                      )}
                     </td>
                     <td className="py-3 px-4">
                       <span

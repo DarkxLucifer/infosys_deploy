@@ -62,8 +62,8 @@ def get_current_user(
         from app.security.tokens import hash_token
         hashed = hash_token(refresh_cookie)
         sess = db.query(RefreshSession).filter(
-            RefreshSession.session_token_hash == hashed,
-            RefreshSession.is_revoked == False,
+            RefreshSession.token_hash == hashed,
+            RefreshSession.revoked_at.is_(None),
             RefreshSession.expires_at > datetime.now(timezone.utc)
         ).first()
         if sess:

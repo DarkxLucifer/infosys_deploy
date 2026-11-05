@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { api, type InspectorDashboardPayload } from "@/lib/api";
 import { InspectionPipelineBoard } from "@/components/dashboard/inspection-pipeline-board";
+import { RecentAiClassificationsFeed } from "@/components/dashboard/recent-ai-classifications-feed";
 
 const DATE_RANGES = [
   { id: "7d", label: "Last 7 days" },
@@ -164,6 +165,13 @@ export function InspectorDashboard() {
 
       {/* Real Inspection Pipeline Board (Section 3.7) */}
       <InspectionPipelineBoard />
+
+      {/* Live AI Photo Classifications Stream */}
+      <RecentAiClassificationsFeed
+        items={data.recentAiClassifications || []}
+        title="Live AI Photo Classifications"
+        subtitle="Recent field photographs classified by InfraScan Model v1.0 (ResNet50)"
+      />
 
       {/* My Inspections Table */}
       <div className="rounded-xl border border-border bg-card shadow-xs overflow-hidden">

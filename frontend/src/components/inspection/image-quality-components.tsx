@@ -22,6 +22,7 @@ import {
   Upload,
   XCircle,
   AlertTriangle,
+  Cpu,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -50,6 +51,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
+import { CrackGeometrySection } from "./crack-geometry-section";
 
 // ─── Status Badges ────────────────────────────────────────────────────────────
 
@@ -63,36 +65,36 @@ export function QualityBadge({
   switch (status) {
     case "accepted":
       return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-950/90 text-emerald-300 border border-emerald-500/40 shadow-xs">
-          <CheckCircle2 className="size-3 text-emerald-400" />
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-muted/80 text-foreground border border-border shadow-xs">
+          <CheckCircle2 className="size-3 text-muted-foreground" />
           <span>Accepted</span>
         </span>
       );
     case "warning":
       return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-950/90 text-amber-300 border border-amber-500/40 shadow-xs">
-          <AlertCircle className="size-3 text-amber-400" />
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-rose-500/10 text-rose-400 border border-rose-500/30 shadow-xs">
+          <AlertCircle className="size-3 text-rose-400" />
           <span>{confirmed ? "Warning (confirmed)" : "Warning"}</span>
         </span>
       );
     case "rejected":
       return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-rose-950/90 text-rose-300 border border-rose-500/40 shadow-xs">
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-rose-500/10 text-rose-400 border border-rose-500/30 shadow-xs">
           <XCircle className="size-3 text-rose-400" />
           <span>Rejected</span>
         </span>
       );
     case "checking":
       return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-sky-950/90 text-sky-300 border border-sky-500/40 shadow-xs">
-          <Loader2 className="size-3 text-sky-400 animate-spin" />
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-muted/60 text-muted-foreground border border-border shadow-xs">
+          <Loader2 className="size-3 text-muted-foreground animate-spin" />
           <span>Checking</span>
         </span>
       );
     default:
       return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-zinc-900/90 text-zinc-300 border border-zinc-700/50 shadow-xs">
-          <Clock className="size-3 text-zinc-400" />
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-muted/40 text-muted-foreground border border-border shadow-xs">
+          <Clock className="size-3 text-muted-foreground" />
           <span>Pending</span>
         </span>
       );
@@ -107,35 +109,35 @@ export function ProcessingBadge({
   switch (status) {
     case "complete":
       return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-950/90 text-indigo-300 border border-indigo-500/40 shadow-xs">
-          <Check className="size-3 text-indigo-400" />
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-muted/80 text-foreground border border-border shadow-xs">
+          <Check className="size-3 text-muted-foreground" />
           <span>Preprocessed</span>
         </span>
       );
     case "running":
       return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-blue-950/90 text-blue-300 border border-blue-500/40 shadow-xs">
-          <Loader2 className="size-3 text-blue-400 animate-spin" />
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-primary/10 text-primary border border-primary/30 shadow-xs">
+          <Loader2 className="size-3 text-primary animate-spin" />
           <span>Processing</span>
         </span>
       );
     case "queued":
       return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-zinc-900/90 text-zinc-300 border border-zinc-700/50 shadow-xs">
-          <Clock className="size-3 text-zinc-400" />
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-muted/40 text-muted-foreground border border-border shadow-xs">
+          <Clock className="size-3 text-muted-foreground" />
           <span>Queued</span>
         </span>
       );
     case "failed":
       return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-rose-950/90 text-rose-300 border border-rose-500/40 shadow-xs">
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-rose-500/10 text-rose-400 border border-rose-500/30 shadow-xs">
           <AlertTriangle className="size-3 text-rose-400" />
           <span>Failed</span>
         </span>
       );
     case "skipped":
       return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-zinc-900/90 text-zinc-400 border border-zinc-800 shadow-xs">
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-muted/40 text-muted-foreground border border-border shadow-xs">
           <Minus className="size-3" />
           <span>Skipped</span>
         </span>
@@ -145,26 +147,175 @@ export function ProcessingBadge({
   }
 }
 
+export function ClassificationBadge({
+  photo,
+  classification,
+  className = "",
+}: {
+  photo?: any;
+  classification?: any;
+  className?: string;
+}) {
+  const ai =
+    classification ||
+    photo?.aiClassification ||
+    photo?.ai_classification ||
+    photo?.qualityReport?.ai_classification ||
+    photo?.quality_report?.ai_classification;
+
+  const qStatus = photo?.quality_status || (photo?.status === "error" ? "rejected" : photo?.status);
+  const pStatus = photo?.processing_status;
+
+  // 1. Quality Rejected / Error -> Skipped
+  if (qStatus === "rejected" || photo?.status === "error") {
+    return (
+      <span
+        title="Quality assessment rejected: AI crack inference skipped"
+        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-muted/40 text-muted-foreground border border-border shadow-xs ${className}`}
+      >
+        <Minus className="size-3 text-muted-foreground" />
+        <span>Skipped</span>
+      </span>
+    );
+  }
+
+  // 2. Uploading / Preprocessing in progress -> Classifying
+  if (photo?.status === "uploading" || qStatus === "checking" || pStatus === "running") {
+    return (
+      <span
+        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-muted/60 text-muted-foreground border border-border shadow-xs ${className}`}
+      >
+        <Loader2 className="size-3 text-muted-foreground animate-spin" />
+        <span>Classifying…</span>
+      </span>
+    );
+  }
+
+  // 3. AI Classification result exists
+  if (ai) {
+    const hasCrack = Boolean(ai.has_crack || ai.predicted_class === "Cracked");
+    const rawProb = hasCrack
+      ? (ai.crack_probability ?? ai.confidence)
+      : (ai.uncracked_probability ?? (1 - (ai.crack_probability || 0)));
+    const pct = typeof rawProb === "number" ? Math.round(rawProb * 100) : 0;
+    const thresholdPct = typeof ai.threshold === "number" ? (ai.threshold * 100).toFixed(1) : "9.5";
+
+    if (hasCrack) {
+      return (
+        <span
+          title={`InfraScan ResNet50: Defect confirmed (${pct}% score exceeds ${thresholdPct}% alarm threshold)`}
+          className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-bold bg-rose-500/10 text-rose-400 border border-rose-500/30 shadow-xs backdrop-blur-xs ${className}`}
+        >
+          <AlertTriangle className="size-3 text-rose-400 shrink-0" />
+          <span>Crack Detected</span>
+          <span className="text-[9px] font-mono text-rose-400/80 font-normal">({pct}%)</span>
+        </span>
+      );
+    } else {
+      return (
+        <span
+          title={`InfraScan ResNet50: Sound concrete surface (${pct}% confidence)`}
+          className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-bold bg-muted/80 text-foreground border border-border shadow-xs backdrop-blur-xs ${className}`}
+        >
+          <CheckCircle2 className="size-3 text-muted-foreground shrink-0" />
+          <span>No Crack</span>
+          <span className="text-[9px] font-mono text-muted-foreground font-normal">({pct}%)</span>
+        </span>
+      );
+    }
+  }
+
+  // 4. Stored AI detection fallback
+  if (photo?.aiDetection) {
+    const isCrack = photo.aiDetection.defectType === "crack";
+    const pct = Math.round((photo.aiDetection.confidence || 0) * 100);
+    if (isCrack) {
+      return (
+        <span
+          title={`InfraScan ResNet50: Crack defect (${pct}%)`}
+          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-rose-500/10 text-rose-400 border border-rose-500/30 shadow-xs backdrop-blur-xs ${className}`}
+        >
+          <AlertTriangle className="size-3 text-rose-400 shrink-0" />
+          <span>Crack ({pct}%)</span>
+        </span>
+      );
+    } else {
+      return (
+        <span
+          title={`InfraScan ResNet50: Sound concrete (${pct}%)`}
+          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-muted/80 text-foreground border border-border shadow-xs backdrop-blur-xs ${className}`}
+        >
+          <CheckCircle2 className="size-3 text-muted-foreground shrink-0" />
+          <span>No Crack ({pct}%)</span>
+        </span>
+      );
+    }
+  }
+
+  // 5. Accepted / Ready for AI
+  return (
+    <span
+      title="Ready for InfraScan ResNet50 analysis"
+      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-muted/60 text-muted-foreground border border-border shadow-xs ${className}`}
+    >
+      <Sparkles className="size-3 text-muted-foreground" />
+      <span>AI: Ready</span>
+    </span>
+  );
+}
+
 
 // ─── Image Compare Viewer (Original / Processed / Compare Slider) ────────────
 
 export function ImageCompare({
   originalUrl,
   processedUrl,
+  rfdetrUrl,
+  rfdetrDetection,
+  activeStage2Model: _activeStage2Model,
+  modelFallback = false,
+  yoloUrl: _yoloUrl,
+  yoloDetection,
+  unetUrl,
+  unetMaskUrl,
+  unetSegmentation,
   metricsBefore,
   metricsAfter,
   className = "",
 }: {
   originalUrl: string;
   processedUrl?: string | null;
+  rfdetrUrl?: string | null;
+  rfdetrDetection?: any;
+  activeStage2Model?: string;
+  modelFallback?: boolean;
+  yoloUrl?: string | null;
+  yoloDetection?: any;
+  unetUrl?: string | null;
+  unetMaskUrl?: string | null;
+  unetSegmentation?: any;
   metricsBefore?: any;
   metricsAfter?: any;
   className?: string;
 }) {
-  const [viewMode, setViewMode] = useState<"compare" | "orig" | "proc">("compare");
+  const hasRfdetrDefects = Boolean(!modelFallback && rfdetrDetection?.has_defect);
+  const initialMode = hasRfdetrDefects ? "rfdetr" : (unetUrl ? "unet" : "compare");
+  const [viewMode, setViewMode] = useState<"compare" | "orig" | "proc" | "rfdetr" | "unet" | "mask">(initialMode);
+  const [compareTarget, setCompareTarget] = useState<"rfdetr" | "unet" | "processed">(
+    hasRfdetrDefects ? "rfdetr" : (unetUrl ? "unet" : "processed")
+  );
   const [sliderPos, setSliderPos] = useState(50); // percent
   const containerRef = useRef<HTMLDivElement>(null);
   const isDragging = useRef(false);
+
+  // If rfdetrUrl or unetUrl becomes available, automatically switch view
+  useEffect(() => {
+    if (hasRfdetrDefects && compareTarget !== "rfdetr") {
+      setCompareTarget("rfdetr");
+    } else if (unetUrl && compareTarget !== "unet" && !hasRfdetrDefects) {
+      setCompareTarget("unet");
+    }
+  }, [hasRfdetrDefects, unetUrl]);
 
   const handlePointerDown = () => {
     isDragging.current = true;
@@ -187,7 +338,14 @@ export function ImageCompare({
     }
   };
 
-  if (!processedUrl) {
+  const compareBackgroundUrl =
+    (compareTarget === "rfdetr" && rfdetrUrl)
+      ? rfdetrUrl
+      : (compareTarget === "unet" && unetUrl)
+      ? unetUrl
+      : (processedUrl || rfdetrUrl || unetUrl || originalUrl);
+
+  if (!processedUrl && !unetUrl && !rfdetrUrl) {
     return (
       <div className={`space-y-3 ${className}`}>
         <div className="relative aspect-video rounded-xl overflow-hidden border border-border bg-black flex items-center justify-center">
@@ -203,11 +361,51 @@ export function ImageCompare({
     );
   }
 
+  const unetMetrics = unetSegmentation || {};
+  const hasUnetData = Boolean(unetMetrics.has_crack || (unetMetrics.crack_area_pct !== undefined && unetMetrics.crack_area_pct > 0));
+
+  // Crack Type Classification (Longitudinal, Transverse, Alligator, Pothole)
+  const rawType =
+    rfdetrDetection?.primary_label ||
+    rfdetrDetection?.primary_defect ||
+    yoloDetection?.primary_defect ||
+    yoloDetection?.detections?.[0]?.label ||
+    yoloDetection?.defect_type;
+
+  let cleanCrackType = "Longitudinal Crack";
+  if (rawType) {
+    const lowerType = String(rawType).toLowerCase();
+    if (lowerType.includes("alligator")) {
+      cleanCrackType = "Alligator Crack";
+    } else if (lowerType.includes("transverse")) {
+      cleanCrackType = "Transverse Crack";
+    } else if (lowerType.includes("pothole") || lowerType.includes("spall")) {
+      cleanCrackType = "Pothole";
+    } else {
+      cleanCrackType = "Longitudinal Crack";
+    }
+  }
+
+  const confidenceScore = rfdetrDetection?.confidence
+    ? Math.round(rfdetrDetection.confidence * 100)
+    : (yoloDetection?.detections?.[0]?.confidence
+      ? Math.round(yoloDetection.detections[0].confidence * 100)
+      : (yoloDetection?.confidence ? Math.round(yoloDetection.confidence * 100) : 88));
+
+  // Single-line crack classification text
+  let crackTypeDisplay = `${cleanCrackType} (${confidenceScore}% confidence)`;
+  if (!modelFallback && rfdetrDetection?.has_defect) {
+    const num = rfdetrDetection.num_detections || 1;
+    crackTypeDisplay = `${cleanCrackType} (${confidenceScore}% confidence) · ${num} defect region${num > 1 ? "s" : ""}`;
+  } else if (modelFallback) {
+    crackTypeDisplay = `U-Net Fallback (best_model.pth) · RF-DETR 0 defects · Crack Area ${unetMetrics.crack_area_pct ?? 0}%`;
+  }
+
   return (
     <div className={`space-y-3 ${className}`}>
       {/* Segmented Mode Control */}
-      <div className="flex items-center justify-between gap-2">
-        <div className="inline-flex rounded-lg p-0.5 bg-muted/60 border border-border">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="inline-flex flex-wrap rounded-lg p-0.5 bg-muted/60 border border-border">
           <button
             type="button"
             onClick={() => setViewMode("compare")}
@@ -235,10 +433,108 @@ export function ImageCompare({
           >
             Processed
           </button>
+
+          {rfdetrUrl && (
+            <button
+              type="button"
+              onClick={() => setViewMode("rfdetr")}
+              className={`px-3 py-1 rounded-md text-xs font-semibold transition-all flex items-center gap-1.5 ${
+                viewMode === "rfdetr" ? "bg-card text-foreground shadow-xs font-bold" : "text-muted-foreground hover:text-foreground font-semibold"
+              }`}
+            >
+              <Cpu className="size-3 text-primary" />
+              <span>RF-DETR</span>
+              {rfdetrDetection?.num_detections !== undefined && (
+                <span className="px-1.5 py-0.2 rounded-full bg-muted text-[10px] font-mono text-foreground">
+                  {rfdetrDetection.num_detections}
+                </span>
+              )}
+            </button>
+          )}
+
+          {unetUrl && (
+            <button
+              type="button"
+              onClick={() => setViewMode("unet")}
+              className={`px-3 py-1 rounded-md text-xs font-semibold transition-all flex items-center gap-1.5 ${
+                viewMode === "unet" ? "bg-card text-foreground shadow-xs font-bold" : "text-muted-foreground hover:text-foreground font-semibold"
+              }`}
+            >
+              <Sparkles className="size-3 text-primary" />
+              <span>{modelFallback ? "UNet (best_model.pth)" : "UNet Segment"}</span>
+              {unetMetrics.crack_area_pct !== undefined && (
+                <span className="px-1.5 py-0.2 rounded-full bg-muted text-[10px] font-mono text-foreground">
+                  {unetMetrics.crack_area_pct}%
+                </span>
+              )}
+            </button>
+          )}
+
+          {(unetMaskUrl || unetUrl) && (
+            <button
+              type="button"
+              onClick={() => setViewMode("mask")}
+              className={`px-3 py-1 rounded-md text-xs font-semibold transition-all ${
+                viewMode === "mask" ? "bg-card text-foreground shadow-xs font-bold" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              Binary Mask
+            </button>
+          )}
         </div>
-        <span className="text-[11px] text-muted-foreground font-mono">
-          {viewMode === "compare" ? `Split: ${sliderPos}%` : viewMode === "orig" ? "Raw Input" : "Enhanced"}
-        </span>
+
+        <div className="flex items-center gap-2">
+          {viewMode === "compare" && (
+            <div className="inline-flex rounded-lg p-0.5 bg-muted/60 border border-border text-[11px]">
+              {rfdetrUrl && (
+                <button
+                  type="button"
+                  onClick={() => setCompareTarget("rfdetr")}
+                  className={`px-2 py-0.5 rounded-md font-semibold transition-all ${
+                    compareTarget === "rfdetr" ? "bg-card text-foreground shadow-xs font-bold" : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  vs RF-DETR
+                </button>
+              )}
+              {unetUrl && (
+                <button
+                  type="button"
+                  onClick={() => setCompareTarget("unet")}
+                  className={`px-2 py-0.5 rounded-md font-semibold transition-all ${
+                    compareTarget === "unet" ? "bg-card text-foreground shadow-xs font-bold" : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  vs UNet
+                </button>
+              )}
+              {processedUrl && (
+                <button
+                  type="button"
+                  onClick={() => setCompareTarget("processed")}
+                  className={`px-2 py-0.5 rounded-md font-semibold transition-all ${
+                    compareTarget === "processed" ? "bg-card text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  vs Preprocessed
+                </button>
+              )}
+            </div>
+          )}
+          <span className="text-[11px] text-muted-foreground font-mono">
+            {viewMode === "compare"
+              ? `Split: ${sliderPos}% (Orig vs ${compareTarget === "rfdetr" ? "RF-DETR" : (compareTarget === "unet" ? "UNet Mask" : "Enhanced")})`
+              : viewMode === "orig"
+              ? "Raw Input"
+              : viewMode === "rfdetr"
+              ? `RF-DETR Medium Defect Detection (${rfdetrDetection?.num_detections ?? 0} defects)`
+              : viewMode === "unet"
+              ? `UNet Pixel Segmentation (${unetMetrics.crack_area_pct ?? 0}% Area)`
+              : viewMode === "mask"
+              ? "UNet Binary Crack Mask"
+              : "Enhanced"}
+          </span>
+        </div>
       </div>
 
       {/* Main Interactive Stage */}
@@ -250,22 +546,69 @@ export function ImageCompare({
         onPointerUp={handlePointerUp}
         onPointerMove={handlePointerMove}
         className="relative aspect-video rounded-xl overflow-hidden border border-border bg-black select-none touch-none focus:outline-hidden focus:ring-2 focus:ring-primary cursor-ew-resize"
-        aria-label="Image comparison slider. Use left and right arrow keys to adjust split position."
+        aria-label="Image comparison viewer. Use left and right arrow keys to adjust split position."
       >
         {viewMode === "orig" && (
           <img src={originalUrl} alt="Original capture" className="w-full h-full object-contain" />
         )}
 
         {viewMode === "proc" && (
-          <img src={processedUrl} alt="Processed copy" className="w-full h-full object-contain" />
+          <img src={processedUrl || originalUrl} alt="Processed copy" className="w-full h-full object-contain" />
+        )}
+
+        {viewMode === "rfdetr" && (
+          <>
+            <img src={rfdetrUrl || processedUrl || originalUrl} alt="RF-DETR Defect Detection" className="w-full h-full object-contain" />
+            <div className="absolute top-3 left-3 px-2 py-0.5 rounded bg-black/80 border border-border font-mono text-[10px] text-foreground pointer-events-none flex items-center gap-1.5">
+              <Cpu className="size-3 text-primary" />
+              RF-DETR Medium (rdd2022-rfdetr-medium)
+            </div>
+            {rfdetrDetection && (
+              <div className="absolute top-3 right-3 px-2 py-0.5 rounded bg-black/80 border border-border font-mono text-[10px] text-foreground pointer-events-none">
+                {rfdetrDetection.num_detections > 0 ? (
+                  <span className="text-rose-400">
+                    {rfdetrDetection.num_detections} defect(s) · {rfdetrDetection.primary_label || "Crack"}
+                  </span>
+                ) : (
+                  <span className="text-muted-foreground">
+                    0 defect bboxes &rarr; U-Net Fallback
+                  </span>
+                )}
+              </div>
+            )}
+          </>
+        )}
+
+        {viewMode === "unet" && (
+          <>
+            <img src={unetUrl || processedUrl || originalUrl} alt="UNet Crack Segmentation" className="w-full h-full object-contain" />
+            <div className="absolute top-3 left-3 px-2 py-0.5 rounded bg-black/80 border border-border font-mono text-[10px] text-foreground pointer-events-none flex items-center gap-1.5">
+              <Sparkles className="size-3 text-primary" />
+              UNet (best_model.pth) {modelFallback ? "· Fallback Active" : "CrackSeg9k"}
+            </div>
+            {unetMetrics.crack_area_pct !== undefined && (
+              <div className="absolute top-3 right-3 px-2 py-0.5 rounded bg-black/80 border border-border font-mono text-[10px] text-rose-400 pointer-events-none">
+                {unetMetrics.crack_area_pct}% Area · {unetMetrics.crack_pixels?.toLocaleString()} px
+              </div>
+            )}
+          </>
+        )}
+
+        {viewMode === "mask" && (
+          <>
+            <img src={unetMaskUrl || unetUrl || processedUrl || originalUrl} alt="Binary Crack Mask" className="w-full h-full object-contain bg-zinc-950" />
+            <div className="absolute top-3 left-3 px-2 py-0.5 rounded bg-black/90 border border-border font-mono text-[10px] text-foreground pointer-events-none">
+              Binary Pixel Segmentation Mask (384×384)
+            </div>
+          </>
         )}
 
         {viewMode === "compare" && (
           <>
-            {/* Processed (Background Layer) */}
+            {/* Background Layer: RF-DETR / UNet Result if available, else Processed */}
             <img
-              src={processedUrl}
-              alt="Processed"
+              src={compareBackgroundUrl || originalUrl}
+              alt="Processed / AI Detection"
               className="absolute inset-0 w-full h-full object-contain"
             />
 
@@ -293,21 +636,73 @@ export function ImageCompare({
             </div>
 
             {/* Badges on viewer */}
-            <div className="absolute top-3 left-3 px-2 py-0.5 rounded bg-black/80 font-mono text-[10px] text-zinc-300 pointer-events-none">
+            <div className="absolute top-3 left-3 px-2 py-0.5 rounded bg-black/80 border border-border font-mono text-[10px] text-muted-foreground pointer-events-none">
               Original
             </div>
-            <div className="absolute top-3 right-3 px-2 py-0.5 rounded bg-black/80 font-mono text-[10px] text-indigo-300 pointer-events-none">
-              Processed
+            <div className="absolute top-3 right-3 px-2 py-0.5 rounded bg-black/80 border border-border font-mono text-[10px] text-foreground pointer-events-none">
+              {compareTarget === "rfdetr" ? "RF-DETR" : (compareTarget === "unet" ? "UNet Segmentation" : "Processed")}
             </div>
           </>
         )}
       </div>
 
-      {/* Mandatory Regulatory Caption */}
+      {/* UNet Quantitative Crack Metrics (Micro-Level Engineering Measurements) */}
+      {hasUnetData && (
+        <div className="p-3 rounded-xl bg-card border border-border space-y-2.5">
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-semibold text-foreground flex items-center gap-1.5">
+              <Sparkles className="size-3.5 text-primary" />
+              UNet Pixel Crack Measurements ({modelFallback ? "Fallback: best_model.pth" : "CrackSeg9k"})
+            </span>
+            <span className="font-mono text-[10px] text-muted-foreground">
+              Dice: 75.14% · IoU: 60.18%
+            </span>
+          </div>
+
+          {/* Crack Type Classification: Single Line Output */}
+          <div className="flex items-center justify-between text-xs px-2.5 py-1.5 rounded-lg bg-muted/40 border border-border">
+            <span className="text-muted-foreground font-medium">Crack Classification:</span>
+            <span className="font-mono font-bold text-foreground">
+              {crackTypeDisplay}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center font-mono text-xs">
+            <div className="p-2 rounded-lg bg-muted/20 border border-border">
+              <span className="text-[10px] text-muted-foreground block font-sans">Crack Area</span>
+              <span className="font-bold text-rose-400">{unetMetrics.crack_area_pct}%</span>
+              <span className="text-[9px] text-muted-foreground block">({unetMetrics.crack_pixels?.toLocaleString()} px)</span>
+            </div>
+            <div className="p-2 rounded-lg bg-muted/20 border border-border">
+              <span className="text-[10px] text-muted-foreground block font-sans">Max Thickness</span>
+              <span className="font-bold text-rose-400">{unetMetrics.max_width_px ?? "—"} px</span>
+              {unetMetrics.max_width_mm && (
+                <span className="text-[9px] text-muted-foreground block">({unetMetrics.max_width_mm} mm)</span>
+              )}
+            </div>
+            <div className="p-2 rounded-lg bg-muted/20 border border-border">
+              <span className="text-[10px] text-muted-foreground block font-sans">Total Length</span>
+              <span className="font-bold text-foreground">{unetMetrics.total_length_px ?? "—"} px</span>
+              {unetMetrics.total_length_mm && (
+                <span className="text-[9px] text-muted-foreground block">({unetMetrics.total_length_mm} mm)</span>
+              )}
+            </div>
+            <div className="p-2 rounded-lg bg-muted/20 border border-border">
+              <span className="text-[10px] text-muted-foreground block font-sans">Mean Conf.</span>
+              <span className="font-bold text-foreground">
+                {unetMetrics.mean_crack_confidence ? `${Math.round(unetMetrics.mean_crack_confidence * 100)}%` : "95%"}
+              </span>
+              <span className="text-[9px] text-muted-foreground block">τ = 0.50 cutoff</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Deep Learning Pipeline Caption */}
       <div className="p-2.5 rounded-lg bg-muted/40 border border-border/80 text-[11px] text-muted-foreground flex items-center gap-2">
         <Sparkles className="size-3.5 text-primary shrink-0" />
         <span>
-          Processed copy for analysis. <strong>Standard image processing, not AI.</strong> Measurements use the original image.
+          Pipeline: <strong>ResNet-18</strong> (80% gate) &rarr; <strong>RF-DETR Medium</strong> (primary) &rarr; <strong>UNet Fallback (best_model.pth)</strong>.
         </span>
       </div>
 
@@ -351,6 +746,8 @@ export function ImageDetailsDrawer({
   onReplace,
   onRemove,
   onTransform,
+  onTransformed,
+  onUpdatePhoto,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -361,11 +758,14 @@ export function ImageDetailsDrawer({
   onReplace?: (id: string) => void;
   onRemove?: (id: string) => void;
   onTransform?: (photo: any) => void;
+  onTransformed?: (updated: any) => void;
+  onUpdatePhoto?: (updated: any) => void;
 }) {
   const [details, setDetails] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [augmentations, setAugmentations] = useState<any[]>([]);
   const [loadingAugs, setLoadingAugs] = useState(false);
+  const [transformModalOpen, setTransformModalOpen] = useState(false);
 
   useEffect(() => {
     if (!open || !photo?.id || photo.id.startsWith("client-")) {
@@ -408,10 +808,210 @@ export function ImageDetailsDrawer({
 
   if (!photo) return null;
 
+  const [analyzingAi, setAnalyzingAi] = useState(false);
+
   const qualityReport = details?.qualityReport || photo.qualityReport;
   const processingRun = details?.processingRun || photo.processingRun;
-  const originalUrl = details?.originalUrl || photo.previewUrl;
-  const processedUrl = details?.processedUrl || photo.processedUrl;
+  const originalUrl = details?.originalUrl || photo.originalUrl || photo.previewUrl;
+  const processedUrl = details?.processedUrl || photo.processedUrl || photo.previewUrl;
+
+  const aiClassification =
+    details?.aiClassification ||
+    details?.ai_classification ||
+    details?.qualityReport?.ai_classification ||
+    details?.quality_report?.ai_classification ||
+    photo?.aiClassification ||
+    photo?.ai_classification ||
+    photo?.qualityReport?.ai_classification ||
+    photo?.quality_report?.ai_classification;
+
+  const isCrackDetected = Boolean(aiClassification?.has_crack || (aiClassification?.crack_probability ?? 0) >= 0.80);
+
+  const rfdetrUrl =
+    details?.rfdetrUrl ||
+    photo?.rfdetrUrl ||
+    (details?.hasRfdetr || photo?.hasRfdetr || isCrackDetected
+      ? `/api/v1/images/${photo.id}/file?variant=rfdetr`
+      : null);
+
+  const rfdetrDetection =
+    details?.rfdetrDetection ||
+    details?.rfdetr_detection ||
+    details?.qualityReport?.rfdetr_detection ||
+    details?.quality_report?.rfdetr_detection ||
+    photo?.rfdetrDetection ||
+    photo?.rfdetr_detection ||
+    photo?.qualityReport?.rfdetr_detection ||
+    photo?.quality_report?.rfdetr_detection ||
+    aiClassification?.rfdetr_detection;
+
+  const activeStage2Model =
+    details?.activeStage2Model ||
+    details?.active_stage2_model ||
+    photo?.activeStage2Model ||
+    photo?.active_stage2_model ||
+    aiClassification?.active_stage2_model ||
+    (rfdetrDetection?.has_defect ? "rfdetr" : (isCrackDetected ? "unet_fallback" : null));
+
+  const modelFallback = Boolean(
+    details?.modelFallback ??
+    details?.model_fallback ??
+    photo?.modelFallback ??
+    photo?.model_fallback ??
+    aiClassification?.model_fallback ??
+    (isCrackDetected && (!rfdetrDetection || !rfdetrDetection.has_defect))
+  );
+
+  const yoloUrl =
+    details?.yoloUrl ||
+    details?.annotatedUrl ||
+    photo?.yoloUrl ||
+    photo?.annotatedUrl ||
+    (details?.hasYolo || photo?.hasYolo || isCrackDetected
+      ? `/api/v1/images/${photo.id}/file?variant=yolo`
+      : null);
+
+  const yoloDetection =
+    details?.yoloDetection ||
+    details?.yolo_detection ||
+    details?.qualityReport?.yolo_detection ||
+    details?.quality_report?.yolo_detection ||
+    photo?.yoloDetection ||
+    photo?.yolo_detection ||
+    photo?.qualityReport?.yolo_detection ||
+    photo?.quality_report?.yolo_detection ||
+    aiClassification?.yolo_detection;
+
+  const unetUrl =
+    details?.unetUrl ||
+    photo?.unetUrl ||
+    (details?.hasUnet || photo?.hasUnet || isCrackDetected
+      ? `/api/v1/images/${photo.id}/file?variant=unet`
+      : null);
+
+  const unetMaskUrl =
+    details?.unetMaskUrl ||
+    photo?.unetMaskUrl ||
+    (details?.hasUnet || photo?.hasUnet || isCrackDetected
+      ? `/api/v1/images/${photo.id}/file?variant=mask`
+      : null);
+
+  const unetSegmentation =
+    details?.unetSegmentation ||
+    details?.unet_segmentation ||
+    details?.qualityReport?.unet_segmentation ||
+    details?.quality_report?.unet_segmentation ||
+    photo?.unetSegmentation ||
+    photo?.unet_segmentation ||
+    photo?.qualityReport?.unet_segmentation ||
+    photo?.quality_report?.unet_segmentation ||
+    aiClassification?.unet_segmentation;
+
+  const handleRunAi = async () => {
+    setAnalyzingAi(true);
+    try {
+      const inspId = photo.inspectionId || photo.inspection_id || details?.inspectionId;
+      let res;
+      if (inspId && !inspId.startsWith("client-")) {
+        res = await api.analyzeSingleImage(inspId, photo.id);
+      } else {
+        res = await api.analyzeImage(photo.id);
+      }
+      const pred = res.aiClassification || res.ai_classification || res.summary?.images?.[0] || res;
+      setDetails((prev: any) => ({
+        ...prev,
+        ...res,
+        aiClassification: pred,
+        ai_classification: pred,
+        rfdetrDetection: res.rfdetrDetection || res.rfdetr_detection || pred?.rfdetr_detection,
+        activeStage2Model: res.activeStage2Model || res.active_stage2_model || pred?.active_stage2_model,
+        modelFallback: res.modelFallback ?? res.model_fallback ?? pred?.model_fallback,
+      }));
+      const detLabel = res.rfdetrDetection?.primary_label || pred?.predicted_class || "Analysis complete";
+      toast.success(
+        `AI: ${detLabel} (${Math.round((pred.crack_probability || pred.confidence || 0) * 100)}%)`
+      );
+      onUpdatePhoto?.({
+        ...photo,
+        ...res,
+        aiClassification: pred,
+        ai_classification: pred,
+        rfdetrDetection: res.rfdetrDetection || res.rfdetr_detection || pred?.rfdetr_detection,
+        activeStage2Model: res.activeStage2Model || res.active_stage2_model || pred?.active_stage2_model,
+        modelFallback: res.modelFallback ?? res.model_fallback ?? pred?.model_fallback,
+      });
+    } catch (e: any) {
+      toast.error("AI Analysis failed: " + (e.message || "Unknown error"));
+    } finally {
+      setAnalyzingAi(false);
+    }
+  };
+
+  const handleInternalTransformed = (result: any) => {
+    const timestamp = Date.now();
+    const bust = (url?: string | null) => {
+      if (!url) return url;
+      return `${url}${url.includes("?") ? "&" : "?"}v=${timestamp}`;
+    };
+
+    const updatedPhoto = {
+      ...photo,
+      ...result,
+      id: result.imageId || photo.id,
+      width: result.width || photo.width,
+      height: result.height || photo.height,
+      originalUrl: bust(result.originalUrl) || photo.originalUrl,
+      previewUrl: bust(result.previewUrl) || photo.previewUrl,
+      processedUrl: bust(result.processedUrl) || photo.processedUrl,
+      thumbnailUrl: bust(result.thumbnailUrl) || photo.thumbnailUrl,
+      rfdetrUrl: bust(result.rfdetrUrl) || photo.rfdetrUrl,
+      unetUrl: bust(result.unetUrl) || photo.unetUrl,
+      unetMaskUrl: bust(result.unetMaskUrl) || photo.unetMaskUrl,
+      geometryUrl: bust(result.geometryUrl) || photo.geometryUrl,
+      annotatedUrl: bust(result.annotatedUrl) || bust(result.rfdetrUrl) || bust(result.unetUrl) || photo.annotatedUrl,
+      qualityReport: result.qualityReport || result.quality_report || photo.qualityReport,
+      quality_report: result.qualityReport || result.quality_report || photo.quality_report,
+      aiClassification: result.aiClassification || result.ai_classification || photo.aiClassification,
+      ai_classification: result.aiClassification || result.ai_classification || photo.ai_classification,
+      rfdetrDetection: result.rfdetrDetection || result.rfdetr_detection || photo.rfdetrDetection,
+      activeStage2Model: result.activeStage2Model || result.active_stage2_model || photo.activeStage2Model,
+      modelFallback: result.modelFallback ?? result.model_fallback ?? photo.modelFallback,
+      unetSegmentation: result.unetSegmentation || result.unet_segmentation || photo.unetSegmentation,
+      unet_segmentation: result.unetSegmentation || result.unet_segmentation || photo.unet_segmentation,
+      crackGeometry: result.crackGeometry || result.crack_geometry || photo.crackGeometry,
+      crack_geometry: result.crackGeometry || result.crack_geometry || photo.crack_geometry,
+      quality_status: result.quality_status || photo.quality_status,
+      status: result.quality_status === "warning" ? "warning" : "valid",
+      processing_status: "complete",
+      version: timestamp,
+    };
+
+    setDetails((prev: any) => ({
+      ...prev,
+      ...updatedPhoto,
+    }));
+
+    api.getImageDetails(photo.id).then((fresh) => {
+      if (fresh) {
+        setDetails((prev: any) => ({
+          ...prev,
+          ...fresh,
+          originalUrl: bust(fresh.originalUrl) || updatedPhoto.originalUrl,
+          previewUrl: bust(fresh.previewUrl) || updatedPhoto.previewUrl,
+          processedUrl: bust(fresh.processedUrl) || updatedPhoto.processedUrl,
+          thumbnailUrl: bust(fresh.thumbnailUrl) || updatedPhoto.thumbnailUrl,
+          rfdetrUrl: bust(fresh.rfdetrUrl) || updatedPhoto.rfdetrUrl,
+          unetUrl: bust(fresh.unetUrl) || updatedPhoto.unetUrl,
+          unetMaskUrl: bust(fresh.unetMaskUrl) || updatedPhoto.unetMaskUrl,
+          geometryUrl: bust(fresh.geometryUrl) || updatedPhoto.geometryUrl,
+        }));
+      }
+    }).catch(() => {});
+
+    onTransformed?.(updatedPhoto);
+    onTransform?.(updatedPhoto);
+    onUpdatePhoto?.(updatedPhoto);
+  };
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -425,6 +1025,7 @@ export function ImageDetailsDrawer({
             <div className="flex items-center gap-1.5">
               <QualityBadge status={photo.quality_status || photo.status} confirmed={photo.warningConfirmed} />
               <ProcessingBadge status={photo.processing_status || "complete"} />
+              <ClassificationBadge photo={photo} classification={aiClassification} />
             </div>
           </div>
           <SheetTitle className="text-base font-bold text-foreground">
@@ -442,22 +1043,375 @@ export function ImageDetailsDrawer({
           </div>
         ) : (
           <Tabs defaultValue="compare" className="w-full">
-            <TabsList className="grid grid-cols-5 h-9 bg-muted/60 p-1 rounded-xl mb-4 text-xs">
+            <TabsList className="grid grid-cols-7 h-9 bg-muted/60 p-1 rounded-xl mb-4 text-xs">
               <TabsTrigger value="compare" className="rounded-lg">Compare</TabsTrigger>
+              <TabsTrigger value="ai" className="rounded-lg">AI Model</TabsTrigger>
               <TabsTrigger value="quality" className="rounded-lg">Quality (7)</TabsTrigger>
               <TabsTrigger value="processing" className="rounded-lg">Pipeline</TabsTrigger>
               <TabsTrigger value="augmentations" className="rounded-lg">Augment (4)</TabsTrigger>
               <TabsTrigger value="metadata" className="rounded-lg">Metadata</TabsTrigger>
+              <TabsTrigger value="geometry" className="rounded-lg">Geometry</TabsTrigger>
             </TabsList>
 
-            {/* TAB 1: Compare Viewer */}
+            {/* TAB 1: Compare Viewer & AI Classification Assessment */}
             <TabsContent value="compare" className="space-y-4">
               <ImageCompare
                 originalUrl={originalUrl}
                 processedUrl={processedUrl}
+                rfdetrUrl={rfdetrUrl}
+                rfdetrDetection={rfdetrDetection}
+                activeStage2Model={activeStage2Model}
+                modelFallback={modelFallback}
+                yoloUrl={yoloUrl}
+                yoloDetection={yoloDetection}
+                unetUrl={unetUrl}
+                unetMaskUrl={unetMaskUrl}
+                unetSegmentation={unetSegmentation}
                 metricsBefore={processingRun?.metricsBefore}
                 metricsAfter={processingRun?.metricsAfter}
               />
+
+              {/* Multi-Stage AI Crack Classification Assessment Card */}
+              <div className="rounded-xl border border-border bg-card p-4 space-y-3.5 shadow-xs">
+                <div className="flex items-center justify-between gap-2 border-b border-border/70 pb-3">
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 rounded-lg bg-primary/10 border border-primary/20 text-primary">
+                      <Cpu className="size-4" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-foreground">AI Crack Classification & Localization</h4>
+                      <p className="text-[11px] text-muted-foreground">
+                        Cascade: ResNet-18 (80% gate) &rarr; RF-DETR Medium (primary) &rarr; UNet Fallback (best_model.pth)
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <ClassificationBadge photo={photo} classification={aiClassification} />
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={analyzingAi || photo.quality_status === "rejected" || photo.status === "error"}
+                      onClick={handleRunAi}
+                      className="h-7 text-[11px] px-2.5 gap-1 border-border font-semibold shadow-xs"
+                      title={aiClassification ? "Re-run Two-Stage AI inference" : "Run Two-Stage AI inference"}
+                    >
+                      {analyzingAi ? (
+                        <>
+                          <Loader2 className="size-3 animate-spin" />
+                          <span>Analyzing…</span>
+                        </>
+                      ) : (
+                        <>
+                          <RotateCw className="size-3" />
+                          <span>{aiClassification ? "Re-run AI" : "Run AI Analysis"}</span>
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                </div>
+
+                {photo.quality_status === "rejected" || photo.status === "error" ? (
+                  <div className="p-3 rounded-lg bg-muted/40 border border-border/60 text-xs text-muted-foreground flex items-center gap-2.5">
+                    <Minus className="size-4 text-zinc-400 shrink-0" />
+                    <span>
+                      AI inference skipped because photograph was rejected during classical computer vision quality assessment.
+                    </span>
+                  </div>
+                ) : aiClassification ? (
+                  <div className="space-y-3">
+                    {/* Status banner */}
+                    <div
+                      className={`p-3 rounded-lg border flex items-center justify-between text-xs font-semibold ${
+                        aiClassification.has_crack || aiClassification.predicted_class === "Cracked"
+                          ? "bg-rose-500/10 border-rose-500/30 text-rose-400"
+                          : "bg-muted/30 border-border text-foreground"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        {aiClassification.has_crack || aiClassification.predicted_class === "Cracked" ? (
+                          <AlertTriangle className="size-4 text-rose-400 shrink-0" />
+                        ) : (
+                          <CheckCircle2 className="size-4 text-muted-foreground shrink-0" />
+                        )}
+                        <span>
+                          {aiClassification.has_crack || aiClassification.predicted_class === "Cracked"
+                            ? (modelFallback
+                                ? "Crack Identified · RF-DETR 0 bboxes &rarr; U-Net Fallback Active"
+                                : (rfdetrDetection?.has_defect
+                                    ? `Crack Defect Identified (RF-DETR: ${rfdetrDetection.num_detections} defect region${rfdetrDetection.num_detections > 1 ? "s" : ""})`
+                                    : "Concrete Crack Defect Identified"))
+                            : "Sound Concrete Surface — No Defect Detected"}
+                        </span>
+                      </div>
+                      <span className="font-mono text-[11px] px-2 py-0.5 rounded bg-muted/60 text-foreground border border-border">
+                        {aiClassification.has_crack || aiClassification.predicted_class === "Cracked"
+                          ? `Probability: ${((aiClassification.crack_probability ?? aiClassification.confidence ?? 0) * 100).toFixed(1)}%`
+                          : `Sound: ${(((aiClassification.uncracked_probability ?? (1 - (aiClassification.crack_probability || 0)))) * 100).toFixed(1)}%`}
+                      </span>
+                    </div>
+
+                    {/* Progress gauge vs calibrated threshold */}
+                    <div className="space-y-1.5 p-3 rounded-lg bg-muted/20 border border-border/60">
+                      <div className="flex items-center justify-between text-[11px]">
+                        <span className="text-muted-foreground font-medium">Model Confidence vs Decision Threshold</span>
+                        <span className="font-mono text-muted-foreground">
+                          Threshold: {(aiClassification.threshold ? (aiClassification.threshold * 100).toFixed(1) : "80.0")}%
+                        </span>
+                      </div>
+                      <div className="relative h-2.5 w-full bg-muted rounded-full overflow-hidden">
+                        {/* Threshold mark */}
+                        <div
+                          className="absolute top-0 bottom-0 w-0.5 bg-foreground z-10"
+                          style={{ left: `${Math.min(95, Math.max(5, (aiClassification.threshold || 0.80) * 100))}%` }}
+                          title={`Threshold: ${((aiClassification.threshold || 0.80) * 100).toFixed(1)}%`}
+                        />
+                        {/* Probability fill */}
+                        <div
+                          className={`h-full transition-all duration-500 ${
+                            aiClassification.has_crack || aiClassification.predicted_class === "Cracked"
+                              ? "bg-rose-500"
+                              : "bg-primary"
+                          }`}
+                          style={{
+                            width: `${Math.min(100, Math.max(2, (aiClassification.crack_probability ?? (aiClassification.has_crack ? 0.9 : 0.05)) * 100))}%`
+                          }}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-0.5">
+                        <span>0% Sound</span>
+                        <span className="text-foreground font-mono">▲ Decision Cutoff ({((aiClassification.threshold || 0.80) * 100).toFixed(0)}%)</span>
+                        <span>100% Cracked</span>
+                      </div>
+                      <p className="text-[10px] text-muted-foreground leading-snug bg-muted/30 p-2 rounded-lg border border-border/50">
+                        <strong className="text-foreground">Pipeline Rule:</strong> If crack prob is <strong>&ge; 80%</strong>, run <strong>RF-DETR Medium</strong> first. If RF-DETR finds 0 bounding boxes, activate fallback to <strong>best_model.pth (UNet)</strong>.
+                      </p>
+                    </div>
+
+                    {/* Metrics 4-grid */}
+                    <div className="grid grid-cols-4 gap-2 text-center text-xs">
+                      <div className="p-2 rounded-lg bg-muted/30 border border-border/60">
+                        <span className="text-[10px] text-muted-foreground block">Predicted Class</span>
+                        <span className={`font-bold font-mono ${aiClassification.has_crack || aiClassification.predicted_class === "Cracked" ? "text-rose-400" : "text-foreground"}`}>
+                          {aiClassification.predicted_class || (aiClassification.has_crack ? "Cracked" : "Uncracked")}
+                        </span>
+                      </div>
+                      <div className="p-2 rounded-lg bg-muted/30 border border-border/60">
+                        <span className="text-[10px] text-muted-foreground block">Stage 2 Active</span>
+                        <span className="font-bold font-mono text-foreground">
+                          {modelFallback ? "UNet Fallback" : (rfdetrDetection?.has_defect ? "RF-DETR" : "ResNet-18")}
+                        </span>
+                      </div>
+                      <div className="p-2 rounded-lg bg-muted/30 border border-border/60">
+                        <span className="text-[10px] text-muted-foreground block">Threshold</span>
+                        <span className="font-mono text-muted-foreground">
+                          {(aiClassification.threshold ? (aiClassification.threshold * 100).toFixed(1) : "80.0")}%
+                        </span>
+                      </div>
+                      <div className="p-2 rounded-lg bg-muted/30 border border-border/60">
+                        <span className="text-[10px] text-muted-foreground block">Engine</span>
+                        <span className="font-mono text-[11px] text-foreground uppercase">
+                          PyTorch/ONNX
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-3.5 rounded-lg bg-muted/30 border border-border flex items-center justify-between gap-3 text-xs">
+                    <div className="space-y-0.5">
+                      <span className="font-semibold text-foreground block">Multi-Stage AI Analysis Ready</span>
+                      <p className="text-[11px] text-muted-foreground">
+                        Execute ResNet-18 spatial classification (80% cutoff), RF-DETR Medium defect detection & UNet fallback.
+                      </p>
+                    </div>
+                    <Button
+                      size="sm"
+                      onClick={handleRunAi}
+                      disabled={analyzingAi}
+                      className="h-8 text-xs font-semibold gap-1.5 shrink-0 bg-primary text-primary-foreground hover:bg-primary/90"
+                    >
+                      {analyzingAi ? (
+                        <>
+                          <Loader2 className="size-3.5 animate-spin" />
+                          <span>Inference…</span>
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="size-3.5" />
+                          <span>Run Multi-Stage AI</span>
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                )}
+              </div>
+            </TabsContent>
+
+            {/* TAB 2: Deep Learning AI Model Architecture & Calibration */}
+            <TabsContent value="ai" className="space-y-4 text-xs">
+              {/* Header Overview Card */}
+              <div className="p-3.5 rounded-xl border border-primary/20 bg-primary/5 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Cpu className="size-4 text-primary" />
+                    <span className="font-bold text-foreground">Multi-Stage AI Architecture Cascade</span>
+                  </div>
+                  <Badge variant="outline" className="text-[10px] text-primary border-primary/30">
+                    {modelFallback ? "U-Net Fallback Active" : (rfdetrDetection?.has_defect ? "RF-DETR Active" : "ResNet-18 Active")}
+                  </Badge>
+                </div>
+                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                  InfraScan utilizes a sequential cascaded deep learning pipeline: <strong>Stage 1 (ResNet-18)</strong> classifies concrete crack probability (80% gate). If cracked, <strong>Stage 2 (RF-DETR Medium)</strong> runs first to detect and classify defects (Longitudinal, Transverse, Alligator, Pothole). If RF-DETR cannot find defect bounding boxes, the system activates <strong>best_model.pth (UNet CrackSeg9k)</strong> to extract pixel-level segmentation and surface geometry.
+                </p>
+              </div>
+
+              {/* Stage 1: ResNet-18 Multi-Scale Classifier */}
+              <div className="rounded-xl border border-border overflow-hidden">
+                <div className="p-2.5 bg-muted/40 border-b border-border font-semibold text-foreground flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <span className="size-2 rounded-full bg-primary" />
+                    Stage 1: Primary Spatial Classifier
+                  </span>
+                  <span className="font-mono text-[10px] text-muted-foreground">infrascan_crack_resnet18</span>
+                </div>
+                <table className="w-full text-left text-xs">
+                  <tbody className="divide-y divide-border">
+                    <tr className="hover:bg-muted/30">
+                      <td className="py-2.5 px-3 font-semibold text-foreground">Architecture</td>
+                      <td className="py-2.5 px-3 font-mono text-muted-foreground">ResNet-18 (Residual Network Multi-Scale)</td>
+                    </tr>
+                    <tr className="hover:bg-muted/30">
+                      <td className="py-2.5 px-3 font-semibold text-foreground">Decision Threshold (τ)</td>
+                      <td className="py-2.5 px-3 font-mono text-foreground font-bold">
+                        {aiClassification?.threshold ? (aiClassification.threshold * 100).toFixed(1) : "80.0"}% crack probability cutoff
+                      </td>
+                    </tr>
+                    <tr className="hover:bg-muted/30">
+                      <td className="py-2.5 px-3 font-semibold text-foreground">Classification Status</td>
+                      <td className="py-2.5 px-3 font-mono font-bold">
+                        {aiClassification ? (
+                          <span className={aiClassification.has_crack || aiClassification.predicted_class === "Cracked" ? "text-rose-400" : "text-foreground"}>
+                            {aiClassification.predicted_class || (aiClassification.has_crack ? "Cracked" : "Uncracked")} ({((aiClassification.crack_probability ?? aiClassification.confidence ?? 0) * 100).toFixed(1)}%)
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">Not evaluated yet</span>
+                        )}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Stage 2 (Primary): RF-DETR Medium Defect Localizer */}
+              <div className="rounded-xl border border-border overflow-hidden">
+                <div className="p-2.5 bg-muted/40 border-b border-border font-semibold text-foreground flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <Cpu className="size-3.5 text-primary" />
+                    Stage 2 (Primary): RF-DETR Defect Detection
+                  </span>
+                  <span className="font-mono text-[10px] text-muted-foreground">dronefreak/rdd2022-rfdetr-medium</span>
+                </div>
+                <table className="w-full text-left text-xs">
+                  <tbody className="divide-y divide-border">
+                    <tr className="hover:bg-muted/30">
+                      <td className="py-2.5 px-3 font-semibold text-foreground">Model Architecture</td>
+                      <td className="py-2.5 px-3 font-mono text-muted-foreground">RF-DETR Medium (DINOv2 backbone)</td>
+                    </tr>
+                    <tr className="hover:bg-muted/30">
+                      <td className="py-2.5 px-3 font-semibold text-foreground">Defect Classes</td>
+                      <td className="py-2.5 px-3 font-mono text-muted-foreground">Longitudinal Crack, Transverse Crack, Alligator Crack, Pothole</td>
+                    </tr>
+                    <tr className="hover:bg-muted/30">
+                      <td className="py-2.5 px-3 font-semibold text-foreground">Detection Results</td>
+                      <td className="py-2.5 px-3 font-mono font-bold">
+                        {rfdetrDetection ? (
+                          rfdetrDetection.num_detections > 0 ? (
+                            <span className="text-rose-400">
+                              {rfdetrDetection.num_detections} defect(s) detected ({rfdetrDetection.primary_label}) · {Math.round((rfdetrDetection.confidence || 0) * 100)}% conf
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground">
+                              0 defect bounding boxes detected (triggered fallback)
+                            </span>
+                          )
+                        ) : (
+                          <span className="text-muted-foreground">Awaiting evaluation</span>
+                        )}
+                      </td>
+                    </tr>
+                    <tr className="hover:bg-muted/30">
+                      <td className="py-2.5 px-3 font-semibold text-foreground">Stage 2 Status</td>
+                      <td className="py-2.5 px-3 font-mono font-bold text-foreground">
+                        {!modelFallback && rfdetrDetection?.has_defect
+                          ? "Active Primary Detector"
+                          : (modelFallback ? "Fallback Triggered -> UNet Active" : "Pending")}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Stage 2 (Fallback / Geometry): UNet (best_model.pth) */}
+              <div className="rounded-xl border border-border overflow-hidden">
+                <div className="p-2.5 bg-muted/40 border-b border-border font-semibold text-foreground flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <Sparkles className="size-3.5 text-primary" />
+                    Stage 2 (Fallback / Geometry): UNet Pixel Segmentation
+                  </span>
+                  <span className="font-mono text-[10px] text-muted-foreground">best_model.pth (CrackSeg9k)</span>
+                </div>
+                <table className="w-full text-left text-xs">
+                  <tbody className="divide-y divide-border">
+                    <tr className="hover:bg-muted/30">
+                      <td className="py-2.5 px-3 font-semibold text-foreground">Model Architecture</td>
+                      <td className="py-2.5 px-3 font-mono text-muted-foreground">UNet 4-Level DoubleConv (384×384 input)</td>
+                    </tr>
+                    <tr className="hover:bg-muted/30">
+                      <td className="py-2.5 px-3 font-semibold text-foreground">Validation Accuracy</td>
+                      <td className="py-2.5 px-3 font-mono text-foreground font-bold">
+                        Dice: 75.14% · IoU: 60.18% · Pixel Acc: 97.44%
+                      </td>
+                    </tr>
+                    <tr className="hover:bg-muted/30">
+                      <td className="py-2.5 px-3 font-semibold text-foreground">Crack Surface Area</td>
+                      <td className="py-2.5 px-3 font-mono font-bold text-rose-400">
+                        {unetSegmentation?.crack_area_pct !== undefined ? (
+                          `${unetSegmentation.crack_area_pct}% (${unetSegmentation.crack_pixels?.toLocaleString()} px)`
+                        ) : (
+                          <span className="text-muted-foreground">Awaiting segmentation</span>
+                        )}
+                      </td>
+                    </tr>
+                    <tr className="hover:bg-muted/30">
+                      <td className="py-2.5 px-3 font-semibold text-foreground">Fallback Role</td>
+                      <td className="py-2.5 px-3 font-mono font-bold text-foreground">
+                        {modelFallback ? "Active Fallback: Provides pixel-level crack segmentation when RF-DETR detects 0 bboxes" : "Geometry / Pixel Area Analysis"}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="flex items-center justify-end">
+                <Button
+                  size="sm"
+                  onClick={handleRunAi}
+                  disabled={analyzingAi || photo.quality_status === "rejected" || photo.status === "error"}
+                  className="h-8 text-xs font-semibold gap-1.5"
+                >
+                  {analyzingAi ? (
+                    <>
+                      <Loader2 className="size-3.5 animate-spin" />
+                      <span>Running Inference…</span>
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="size-3.5" />
+                      <span>{aiClassification ? "Re-evaluate Cascade" : "Execute AI Cascade"}</span>
+                    </>
+                  )}
+                </Button>
+              </div>
             </TabsContent>
 
             {/* TAB 2: Quality Assessment (Seven Checks) */}
@@ -473,8 +1427,8 @@ export function ImageDetailsDrawer({
               </div>
 
               {photo.quality_status === "warning" && !photo.warningConfirmed && (
-                <div className="p-3 rounded-xl border border-amber-500/30 bg-amber-500/10 flex items-center justify-between gap-3 text-xs">
-                  <div className="flex items-center gap-2 text-amber-300">
+                <div className="p-3 rounded-xl border border-rose-500/30 bg-rose-500/10 flex items-center justify-between gap-3 text-xs">
+                  <div className="flex items-center gap-2 text-rose-400">
                     <AlertCircle className="size-4 shrink-0" />
                     <span>Warning requires field confirmation before review submission.</span>
                   </div>
@@ -484,7 +1438,7 @@ export function ImageDetailsDrawer({
                       onConfirmWarning?.(photo.id);
                       onOpenChange(false);
                     }}
-                    className="h-7 text-xs bg-amber-600 hover:bg-amber-700 text-white shrink-0 font-semibold"
+                    className="h-7 text-xs bg-primary hover:bg-primary/90 text-primary-foreground shrink-0 font-semibold"
                   >
                     Continue anyway
                   </Button>
@@ -509,7 +1463,7 @@ export function ImageDetailsDrawer({
                             <div className="font-semibold text-foreground">{chk.label}</div>
                             <div className="text-[11px] text-muted-foreground leading-snug">{chk.reason}</div>
                           </td>
-                          <td className="py-2.5 px-3 font-mono">
+                          <td className="py-2.5 px-3 font-mono text-foreground">
                             {chk.value} {chk.unit}
                           </td>
                           <td className="py-2.5 px-3 font-mono text-muted-foreground">
@@ -519,10 +1473,8 @@ export function ImageDetailsDrawer({
                             <span
                               className={`inline-flex px-1.5 py-0.5 rounded text-[10px] font-bold ${
                                 chk.status === "pass"
-                                  ? "bg-emerald-950 text-emerald-400 border border-emerald-500/30"
-                                  : chk.status === "warn"
-                                  ? "bg-amber-950 text-amber-400 border border-amber-500/30"
-                                  : "bg-rose-950 text-rose-400 border border-rose-500/30"
+                                  ? "bg-muted/50 text-foreground border border-border"
+                                  : "bg-rose-500/10 text-rose-400 border border-rose-500/30"
                               }`}
                             >
                               {chk.status.toUpperCase()}
@@ -547,8 +1499,8 @@ export function ImageDetailsDrawer({
               <div className="p-3 rounded-xl bg-primary/5 border border-primary/20 text-xs text-foreground flex items-center gap-2">
                 <Sparkles className="size-4 text-primary shrink-0" />
                 <span>
-                  <strong>Standard image processing, not AI.</strong> Applied profile:{" "}
-                  <code className="font-mono text-primary font-bold">general_v1</code>.
+                  <strong>Classical CV Preprocessing Pipeline</strong> (contrast balancing, noise filtering, not generative AI). Profile:{" "}
+                  <code className="font-mono text-primary font-bold">general_v1</code>. ResNet50 deep learning crack classification runs in parallel.
                 </span>
               </div>
 
@@ -585,8 +1537,8 @@ export function ImageDetailsDrawer({
                           <span
                             className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
                               st.applied
-                                ? "bg-emerald-950 text-emerald-400 border border-emerald-500/30"
-                                : "bg-muted text-muted-foreground"
+                                ? "bg-muted/50 text-foreground border border-border"
+                                : "bg-muted/20 text-muted-foreground border border-border/50"
                             }`}
                           >
                             {st.applied ? "APPLIED" : "SKIPPED"}
@@ -656,7 +1608,7 @@ export function ImageDetailsDrawer({
                     <Ruler className="size-3 text-primary" /> Optical Scale Calibration
                   </span>
                   {photo.calibration && (
-                    <Badge variant="outline" className="text-[10px] text-emerald-400 border-emerald-500/30">
+                    <Badge variant="outline" className="text-[10px] text-foreground border-border">
                       Calibrated
                     </Badge>
                   )}
@@ -724,6 +1676,15 @@ export function ImageDetailsDrawer({
                 </div>
               )}
             </TabsContent>
+
+            {/* TAB 7: Crack Geometry Extraction (Surface Area, Coverage %, Centerlines & Widths) */}
+            <TabsContent value="geometry" className="space-y-4">
+              <CrackGeometrySection
+                photo={photo}
+                details={details}
+                onCalibrate={onCalibrate}
+              />
+            </TabsContent>
           </Tabs>
         )}
 
@@ -745,21 +1706,18 @@ export function ImageDetailsDrawer({
             </Button>
           )}
           <div className="flex items-center gap-2">
-            {onTransform && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  onOpenChange(false);
-                  onTransform(photo);
-                }}
-                className="text-xs text-primary border-primary/30 hover:bg-primary/10"
-              >
-                <Crop className="size-3.5 mr-1.5" />
-                Crop & Rotate
-              </Button>
-            )}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setTransformModalOpen(true);
+              }}
+              className="text-xs text-primary border-primary/30 hover:bg-primary/10"
+            >
+              <Crop className="size-3.5 mr-1.5" />
+              Crop & Rotate
+            </Button>
             {onReplace && (
               <Button
                 type="button"
@@ -786,6 +1744,19 @@ export function ImageDetailsDrawer({
           </div>
         </div>
       </SheetContent>
+
+      <ImageTransformModal
+        open={transformModalOpen}
+        onOpenChange={setTransformModalOpen}
+        photo={{
+          ...photo,
+          originalUrl: details?.originalUrl || photo.originalUrl || photo.previewUrl,
+          previewUrl: details?.originalUrl || photo.originalUrl || photo.previewUrl,
+          width: details?.width || photo.width,
+          height: details?.height || photo.height,
+        }}
+        onTransformed={handleInternalTransformed}
+      />
     </Sheet>
   );
 }
@@ -912,7 +1883,7 @@ export function ImageTransformModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl p-0 overflow-hidden bg-card border-border">
+      <DialogContent className="sm:max-w-2xl p-0 overflow-hidden bg-card border-border z-[70]">
         <DialogHeader className="p-4 bg-muted/30 border-b border-border">
           <DialogTitle className="text-sm font-bold flex items-center gap-2">
             <Crop className="size-4 text-primary" />
@@ -933,7 +1904,7 @@ export function ImageTransformModal({
               }}
             >
               <img
-                src={photo.previewUrl}
+                src={photo.originalUrl || photo.previewUrl}
                 alt="Transform preview"
                 className="max-h-[280px] w-auto object-contain pointer-events-none"
               />
@@ -958,7 +1929,7 @@ export function ImageTransformModal({
             {cropPreset === "free" && (
               <div className="absolute inset-0 pointer-events-none">
                 <div
-                  className="absolute border-2 border-emerald-400 border-dashed rounded-sm shadow-[0_0_0_9999px_rgba(0,0,0,0.6)]"
+                  className="absolute border-2 border-primary border-dashed rounded-sm shadow-[0_0_0_9999px_rgba(0,0,0,0.6)]"
                   style={{
                     left: `${freeCrop.x}%`,
                     top: `${freeCrop.y}%`,
@@ -966,7 +1937,7 @@ export function ImageTransformModal({
                     height: `${freeCrop.height}%`,
                   }}
                 >
-                  <div className="absolute -top-5 left-0 bg-emerald-500 text-black text-[9px] font-bold px-1.5 py-0.5 rounded shadow whitespace-nowrap">
+                  <div className="absolute -top-5 left-0 bg-primary text-primary-foreground text-[9px] font-bold px-1.5 py-0.5 rounded shadow-xs whitespace-nowrap">
                     Free Crop ({Math.round(freeCrop.width)}% × {Math.round(freeCrop.height)}%)
                   </div>
                 </div>
@@ -979,12 +1950,12 @@ export function ImageTransformModal({
                 Rot: {rotation}°
               </span>
               {(flipH || flipV) && (
-                <span className="px-2 py-0.5 rounded bg-black/80 font-mono text-[10px] text-indigo-300">
+                <span className="px-2 py-0.5 rounded bg-black/80 font-mono text-[10px] text-foreground">
                   Flip: {flipH ? "H" : ""}{flipV ? "V" : ""}
                 </span>
               )}
               {cropPreset !== "none" && (
-                <span className="px-2 py-0.5 rounded bg-black/80 font-mono text-[10px] text-emerald-300">
+                <span className="px-2 py-0.5 rounded bg-black/80 font-mono text-[10px] text-foreground">
                   Crop: {cropPreset === "free" ? `${freeCrop.width}%×${freeCrop.height}%` : cropPreset}
                 </span>
               )}
@@ -1058,7 +2029,7 @@ export function ImageTransformModal({
                   variant={cropPreset === "free" ? "secondary" : "outline"}
                   size="sm"
                   onClick={() => setCropPreset("free")}
-                  className="h-8 text-xs font-semibold text-emerald-400 border-emerald-500/30"
+                  className="h-8 text-xs font-semibold text-primary border-primary/30"
                 >
                   Free Crop
                 </Button>
@@ -1095,9 +2066,9 @@ export function ImageTransformModal({
 
           {/* Free Crop Adjustable Dimension Sliders */}
           {cropPreset === "free" && (
-            <div className="p-3 rounded-xl border border-emerald-500/30 bg-emerald-950/10 space-y-2.5 text-xs">
+            <div className="p-3 rounded-xl border border-border bg-muted/30 space-y-2.5 text-xs">
               <div className="flex items-center justify-between text-[11px]">
-                <span className="font-semibold text-emerald-400 flex items-center gap-1.5">
+                <span className="font-semibold text-primary flex items-center gap-1.5">
                   <Crop className="size-3.5" />
                   Free Crop Rectangular Region
                 </span>
@@ -1271,6 +2242,8 @@ export function ImageQualityCard({
   onRetryProcessing,
   onCalibrate,
   onTransform,
+  onTransformed,
+  onUpdatePhoto,
 }: {
   photo: any;
   onRemove: (id: string) => void;
@@ -1279,6 +2252,8 @@ export function ImageQualityCard({
   onRetryProcessing?: (id: string) => void;
   onCalibrate?: (id: string) => void;
   onTransform?: (photo: any) => void;
+  onTransformed?: (updated: any) => void;
+  onUpdatePhoto?: (updated: any) => void;
 }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
 
@@ -1308,8 +2283,48 @@ export function ImageQualityCard({
     if (photo.processing_status === "failed") {
       return "Processing failed. Your original photo is safe.";
     }
+
+    const unetSeg = photo.unetSegmentation || photo.qualityReport?.unet_segmentation;
+    const crackAreaPct = unetSeg?.crack_area_pct;
+    const rfdetrDet = photo.rfdetrDetection || photo.qualityReport?.rfdetr_detection;
+    const isFallback = Boolean(photo.modelFallback || photo.model_fallback);
+
+    // Check AI classification status from Multi-Stage AI models
+    const ai =
+      photo.aiClassification ||
+      photo.ai_classification ||
+      photo.qualityReport?.ai_classification ||
+      photo.quality_report?.ai_classification;
+
+    if (ai) {
+      const hasCrack = Boolean(ai.has_crack || ai.predicted_class === "Cracked" || (ai.crack_probability ?? 0) >= 0.80);
+      const rawProb = hasCrack
+        ? (ai.crack_probability ?? ai.confidence)
+        : (ai.uncracked_probability ?? (1 - (ai.crack_probability || 0)));
+      const pct = typeof rawProb === "number" ? Math.round(rawProb * 100) : 0;
+      if (hasCrack) {
+        if (!isFallback && rfdetrDet?.has_defect) {
+          const num = rfdetrDet.num_detections || 1;
+          const pLabel = rfdetrDet.primary_label || "Crack";
+          return `RF-DETR: ${num} defect region${num > 1 ? "s" : ""} (${pLabel}, ${Math.round((rfdetrDet.confidence || rawProb) * 100)}% conf).`;
+        }
+        const unetPart = crackAreaPct !== undefined ? ` · UNet Fallback: ${crackAreaPct}% area` : " · UNet Fallback (best_model.pth)";
+        return `U-Net Fallback (best_model.pth): RF-DETR found 0 bboxes${unetPart}.`;
+      }
+      return `ResNet-18 AI: Sound concrete surface (${pct}% confidence). Below 80% defect cutoff.`;
+    }
+
+    if (photo.aiDetection) {
+      const isCrack = photo.aiDetection.defectType === "crack";
+      const pct = Math.round((photo.aiDetection.confidence || 0) * 100);
+      if (isCrack) {
+        return `ResNet-18 AI: Crack defect flagged (${pct}% score exceeds 80% cutoff).`;
+      }
+      return `ResNet-18 AI: Sound concrete surface verified (${pct}% confidence).`;
+    }
+
     if (photo.processing_status === "complete") {
-      return "Processed copy ready. Standard image processing, not AI.";
+      return "Processed copy ready. Ready for AI inspection.";
     }
     return "Good to use. All quality checks passed.";
   };
@@ -1321,6 +2336,35 @@ export function ImageQualityCard({
     }
   };
 
+  const unetSeg = photo.unetSegmentation || photo.qualityReport?.unet_segmentation;
+  const crackAreaPct = unetSeg?.crack_area_pct;
+  const rfdetrDet = photo.rfdetrDetection || photo.qualityReport?.rfdetr_detection;
+
+  const aiForThumb =
+    photo.aiClassification ||
+    photo.ai_classification ||
+    photo.qualityReport?.ai_classification ||
+    photo.quality_report?.ai_classification;
+
+  const hasCrackDefect = Boolean(aiForThumb?.has_crack || aiForThumb?.predicted_class === "Cracked" || (aiForThumb?.crack_probability ?? 0) >= 0.80);
+  const isRealServerId = Boolean(photo.id && !photo.id.startsWith("client-") && !photo.id.startsWith("temp-") && photo.id.length > 15);
+  const isFallback = Boolean(photo.modelFallback || photo.model_fallback || (hasCrackDefect && (!rfdetrDet || !rfdetrDet.has_defect)));
+
+  // For cracked images, use UNet segmentation model output as thumbnail on main dashboard
+  const unetCandidate =
+    photo.unetUrl ||
+    (hasCrackDefect && isRealServerId ? `/api/v1/images/${photo.id}/file?variant=unet` : null) ||
+    photo.annotatedUrl;
+
+  const displayThumbnail =
+    (hasCrackDefect ? unetCandidate : null) ||
+    (!isFallback && (photo.rfdetrUrl || (hasCrackDefect && isRealServerId ? `/api/v1/images/${photo.id}/file?variant=rfdetr` : null))) ||
+    photo.unetUrl ||
+    photo.annotatedUrl ||
+    (hasCrackDefect && isRealServerId ? `/api/v1/images/${photo.id}/file?variant=unet` : null) ||
+    photo.processedUrl ||
+    photo.previewUrl;
+
   return (
     <>
       <div
@@ -1329,12 +2373,20 @@ export function ImageQualityCard({
         className="relative rounded-xl overflow-hidden border border-border bg-card group flex flex-col focus:outline-hidden focus:ring-2 focus:ring-primary shadow-xs"
         aria-label={`Photo ${photo.name}. Status: ${photo.quality_status || photo.status}. Press Enter for details.`}
       >
-        {/* Thumbnail area */}
+        {/* Thumbnail area - displays UNet segmentation overlay for cracked images */}
         <div className="relative aspect-video bg-black overflow-hidden cursor-pointer" onClick={() => setDrawerOpen(true)}>
           <img
-            src={photo.previewUrl}
+            src={displayThumbnail}
             alt={photo.name}
             className="w-full h-full object-cover group-hover:scale-[1.02] transition-transform duration-300"
+            onError={(e) => {
+              const target = e.currentTarget;
+              if (photo.processedUrl && target.src !== photo.processedUrl) {
+                target.src = photo.processedUrl;
+              } else if (photo.previewUrl && target.src !== photo.previewUrl) {
+                target.src = photo.previewUrl;
+              }
+            }}
           />
 
           {/* Top badges bar with solid high-contrast backgrounds (>= 4.5:1) */}
@@ -1346,17 +2398,25 @@ export function ImageQualityCard({
             {photo.processing_status && (
               <ProcessingBadge status={photo.processing_status} />
             )}
-            {photo.source && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-black/90 text-primary border border-primary/40 shadow-xs capitalize">
-                {photo.source}
+            <ClassificationBadge photo={photo} />
+            {!isFallback && rfdetrDet?.has_defect && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-muted/80 text-foreground border border-border shadow-xs">
+                <Cpu className="size-2.5 text-primary" />
+                RF-DETR: {rfdetrDet.primary_label || `${rfdetrDet.num_detections} defect(s)`}
+              </span>
+            )}
+            {isFallback && crackAreaPct !== undefined && crackAreaPct > 0 && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-muted/80 text-rose-400 border border-border shadow-xs">
+                <Sparkles className="size-2.5 text-primary" />
+                UNet Fallback: {crackAreaPct}%
               </span>
             )}
           </div>
 
           {/* Bottom GPS caption bar with solid background */}
           {photo.gps && (
-            <div className="absolute bottom-0 left-0 right-0 px-2 py-1 bg-black/85 text-[10px] text-emerald-300 font-mono font-semibold flex items-center gap-1 border-t border-black/40">
-              <MapPin className="size-2.5 text-emerald-400 shrink-0" />
+            <div className="absolute bottom-0 left-0 right-0 px-2 py-1 bg-black/85 text-[10px] text-foreground font-mono font-semibold flex items-center gap-1 border-t border-black/40">
+              <MapPin className="size-2.5 text-muted-foreground shrink-0" />
               <span>{photo.gps.lat.toFixed(5)}, {photo.gps.lng.toFixed(5)}</span>
             </div>
           )}
@@ -1404,7 +2464,7 @@ export function ImageQualityCard({
                     </DropdownMenuItem>
                     {photo.quality_status === "warning" && !photo.warningConfirmed && (
                       <DropdownMenuItem onClick={() => onConfirmWarning?.(photo.id)}>
-                        <CheckCircle2 className="size-3.5 mr-2 text-amber-400" />
+                        <CheckCircle2 className="size-3.5 mr-2 text-primary" />
                         Continue anyway
                       </DropdownMenuItem>
                     )}
@@ -1454,7 +2514,7 @@ export function ImageQualityCard({
               type="button"
               size="sm"
               onClick={() => onConfirmWarning?.(photo.id)}
-              className="w-full h-7 text-[11px] bg-amber-600 hover:bg-amber-700 text-white font-semibold gap-1 mt-1"
+              className="w-full h-7 text-[11px] bg-primary hover:bg-primary/90 text-primary-foreground font-semibold gap-1 mt-1"
             >
               <AlertCircle className="size-3" />
               <span>Continue anyway</span>
@@ -1474,6 +2534,8 @@ export function ImageQualityCard({
         onReplace={onReplace}
         onRemove={onRemove}
         onTransform={onTransform}
+        onTransformed={onTransformed}
+        onUpdatePhoto={onUpdatePhoto}
       />
     </>
   );

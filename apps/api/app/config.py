@@ -60,6 +60,14 @@ class Settings(BaseSettings):
     PREPROCESS_CLAHE_GRID: int = 8
     PREPROCESS_SHARPEN_STRENGTH: float = 0.6
 
+    # AI Model Configuration (InfraScan Model v1.1 - ResNet18 Crack Classifier)
+    MODEL_DIR: str = r"d:\project\aiml prime\project\infosys\storage\models"
+    MODEL_FILENAME: str = "infrascan_crack_resnet18.onnx"
+    TORCHSCRIPT_FILENAME: str = "infrascan_crack_resnet18_torchscript.pt"
+    WEIGHTS_FILENAME: str = "infrascan_crack_resnet18_weights.pth"
+    METADATA_FILENAME: str = "model_metadata.json"
+
+
     model_config = SettingsConfigDict(
         env_file=str(BASE_DIR.parent.parent / ".env"),
         env_file_encoding="utf-8",

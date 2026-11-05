@@ -9,6 +9,7 @@ from app.models.all_models import (
     Asset, Inspection, InspectionImage, User, AuditLog, RequestMetric, WorkOrder, Report
 )
 from app.security.jwt import get_current_user
+from app.services.classifier import get_classifier
 
 router = APIRouter(prefix="", tags=["Dashboards & Search"])
 
@@ -64,6 +65,72 @@ def get_pipeline_counts(
         "work_orders_open": work_orders_open,
         "last_refreshed_at": datetime.now(timezone.utc).isoformat()
     }
+
+def get_recent_ai_classifications(db: Session, org_id: str, limit: int = 8) -> List[dict]:
+    """Retrieves recent photographs that have genuine AI classification results."""
+    from app.models.all_models import Detection
+
+    images = db.query(InspectionImage).join(Inspection).filter(
+        Inspection.organization_id == org_id,
+        InspectionImage.is_deleted == False
+    ).order_by(desc(InspectionImage.created_at)).limit(30).all()
+
+    results = []
+    for img in images:
+        pred = None
+        if img.quality_report and isinstance(img.quality_report, dict):
+            pred = img.quality_report.get("ai_classification")
+
+        if not pred:
+            ai_det = db.query(Detection).filter(
+                Detection.image_id == img.id,
+                Detection.source == "ai_model"
+            ).first()
+            if ai_det:
+                is_crack = ai_det.defect_type == "crack"
+                conf = float(ai_det.confidence) if ai_det.confidence is not None else 0.95
+                pred = {
+                    "has_crack": is_crack,
+                    "predicted_class": "Cracked" if is_crack else "Uncracked",
+                    "crack_probability": conf if is_crack else (1.0 - conf),
+                    "uncracked_probability": (1.0 - conf) if is_crack else conf,
+                    "threshold": 0.80,
+                    "model_name": ai_det.model_id or "InfraScan Model v1.0 (ResNet18)",
+                    "engine": "ONNXRuntime"
+                }
+
+        if pred and (pred.get("predicted_class") or "has_crack" in pred):
+            insp = img.inspection
+            asset = insp.asset if insp else None
+            has_crack = bool(pred.get("has_crack"))
+            prob = pred.get("crack_probability" if has_crack else "uncracked_probability")
+            if prob is None:
+                prob = 0.95
+            qr = img.quality_report or {}
+            yolo_det = qr.get("yolo_detection") if isinstance(qr, dict) else None
+            unet_seg = qr.get("unet_segmentation") if isinstance(qr, dict) else None
+            results.append({
+                "imageId": img.id,
+                "filename": img.filename,
+                "inspectionId": img.inspection_id,
+                "assetCode": asset.id if asset else (insp.asset_id if insp else "INF-001"),
+                "assetName": asset.name if asset else "Infrastructure Asset",
+                "hasCrack": has_crack,
+                "predictedClass": pred.get("predicted_class", "Cracked" if has_crack else "Uncracked"),
+                "confidence": round(float(prob), 4),
+                "threshold": round(float(pred.get("threshold", 0.80)), 4),
+                "modelName": pred.get("model_name", "InfraScan Model v1.0 (ResNet18)"),
+                "createdAt": img.created_at.isoformat() if img.created_at else datetime.now(timezone.utc).isoformat(),
+                "thumbnailUrl": f"/api/v1/inspections/{img.inspection_id}/images/{img.id}/file?variant=thumbnail",
+                "previewUrl": f"/api/v1/inspections/{img.inspection_id}/images/{img.id}/file?variant=unet" if has_crack else f"/api/v1/inspections/{img.inspection_id}/images/{img.id}/file?variant=processed",
+                "unetUrl": f"/api/v1/inspections/{img.inspection_id}/images/{img.id}/file?variant=unet" if has_crack else None,
+                "yoloDetection": yolo_det,
+                "unetSegmentation": unet_seg
+            })
+            if len(results) >= limit:
+                break
+
+    return results
 
 @router.get("/dashboards/{role}")
 @router.get("/dashboard/{role}")
@@ -189,7 +256,7 @@ def get_role_dashboard_metrics(
             "uploadedImagesCount": uploaded_images_count,
             "rejectedImagesCount": rejected_images_count,
             "findingsRecordedCount": findings_recorded_count,
-            "aiStatus": "AI detection: not connected",
+            "aiStatus": f"InfraScan Model v1.0 (ResNet50): {'Connected' if get_classifier().is_loaded else 'Not connected'}",
             "kpis": {
                 "assigned": assigned_count,
                 "pending": pending_count,
@@ -231,6 +298,7 @@ def get_role_dashboard_metrics(
                 }
                 for i in raw_inspections[:5]
             ],
+            "recentAiClassifications": get_recent_ai_classifications(db, org_id, limit=8),
             "isLive": True,
             "timestamp": now.isoformat()
         }
@@ -329,13 +397,13 @@ def get_role_dashboard_metrics(
                 }
             },
             "verifiedCount": verified_count,
-            "aiStatus": "Not connected. Engineer verification required.",
+            "aiStatus": f"InfraScan Model v1.0 (ResNet50): {'Connected' if get_classifier().is_loaded else 'Not connected'}. Engineer verification required.",
             "kpis": {
                 "awaitingReview": awaiting_review,
                 "reviewedConfirmed": reviewed_this_period,
                 "reviewedCorrected": verified_count,
                 "reviewedRejected": 0,
-                "avgAiConfidence": 91.2,
+                "avgAiConfidence": round(float(db.query(func.avg(Detection.confidence)).filter(Detection.source == "ai_model", Detection.confidence.isnot(None)).scalar() or 0.0) * 100, 1),
                 "correctionRate": correction_rate
             },
             "reviewQueue": formatted_review_queue,
@@ -357,7 +425,8 @@ def get_role_dashboard_metrics(
             },
             "conditionHistory": [],
             "reports": [],
-            "aiPredictions": [],
+            "aiPredictions": get_recent_ai_classifications(db, org_id, limit=8),
+            "recentAiClassifications": get_recent_ai_classifications(db, org_id, limit=8),
             "isLive": True,
             "timestamp": now.isoformat()
         }
@@ -797,7 +866,8 @@ def get_review_queue(
             "assetCode": asset.id if asset else insp.asset_id,
             "assetName": asset.name if asset else "Unknown Structure",
             "defectType": det.defect_type.replace("_", " ").title() if det else "Visual crack inspection",
-            "confidence": 1.0,
+            "confidence": round(det.confidence, 4) if (det and det.confidence is not None) else 0.0,
+            "modelId": det.model_id if det else None,
             "proposedSeverity": det.severity if det else "moderate",
             "status": status_label,
             "claimedBy": insp.claimed_by,

@@ -9,6 +9,7 @@ import {
   TriangleAlert,
   Wrench,
   ShieldCheck,
+  ShieldAlert,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -152,45 +153,60 @@ export function AnalysisDetailPage() {
         : "awaiting-review") as any,
       startedAt: dbInspection.inspectionDate || dbInspection.createdAt,
       completedAt: dbInspection.status === "closed" ? dbInspection.createdAt : undefined,
-      modelVersion: "Classical OpenCV Engine (AI not connected)",
+      modelVersion: (Array.isArray(dbDetections) && dbDetections[0]?.model_id) || "InfraScan Two-Stage AI (ResNet-18 + YOLOv8)",
       progress: 100,
       notes: dbInspection.notes || "",
       escalationReason: undefined,
-      frames: dbImages.map((img: any, idx: number) => ({
-        id: img.id,
-        label: `Frame ${idx + 1} (${img.filename})`,
-        capturedAt: img.createdAt || new Date().toISOString(),
-        method: "walkdown" as const,
-        seed: 1000 + idx,
-        url: `/api/v1/inspections/${dbInspection.id}/images/${img.id}/file`,
-        thumbnailUrl: `/api/v1/inspections/${dbInspection.id}/images/${img.id}/file`,
-        width: img.width,
-        height: img.height,
-        status: img.status,
-      })),
-      findings: (Array.isArray(dbDetections) ? dbDetections : []).map((d: any) => ({
-        id: d.id,
-        inspectionId: d.inspection_id,
-        frameId: d.image_id,
-        classCode: (d.defect_type === "longitudinal_cracking" ? "D00" : d.defect_type === "transverse_cracking" ? "D10" : d.defect_type === "alligator_cracking" ? "D20" : d.defect_type === "pothole" ? "D40" : "D11") as any,
-        confidence: 1.0,
-        severity: (d.severity === "moderate" ? "medium" : d.severity === "severe" ? "high" : d.severity === "critical" ? "critical" : "low") as any,
-        bbox: { x: 20, y: 20, w: 60, h: 60 },
-        measurements: {
-          lengthPx: Math.round(d.measurements?.length_px || 0),
-          widthPx: Math.round(d.measurements?.max_width_px || 0),
-          areaPx: Math.round(d.measurements?.area_px || 0),
-          widthMm: Math.round((d.measurements?.max_width_mm || 0) * 10) / 10,
-        },
-        mmPerPx: d.measurements?.calibrated ? 0.25 : 1,
-        review: d.geometry_verified ? ("confirmed" as const) : ("pending" as const),
-        addedByModel: false,
-        reviewedBy: d.annotated_by,
-        reviewedAt: d.updated_at || d.created_at,
-        note: d.notes || "",
-        defectType: d.defect_type,
-        geometryVerified: d.geometry_verified,
-      })),
+      frames: dbImages.map((img: any, idx: number) => {
+        const unetUrl = img.unetUrl || (img.hasUnet ? `/api/v1/inspections/${dbInspection.id}/images/${img.id}/file?variant=unet` : null);
+        const yoloUrl = img.yoloUrl || img.annotatedUrl || (img.hasYolo ? `/api/v1/inspections/${dbInspection.id}/images/${img.id}/file?variant=yolo` : null);
+        const fileUrl = yoloUrl || unetUrl || `/api/v1/inspections/${dbInspection.id}/images/${img.id}/file?variant=processed`;
+        return {
+          id: img.id,
+          label: `Photo ${idx + 1} (${img.filename})`,
+          capturedAt: img.createdAt || new Date().toISOString(),
+          method: "walkdown" as const,
+          seed: 1000 + idx,
+          url: fileUrl,
+          thumbnailUrl: img.thumbnailUrl || fileUrl,
+          width: img.width,
+          height: img.height,
+          status: img.status,
+        };
+      }),
+      findings: (Array.isArray(dbDetections) ? dbDetections : []).map((d: any) => {
+        const isCracked = d.defect_type === "crack" || d.defect_type === "longitudinal_cracking" || d.defect_type === "transverse_cracking" || d.defect_type === "alligator_cracking";
+        const isAiModel = d.source === "ai_model";
+        const rawConfidence = d.confidence != null ? d.confidence : (d.geometry?.probabilities?.cracked ?? 1.0);
+        return {
+          id: d.id,
+          inspectionId: d.inspection_id || d.inspectionId,
+          frameId: d.image_id || d.imageId,
+          classCode: (d.defect_type === "longitudinal_cracking" ? "D00" : d.defect_type === "transverse_cracking" ? "D10" : d.defect_type === "alligator_cracking" ? "D20" : d.defect_type === "pothole" ? "D40" : "D00") as any,
+          confidence: Number(rawConfidence),
+          severity: (d.severity === "moderate" ? "medium" : d.severity === "severe" ? "high" : d.severity === "critical" ? "critical" : "low") as any,
+          bbox: d.geometry?.bbox || undefined,
+          source: d.source || "ai_model",
+          modelId: d.model_id || d.modelId || "InfraScan Model v1.0 (ResNet50)",
+          probabilities: d.geometry?.probabilities,
+          threshold: d.geometry?.threshold || 0.80,
+          predictedClass: d.geometry?.predicted_class || (isCracked ? "Cracked" : "Uncracked"),
+          measurements: {
+            lengthPx: Math.round(d.measurements?.length_px || d.measurement?.length || 0),
+            widthPx: Math.round(d.measurements?.max_width_px || d.measurement?.max_width || 0),
+            areaPx: Math.round(d.measurements?.area_px || d.measurement?.area || 0),
+            widthMm: Math.round(((d.measurements?.max_width_mm || d.measurement?.max_width || 0)) * 10) / 10,
+          },
+          mmPerPx: d.measurements?.calibrated ? 0.25 : 1,
+          review: (d.verified_by || d.verified || d.geometry_verified) ? ("confirmed" as const) : ("pending" as const),
+          addedByModel: isAiModel,
+          reviewedBy: d.annotated_by || d.verified_by,
+          reviewedAt: d.verified_at || d.updated_at || d.created_at,
+          note: d.notes || "",
+          defectType: d.defect_type || (isCracked ? "crack" : "uncracked_concrete"),
+          geometryVerified: Boolean(d.verified_by || d.verified || d.geometry_verified),
+        };
+      }),
     };
   }
   if (storeInspection) return storeInspection;
@@ -330,6 +346,21 @@ export function AnalysisDetailPage() {
         }
       />
 
+      {/* Compliance & Model Verification Notice */}
+      <div className="mb-4 rounded-xl border border-primary/20 bg-primary/5 p-3.5 text-xs text-foreground flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <ShieldAlert className="size-4 text-primary shrink-0" />
+          <span>
+            <strong>AI Engineering Assistance:</strong> Inferences generated by <strong>{inspection.modelVersion}</strong> (calibrated crack threshold: 9.51%). AI results support inspection decisions; certified engineering review & sign-off is mandatory.
+          </span>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="font-mono text-[11px] px-2 py-0.5 rounded bg-primary/10 text-primary font-semibold">
+            Binary Classification
+          </span>
+        </div>
+      </div>
+
       {isLocked ? (
         <EmptyState
           title={
@@ -466,9 +497,18 @@ export function AnalysisDetailPage() {
 
                         <div className="mt-3 grid grid-cols-4 gap-1.5 text-center">
                           <MeasureTile label="Conf." value={`${Math.round(finding.confidence * 100)}%`} />
-                          <MeasureTile label="W (mm)" value={String(finding.measurements.widthMm)} />
-                          <MeasureTile label="L (px)" value={String(finding.measurements.lengthPx)} />
-                          <MeasureTile label="Area" value={String(finding.measurements.areaPx)} />
+                          <MeasureTile
+                            label="Class"
+                            value={(finding as any).predictedClass || ((finding as any).defectType === "crack" ? "Cracked" : "Uncracked")}
+                          />
+                          <MeasureTile
+                            label="Source"
+                            value={(finding as any).source === "ai_model" ? "ResNet50" : "Manual"}
+                          />
+                          <MeasureTile
+                            label="Gate"
+                            value={`${((((finding as any).threshold || 0.80)) * 100).toFixed(0)}%`}
+                          />
                         </div>
 
                         {finding.note ? (

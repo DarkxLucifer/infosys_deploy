@@ -129,7 +129,7 @@ def test_full_role_completeness_lifecycle():
     assert res_dash.status_code == 200
     dash_data = res_dash.json()
     assert dash_data["assignedCount"] >= 1
-    assert dash_data["aiStatus"] == "AI detection: not connected"
+    assert "aiStatus" in dash_data and ("AI detection:" in dash_data["aiStatus"] or "InfraScan Model" in dash_data["aiStatus"])
 
     # 5. Inspector uploads image (INS-4, INS-7)
     img_bytes = create_dummy_image_bytes()

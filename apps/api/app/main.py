@@ -61,7 +61,16 @@ async def lifespan(app: FastAPI):
     finally:
         db.close()
 
+    # Load & Warm Up AI Model Service (InfraScan Model v1.0 - ResNet50)
+    try:
+        from app.services.classifier import get_classifier
+        clf = get_classifier()
+        logger.info("InfraScan AI Model initialized: loaded=%s, engine=%s, version=%s", clf.is_loaded, clf.engine_type, clf.metadata.get("project_model_version"))
+    except Exception as e:
+        logger.error("Failed initializing classifier in lifespan: %s", e)
+
     yield
+
 
 app = FastAPI(
     title="InfraScan API Gateway",
@@ -140,3 +149,11 @@ def health():
 @app.get("/ready")
 def readiness():
     return {"status": "ok", "ready": True}
+
+@app.get(f"{api_v1_prefix}/models/active")
+@app.get("/api/models/active")
+def get_active_model_status():
+    """Returns the loaded status, version, and capabilities of InfraScan AI models."""
+    from app.services.classifier import get_classifier
+    return get_classifier().get_status()
+

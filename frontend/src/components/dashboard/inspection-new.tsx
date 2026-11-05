@@ -50,6 +50,8 @@ import {
 
 interface UploadedPhoto {
   id: string;
+  inspectionId?: string;
+  inspection_id?: string;
   name: string;
   previewUrl: string;
   processedUrl?: string | null;
@@ -58,6 +60,9 @@ interface UploadedPhoto {
   processing_status: "not_started" | "queued" | "running" | "complete" | "failed" | "skipped";
   qualityNote?: string;
   qualityReport?: any;
+  aiClassification?: any;
+  ai_classification?: any;
+  aiDetection?: any;
   processingRun?: any;
   warningConfirmed?: boolean;
   clientError?: string;
@@ -67,6 +72,32 @@ interface UploadedPhoto {
   height?: number;
   calibration?: any;
   drone?: { altitude?: number; gimbalPitch?: number };
+  hasRfdetr?: boolean;
+  has_rfdetr?: boolean;
+  rfdetrUrl?: string | null;
+  rfdetrDetection?: any;
+  rfdetr_detection?: any;
+  activeStage2Model?: string;
+  active_stage2_model?: string;
+  modelFallback?: boolean;
+  model_fallback?: boolean;
+  hasYolo?: boolean;
+  yoloUrl?: string | null;
+  annotatedUrl?: string | null;
+  yoloDetection?: any;
+  yolo_detection?: any;
+  hasUnet?: boolean;
+  unetUrl?: string | null;
+  unetMaskUrl?: string | null;
+  unetSegmentation?: any;
+  unet_segmentation?: any;
+  originalUrl?: string | null;
+  thumbnailUrl?: string | null;
+  geometryUrl?: string | null;
+  quality_report?: any;
+  crackGeometry?: any;
+  crack_geometry?: any;
+  version?: number;
 }
 
 // ─── Camera Capture Modal ─────────────────────────────────────────────────────
@@ -561,29 +592,82 @@ export function InspectionNewPage() {
 
         const qualityStatus = result.quality_status || (result.quality_report?.overall === "warning" ? "warning" : "accepted");
         const processingStatus = result.processing_status || (qualityStatus === "accepted" ? "complete" : "not_started");
-        const processedUrl = result.preview_url || (result.processed_path ? `/api/v1/images/${result.id}/file?variant=processed` : null);
+        const hasRfdetr = Boolean(result.hasRfdetr || result.has_rfdetr);
+        const rfdetrUrl = result.rfdetrUrl || result.rfdetr_url || (hasRfdetr ? `/api/v1/images/${result.id}/file?variant=rfdetr` : null);
+        const rfdetrDetection = result.rfdetrDetection || result.rfdetr_detection || result.quality_report?.rfdetr_detection || result.qualityReport?.rfdetr_detection;
+        const activeStage2Model = result.activeStage2Model || result.active_stage2_model;
+        const modelFallback = Boolean(result.modelFallback ?? result.model_fallback ?? (result.hasUnet && !hasRfdetr));
+        const hasYolo = Boolean(result.hasYolo || result.has_yolo);
+        const yoloUrl = result.yoloUrl || result.yolo_url || (hasYolo ? `/api/v1/images/${result.id}/file?variant=yolo` : null);
+        const hasUnet = Boolean(result.hasUnet || result.has_unet);
+        const unetUrl = result.unetUrl || result.unet_url || (hasUnet ? `/api/v1/images/${result.id}/file?variant=unet` : null);
+        const unetMaskUrl = result.unetMaskUrl || (hasUnet ? `/api/v1/images/${result.id}/file?variant=mask` : null);
+        const unetSegmentation = result.unetSegmentation || result.unet_segmentation || result.quality_report?.unet_segmentation || result.qualityReport?.unet_segmentation;
+        const originalUrl = result.originalUrl || `/api/v1/images/${result.id}/file?variant=original`;
+        const processedUrl = result.preview_url || result.processedUrl || (result.processed_path ? `/api/v1/images/${result.id}/file?variant=processed` : null);
+        const yoloDetection = result.yoloDetection || result.yolo_detection || result.quality_report?.yolo_detection || result.qualityReport?.yolo_detection;
+
+        const isCrack = Boolean(
+          result.ai_classification?.has_crack ||
+          result.ai_classification?.predicted_class === "Cracked" ||
+          (result.ai_classification?.crack_probability ?? 0) >= 0.80 ||
+          result.aiClassification?.has_crack ||
+          result.aiClassification?.predicted_class === "Cracked" ||
+          (result.aiClassification?.crack_probability ?? 0) >= 0.80
+        );
+
+        // Result image to display on dashboard: UNet segmentation thumbnail if crack detected
+        const displayUrl = (isCrack && unetUrl) || (!modelFallback && rfdetrUrl) || unetUrl || processedUrl || originalUrl;
 
         setPhotos((prev) =>
-          prev.map((p) =>
-            p.id === tempId
-              ? {
-                  ...p,
-                  id: result.id,
-                  status: qualityStatus === "warning" ? "warning" : "valid",
-                  quality_status: qualityStatus,
-                  processing_status: processingStatus,
-                  qualityNote: result.quality_report?.reason,
-                  qualityReport: result.quality_report,
-                  processingRun: result.processing_run,
-                  processedUrl: processedUrl,
-                  warningConfirmed: Boolean(result.warning_confirmed_by),
-                  width: result.width || p.width,
-                  height: result.height || p.height,
-                  source: result.source || source,
-                  drone: result.quality_report?.drone || drone,
-                }
-              : p
-          )
+          prev.map((p) => {
+            if (p.id !== tempId) return p;
+            if (p.previewUrl && p.previewUrl.startsWith("blob:")) {
+              try { URL.revokeObjectURL(p.previewUrl); } catch (_) {}
+            }
+            return {
+              ...p,
+              id: result.id,
+              inspectionId: createdInspectionId,
+              inspection_id: createdInspectionId,
+              status: qualityStatus === "warning" ? "warning" : "valid",
+              quality_status: qualityStatus,
+              processing_status: processingStatus,
+              qualityNote: result.quality_report?.reason || result.qualityReport?.reason,
+              qualityReport: result.quality_report || result.qualityReport,
+              aiClassification: result.ai_classification || result.aiClassification || result.quality_report?.ai_classification || result.qualityReport?.ai_classification,
+              ai_classification: result.ai_classification || result.aiClassification || result.quality_report?.ai_classification || result.qualityReport?.ai_classification,
+              aiDetection: result.ai_detection || result.aiDetection,
+              processingRun: result.processing_run || result.processingRun,
+              previewUrl: displayUrl,
+              originalUrl: originalUrl,
+              processedUrl: processedUrl,
+              hasRfdetr: hasRfdetr,
+              has_rfdetr: hasRfdetr,
+              rfdetrUrl: rfdetrUrl,
+              rfdetrDetection: rfdetrDetection,
+              rfdetr_detection: rfdetrDetection,
+              activeStage2Model: activeStage2Model,
+              active_stage2_model: activeStage2Model,
+              modelFallback: modelFallback,
+              model_fallback: modelFallback,
+              yoloUrl: yoloUrl,
+              annotatedUrl: (isCrack && unetUrl) ? unetUrl : ((!modelFallback && rfdetrUrl) ? rfdetrUrl : (unetUrl || yoloUrl)),
+              hasYolo: hasYolo,
+              yoloDetection: yoloDetection,
+              yolo_detection: yoloDetection,
+              hasUnet: hasUnet,
+              unetUrl: unetUrl,
+              unetMaskUrl: unetMaskUrl,
+              unetSegmentation: unetSegmentation,
+              unet_segmentation: unetSegmentation,
+              warningConfirmed: Boolean(result.warning_confirmed_by),
+              width: result.width || p.width,
+              height: result.height || p.height,
+              source: result.source || source,
+              drone: result.quality_report?.drone || drone,
+            };
+          })
         );
 
         if (qualityStatus === "warning") {
@@ -635,19 +719,45 @@ export function InspectionNewPage() {
 
   const handlePhotoTransformed = useCallback((result: any) => {
     const timestamp = Date.now();
-    const updatedPreview = result.previewUrl
-      ? `${result.previewUrl}&t=${timestamp}`
-      : undefined;
+    const bust = (url?: string | null) => {
+      if (!url) return url;
+      return `${url}${url.includes("?") ? "&" : "?"}v=${timestamp}`;
+    };
+
     setPhotos((prev) =>
       prev.map((p) =>
         p.id === result.imageId
           ? {
               ...p,
+              ...result,
+              id: result.imageId,
               width: result.width || p.width,
               height: result.height || p.height,
-              previewUrl: updatedPreview || p.previewUrl,
-              processedUrl: updatedPreview || p.processedUrl,
-              qualityReport: result.qualityReport || p.qualityReport,
+              previewUrl: bust(result.previewUrl) || p.previewUrl,
+              originalUrl: bust(result.originalUrl) || p.originalUrl,
+              processedUrl: bust(result.processedUrl) || p.processedUrl,
+              thumbnailUrl: bust(result.thumbnailUrl) || p.thumbnailUrl,
+              rfdetrUrl: bust(result.rfdetrUrl) || p.rfdetrUrl,
+              unetUrl: bust(result.unetUrl) || p.unetUrl,
+              unetMaskUrl: bust(result.unetMaskUrl) || p.unetMaskUrl,
+              geometryUrl: bust(result.geometryUrl) || p.geometryUrl,
+              annotatedUrl: bust(result.annotatedUrl) || bust(result.rfdetrUrl) || bust(result.unetUrl) || p.annotatedUrl,
+              hasRfdetr: result.hasRfdetr ?? result.has_rfdetr ?? p.hasRfdetr,
+              has_rfdetr: result.hasRfdetr ?? result.has_rfdetr ?? p.has_rfdetr,
+              rfdetrDetection: result.rfdetrDetection || result.rfdetr_detection || p.rfdetrDetection,
+              rfdetr_detection: result.rfdetrDetection || result.rfdetr_detection || p.rfdetr_detection,
+              activeStage2Model: result.activeStage2Model || result.active_stage2_model || p.activeStage2Model,
+              active_stage2_model: result.activeStage2Model || result.active_stage2_model || p.active_stage2_model,
+              modelFallback: result.modelFallback ?? result.model_fallback ?? p.modelFallback,
+              model_fallback: result.modelFallback ?? result.model_fallback ?? p.model_fallback,
+              qualityReport: result.qualityReport || result.quality_report || p.qualityReport,
+              quality_report: result.qualityReport || result.quality_report || p.quality_report,
+              aiClassification: result.aiClassification || result.ai_classification || p.aiClassification,
+              ai_classification: result.aiClassification || result.ai_classification || p.ai_classification,
+              unetSegmentation: result.unetSegmentation || result.unet_segmentation || result.qualityReport?.unet_segmentation || p.unetSegmentation,
+              unet_segmentation: result.unetSegmentation || result.unet_segmentation || result.qualityReport?.unet_segmentation || p.unet_segmentation,
+              crackGeometry: result.crackGeometry || result.crack_geometry || result.qualityReport?.crack_geometry || p.crackGeometry,
+              crack_geometry: result.crackGeometry || result.crack_geometry || result.qualityReport?.crack_geometry || p.crack_geometry,
               quality_status:
                 result.quality_status ||
                 (result.qualityReport?.overall === "rejected" ? "warning" : "accepted"),
@@ -657,15 +767,22 @@ export function InspectionNewPage() {
                   ? "warning"
                   : "valid",
               processing_status: "complete",
+              version: timestamp,
             }
           : p
       )
     );
+    setTransformModalOpen(false);
   }, []);
 
   const handleConfirmWarning = useCallback(async (id: string) => {
     try {
       const res = await api.confirmImageWarning(id);
+      const hasUnet = Boolean(res.hasUnet || res.has_unet);
+      const unetUrl = res.unetUrl || (hasUnet ? `/api/v1/images/${id}/file?variant=unet` : null);
+      const displayUrl = unetUrl || res.previewUrl || res.preview_url || `/api/v1/images/${id}/file?variant=unet`;
+      const bust = `?v=${Date.now()}`;
+
       setPhotos((prev) =>
         prev.map((p) =>
           p.id === id
@@ -675,6 +792,16 @@ export function InspectionNewPage() {
                 quality_status: "accepted",
                 processing_status: "complete",
                 warningConfirmed: true,
+                previewUrl: `${displayUrl}${displayUrl.includes("?") ? "&" : "?"}v=${Date.now()}`,
+                yoloUrl: null,
+                annotatedUrl: unetUrl ? `${unetUrl}${bust}` : null,
+                hasYolo: false,
+                yoloDetection: null,
+                hasUnet: hasUnet,
+                unetUrl: unetUrl ? `${unetUrl}${bust}` : null,
+                unetMaskUrl: res.unetMaskUrl || (hasUnet ? `/api/v1/images/${id}/file?variant=mask${bust}` : null),
+                unetSegmentation: res.unetSegmentation || res.unet_segmentation,
+                aiClassification: res.aiClassification || res.ai_classification,
                 processedUrl: res.preview_url || `/api/v1/images/${id}/file?variant=processed`,
                 processingRun: res.processing_run,
               }
@@ -1208,6 +1335,10 @@ export function InspectionNewPage() {
                       onTransform={(p) => {
                         setTransformPhoto(p);
                         setTransformModalOpen(true);
+                      }}
+                      onTransformed={handlePhotoTransformed}
+                      onUpdatePhoto={(updated) => {
+                        setPhotos((prev) => prev.map((item) => (item.id === updated.id ? { ...item, ...updated } : item)));
                       }}
                     />
                   ))}
