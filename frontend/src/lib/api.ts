@@ -2253,6 +2253,33 @@ export const apiService = {
     return res.json();
   },
 
+  async updateDetection(detectionId: string, payload: any): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/detections/${detectionId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      credentials: "include",
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail?.message || err.detail || "Failed to update detection");
+    }
+    return res.json();
+  },
+
+  async deleteDetection(detectionId: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/detections/${detectionId}`, {
+      method: "DELETE",
+      headers: authHeaders(),
+      credentials: "include",
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail?.message || err.detail || "Failed to delete detection");
+    }
+    return res.json();
+  },
+
   async markNoDefects(inspectionId: string, notes?: string): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/inspections/${inspectionId}/mark-no-defects`, {
       method: "POST",
@@ -2267,11 +2294,12 @@ export const apiService = {
     return res.json();
   },
 
-  async submitInspection(inspectionId: string): Promise<any> {
+  async submitInspection(inspectionId: string, payload?: { description?: string; severity?: string; notes?: string }): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/inspections/${inspectionId}/submit`, {
       method: "POST",
-      headers: authHeaders(),
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       credentials: "include",
+      body: payload ? JSON.stringify(payload) : undefined,
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
@@ -2306,11 +2334,12 @@ export const apiService = {
     return res.json();
   },
 
-  async signOffInspection(inspectionId: string): Promise<any> {
+  async signOffInspection(inspectionId: string, payload?: { description?: string; severity?: string; notes?: string }): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/inspections/${inspectionId}/sign-off`, {
       method: "POST",
-      headers: authHeaders(),
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       credentials: "include",
+      body: payload ? JSON.stringify(payload) : undefined,
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));

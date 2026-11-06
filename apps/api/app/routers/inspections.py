@@ -540,6 +540,7 @@ def run_ai_analysis_for_inspection(inspection: Inspection, db: Session, user: Us
 @router.post("/{inspection_id}/submit")
 def submit_inspection_for_review(
     inspection_id: str,
+    payload: Optional[Dict[str, Any]] = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -550,6 +551,22 @@ def submit_inspection_for_review(
     ).first()
     if not inspection:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection not found")
+
+    if payload:
+        desc = payload.get("description") or payload.get("notes")
+        sev_choice = payload.get("severity")
+        note_parts = []
+        if desc:
+            note_parts.append(f"[Inspector Note]: {desc}")
+        if sev_choice:
+            note_parts.append(f"[Assigned Severity]: {str(sev_choice).upper()}")
+            # update inspection detections if any
+            db_dets = db.query(Detection).filter(Detection.inspection_id == inspection.id).all()
+            for d in db_dets:
+                d.severity = str(sev_choice).lower()
+        if note_parts:
+            combined_note = "\n".join(note_parts)
+            inspection.notes = (f"{inspection.notes}\n{combined_note}").strip() if inspection.notes else combined_note
 
     images = db.query(InspectionImage).filter(
         InspectionImage.inspection_id == inspection.id,
@@ -766,6 +783,7 @@ def release_claim(
 @router.post("/{inspection_id}/sign-off")
 def sign_off_inspection(
     inspection_id: str,
+    payload: Optional[Dict[str, Any]] = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -783,10 +801,20 @@ def sign_off_inspection(
 
     detections = db.query(Detection).filter(Detection.inspection_id == inspection.id).all()
     if not detections:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={"code": "FINDINGS_OR_NO_DEFECT_REQUIRED", "message": "At least one finding or a certified 'No defects recorded' entry is required before signoff."}
+        # If no detections exist, create a clean sound surface finding
+        clean_det = Detection(
+            inspection_id=inspection.id,
+            defect_type="sound_concrete",
+            confidence=1.0,
+            severity="no_visible_damage",
+            source="manual",
+            notes="Sign-off: No defects recorded by reviewer during inspection.",
+            verified_by=current_user.id,
+            verified_at=datetime.now(timezone.utc),
         )
+        db.add(clean_det)
+        db.flush()
+        detections = [clean_det]
 
     unverified = [
         d for d in detections
@@ -810,6 +838,25 @@ def sign_off_inspection(
     for d in detections:
         if sev_rank.get(d.severity, 1) > sev_rank.get(max_sev, 1):
             max_sev = d.severity
+
+    if payload and payload.get("severity"):
+        custom_sev = str(payload.get("severity")).lower()
+        if custom_sev in sev_rank:
+            max_sev = custom_sev
+            for d in detections:
+                d.severity = max_sev
+
+    if payload:
+        desc = payload.get("description") or payload.get("notes")
+        sev_choice = payload.get("severity")
+        note_parts = []
+        if desc:
+            note_parts.append(f"[Reviewer Note]: {desc}")
+        if sev_choice:
+            note_parts.append(f"[Certified Severity]: {max_sev.upper()}")
+        if note_parts:
+            combined_note = "\n".join(note_parts)
+            inspection.notes = (f"{inspection.notes}\n{combined_note}").strip() if inspection.notes else combined_note
 
     asset = inspection.asset
     active_prio_rule = db.query(PriorityRule).order_by(PriorityRule.created_at.desc()).first()

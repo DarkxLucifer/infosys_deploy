@@ -15,7 +15,7 @@ from app.services.severity_engine import evaluate_severity
 
 router = APIRouter(prefix="", tags=["Engineer Findings & Annotations"])
 
-ENGINEER_ROLES = {"admin", "engineer", "civil-engineer"}
+ENGINEER_ROLES = {"admin", "engineer", "civil-engineer", "inspector", "lead_inspector"}
 
 def require_engineer(user: User):
     user_role = (user.role or "").lower()
