@@ -253,6 +253,16 @@ def get_inspection_detail(
     if not inspection:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection not found")
 
+    user_role = (current_user.role or "").lower()
+    if user_role == "maintenance" and inspection.status not in ("reviewed", "reported", "closed"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "UNREVIEWED_ACCESS_BLOCKED",
+                "message": "This inspection is still in review. Maintenance Engineers can only access inspections after engineering sign-off."
+            }
+        )
+
     asset = inspection.asset
     inspector = inspection.inspector
     claimant = inspection.claimant
@@ -427,6 +437,15 @@ def reassign_inspection(
     if not inspection:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection not found")
 
+    if inspection.status == "closed":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "ALREADY_CLOSED",
+                "message": f"Inspection {inspection.id} is already closed."
+            }
+        )
+
     new_inspector = db.query(User).filter(
         User.id == req.inspector_id,
         User.organization_id == current_user.organization_id
@@ -561,6 +580,15 @@ def submit_inspection_for_review(
     if not inspection:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection not found")
 
+    if inspection.status == "closed":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "ALREADY_CLOSED",
+                "message": f"Inspection {inspection.id} is already closed."
+            }
+        )
+
     if payload:
         desc = payload.get("description") or payload.get("notes")
         sev_choice = payload.get("severity")
@@ -661,6 +689,15 @@ def trigger_ai_analysis(
     if not inspection:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection not found")
 
+    if inspection.status == "closed":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "ALREADY_CLOSED",
+                "message": f"Inspection {inspection.id} is already closed."
+            }
+        )
+
     summary = run_ai_analysis_for_inspection(inspection, db, current_user)
     return {
         "inspectionId": inspection.id,
@@ -730,6 +767,15 @@ def claim_inspection(
     if not inspection:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection not found")
 
+    if inspection.status == "closed":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "ALREADY_CLOSED",
+                "message": f"Inspection {inspection.id} is already closed."
+            }
+        )
+
     if inspection.claimed_by and inspection.claimed_by != current_user.id:
         claimed_user = db.query(User).filter(User.id == inspection.claimed_by).first()
         claimer_name = claimed_user.name if claimed_user else "another engineer"
@@ -768,6 +814,15 @@ def release_claim(
     if not inspection:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection not found")
 
+    if inspection.status == "closed":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "ALREADY_CLOSED",
+                "message": f"Inspection {inspection.id} is already closed."
+            }
+        )
+
     user_role = (current_user.role or "").lower()
     if inspection.claimed_by != current_user.id and user_role != "admin":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You can only release claims made by yourself.")
@@ -798,7 +853,7 @@ def sign_off_inspection(
 ):
     """Enforces ENG-10 & ENG-14: Sign-off and lock. Mandatory verification gate for all findings."""
     user_role = (current_user.role or "").lower()
-    if user_role not in ("admin", "engineer", "civil-engineer"):
+    if user_role not in ("admin", "engineer", "civil-engineer", "civil_engineer"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only engineers can sign off inspections.")
 
     inspection = db.query(Inspection).filter(
@@ -807,6 +862,15 @@ def sign_off_inspection(
     ).first()
     if not inspection:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection not found")
+
+    if inspection.status in ("reviewed", "reported", "closed"):
+        raise HTTPException(
+            status_code=status.HTTP_423_LOCKED,
+            detail={
+                "code": "ALREADY_SIGNED_OFF",
+                "message": f"Inspection {inspection.id} has already been reviewed and signed off. Its record is permanently locked."
+            }
+        )
 
     detections = db.query(Detection).filter(Detection.inspection_id == inspection.id).all()
     if not detections:
@@ -964,6 +1028,15 @@ def confirm_priority(
     if not inspection:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection not found")
 
+    if inspection.status == "closed":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "ALREADY_CLOSED",
+                "message": f"Inspection {inspection.id} is already closed."
+            }
+        )
+
     prio_rec = db.query(PriorityRecommendation).filter(
         PriorityRecommendation.inspection_id == inspection.id
     ).order_by(PriorityRecommendation.created_at.desc()).first()
@@ -1017,6 +1090,15 @@ def close_inspection(
     ).first()
     if not inspection:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection not found")
+
+    if inspection.status == "closed":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "ALREADY_CLOSED",
+                "message": f"Inspection {inspection.id} is already closed."
+            }
+        )
 
     if inspection.status not in ("reviewed", "reported"):
         raise HTTPException(

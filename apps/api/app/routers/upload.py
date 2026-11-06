@@ -83,7 +83,7 @@ def find_stored_file(subdir: str, filename: str) -> Optional[str]:
 ALLOWED_UPLOAD_ROLES = {"admin", "manager", "engineer", "civil-engineer", "inspector"}
 
 def require_upload_permission(user: User, inspection: Optional[Inspection] = None):
-    """Enforces Section 1 & Check J9: Upload permissions."""
+    """Enforces Section 1 & Check J9: Upload permissions and image set locking."""
     user_role = (user.role or "").lower()
     if user_role not in ALLOWED_UPLOAD_ROLES:
         raise HTTPException(
@@ -94,6 +94,14 @@ def require_upload_permission(user: User, inspection: Optional[Inspection] = Non
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={"code": "ACCESS_DENIED", "message": "Inspectors can only upload to their assigned inspections."}
+        )
+    if inspection and inspection.status in ("pending_review", "in_review", "reviewed", "reported", "closed"):
+        raise HTTPException(
+            status_code=status.HTTP_423_LOCKED,
+            detail={
+                "code": "IMAGE_SET_LOCKED",
+                "message": f"Inspection {inspection.id} is in status '{inspection.status}'. The image set is sealed and locked against new uploads or deletions."
+            }
         )
 
 def enforce_image_visibility(

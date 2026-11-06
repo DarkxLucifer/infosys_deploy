@@ -2941,6 +2941,23 @@ export const apiService = {
     }
     return res.json();
   },
+
+  async updateProfile(data: { name?: string; role?: string }): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/me`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(),
+      },
+      credentials: "include",
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail?.message || err.detail || "Failed to update profile");
+    }
+    return res.json();
+  },
 };
 
 export const api = apiService;

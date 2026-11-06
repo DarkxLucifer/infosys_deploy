@@ -8,7 +8,7 @@ import {
   CircleCheck,
   ClipboardCheck,
   FileText,
-  Play,
+  Lock,
   TriangleAlert,
   Upload,
   CheckCheck,
@@ -45,6 +45,7 @@ import {
 import { OpticalCalibrationModal } from "@/components/inspection/optical-calibration-modal";
 
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
@@ -158,15 +159,16 @@ function findBaselineMatch(
 
 export function InspectionDetailPage() {
   const { id = "" } = useParams();
-  const { state, inspectionById, assetById, runAnalysis, escalateInspection, generateReport } =
+  const { state, inspectionById, assetById, escalateInspection, generateReport } =
     useAppStore();
   const { navigate } = useDashboardNavigation();
   const [escalateOpen, setEscalateOpen] = useState(false);
   const [escalateReason, setEscalateReason] = useState("");
   const { user: authUser } = useAuth();
   const [reassignOpen, setReassignOpen] = useState(false);
+  const userRole = (authUser?.role || "").toLowerCase();
   const canReassign = ["admin", "manager", "engineer", "civil-engineer", "lead_inspector"].includes(
-    (authUser?.role || "").toLowerCase()
+    userRole
   );
 
   const [dbInspection, setDbInspection] = useState<any | null>(null);
@@ -174,6 +176,13 @@ export function InspectionDetailPage() {
   const [dbDetections, setDbDetections] = useState<any[]>([]);
   const [dbAsset, setDbAsset] = useState<any | null>(null);
   const [loadingDb, setLoadingDb] = useState(true);
+  const [blockedMessage, setBlockedMessage] = useState<string | null>(null);
+
+  const isImageSetLocked = ["pending_review", "in_review", "reviewed", "reported", "closed"].includes(
+    (dbInspection?.status || "").toLowerCase()
+  );
+  const isInspector = ["inspector", "lead_inspector"].includes(userRole);
+  const isEngineerOrAdmin = ["engineer", "civil-engineer", "civil_engineer", "admin"].includes(userRole);
 
   const [uploadSource, setUploadSource] = useState("smartphone");
   const [isUploading, setIsUploading] = useState(false);
@@ -302,8 +311,20 @@ export function InspectionDetailPage() {
       return;
     }
     try {
-      const [realInsp, realImages, realDets] = await Promise.all([
-        api.getInspection(id).catch(() => null),
+      setBlockedMessage(null);
+      const realInsp = await api.getInspection(id).catch((err: any) => {
+        if (
+          err.message?.includes("UNREVIEWED_ACCESS_BLOCKED") ||
+          err.message?.includes("in review") ||
+          err.message?.includes("Maintenance Engineers")
+        ) {
+          setBlockedMessage(
+            "This inspection is currently in review. Maintenance Engineers can only access inspection data after certified engineering sign-off."
+          );
+        }
+        return null;
+      });
+      const [realImages, realDets] = await Promise.all([
         api.getInspectionImages(id).catch(() => ({ items: [] })),
         api.getInspectionDetections(id).catch(() => ({ items: [] })),
       ]);
@@ -557,6 +578,27 @@ export function InspectionDetailPage() {
     );
   }
 
+  if (blockedMessage) {
+    return (
+      <PageShell>
+        <div className="max-w-xl mx-auto py-16 text-center space-y-4">
+          <div className="size-14 mx-auto rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-500">
+            <Lock className="size-7" />
+          </div>
+          <h2 className="text-lg font-bold text-foreground">Inspection Under Active Engineering Review</h2>
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            {blockedMessage}
+          </p>
+          <div className="pt-2">
+            <Button variant="outline" size="sm" onClick={() => navigate("/app/inspections")}>
+              Back to inspections
+            </Button>
+          </div>
+        </div>
+      </PageShell>
+    );
+  }
+
   if (!inspection) {
     return (
       <PageShell>
@@ -578,15 +620,6 @@ export function InspectionDetailPage() {
   const highSeverity = inspection.findings.filter(
     (finding) => severityRank[finding.severity] >= severityRank.high,
   ).length;
-
-  const runAnalysisNow = () => {
-    runAnalysis(inspection.id);
-    toast.success("Analysis started", {
-      description:
-        "The pipeline moves through segmentation, measurement and severity scoring (~5s).",
-    });
-    navigate(`/app/review/${inspection.id}`);
-  };
 
   const downloadCertificateNow = () => {
     const report = generateReport("integrity", inspection.id);
@@ -649,13 +682,9 @@ export function InspectionDetailPage() {
           <>
             {inspection.status === "in-progress" ? (
               <div className="flex items-center gap-2">
-                <Button onClick={handleSubmitForReview}>
+                <Button onClick={handleSubmitForReview} className="cursor-pointer">
                   <CheckCheck className="size-4" />
                   Submit for review
-                </Button>
-                <Button variant="secondary" onClick={runAnalysisNow}>
-                  <Play className="size-4" />
-                  Run analysis
                 </Button>
               </div>
             ) : null}
@@ -915,87 +944,110 @@ export function InspectionDetailPage() {
 
             {/* ----------------------------- frames ------------------------------ */}
             <TabsContent value="frames">
-              {/* Upload bar for inspectors & engineers */}
-              <div className="mb-4 rounded-2xl border bg-card p-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                  <div>
-                    <h3 className="text-sm font-semibold text-foreground">Upload inspection imagery</h3>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      JPG, PNG, or Drone files. Automatic validation of blur, resolution, and lighting.
-                    </p>
+              {/* Image set lock notice or active upload area */}
+              {isImageSetLocked ? (
+                <div className="mb-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4 text-xs">
+                  <div className="flex items-center gap-3">
+                    <div className="flex size-9 items-center justify-center rounded-xl bg-amber-500/10 text-amber-500 border border-amber-500/20 shadow-xs shrink-0">
+                      <Lock className="size-4" />
+                    </div>
+                    <div>
+                      <p className="font-semibold text-foreground">
+                        Image Set Locked · {dbInspection?.status === "reviewed" ? "Certified & Closed" : "Submitted for Civil Review"}
+                      </p>
+                      <p className="text-[11px] text-muted-foreground mt-0.5">
+                        Per InfraScan lifecycle specification, photographic evidence is permanently locked once submitted for review.
+                      </p>
+                    </div>
                   </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Select value={uploadSource} onValueChange={setUploadSource}>
-                      <SelectTrigger className="h-9 w-36 text-xs">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="smartphone">Smartphone</SelectItem>
-                        <SelectItem value="digital_camera">Digital camera</SelectItem>
-                        <SelectItem value="drone">Drone capture</SelectItem>
-                        <SelectItem value="upload">Repository</SelectItem>
-                      </SelectContent>
-                    </Select>
-
-                    {/* Live Camera Button */}
-                    <Button
-                      type="button"
-                      size="sm"
-                      onClick={() => setCameraModalOpen(true)}
-                      className="h-9 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium gap-1.5 shadow-xs"
-                    >
-                      <Camera className="size-3.5" />
-                      <span>Take Photo</span>
-                    </Button>
-
-                    {/* Direct Mobile Device Camera Input */}
-                    <label className="cursor-pointer">
-                      <input
-                        type="file"
-                        accept="image/*"
-                        capture="environment"
-                        onChange={handleUploadFile}
-                        disabled={isUploading}
-                        className="hidden"
-                      />
-                      <span className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-border bg-secondary hover:bg-secondary/80 text-foreground text-xs font-medium transition-all shadow-xs">
-                        <Smartphone className="size-3.5 text-primary" />
-                        <span>Mobile Cam</span>
-                      </span>
-                    </label>
-
-                    {/* File upload */}
-                    <label className="cursor-pointer">
-                      <input
-                        type="file"
-                        multiple
-                        accept="image/jpeg,image/png"
-                        onChange={handleUploadFile}
-                        disabled={isUploading}
-                        className="hidden"
-                      />
-                      <span className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg bg-primary hover:opacity-90 text-primary-foreground text-xs font-medium transition-all shadow-xs">
-                        {isUploading ? (
-                          <>
-                            <Loader2 className="size-3.5 animate-spin" />
-                            <span>Uploading...</span>
-                          </>
-                        ) : (
-                          <>
-                            <Upload className="size-3.5" />
-                            <span>Upload files</span>
-                          </>
-                        )}
-                      </span>
-                    </label>
-                  </div>
+                  <Badge variant="outline" className="text-[10px] uppercase font-mono tracking-wider border-amber-500/30 text-amber-600 dark:text-amber-400 bg-background/50">
+                    Immutable Record
+                  </Badge>
                 </div>
-              </div>
+              ) : (isInspector || isEngineerOrAdmin) ? (
+                <>
+                  <div className="mb-4 rounded-2xl border bg-card p-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                      <div>
+                        <h3 className="text-sm font-semibold text-foreground">Upload inspection imagery</h3>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          JPG, PNG, or Drone files. Automatic validation of blur, resolution, and lighting.
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Select value={uploadSource} onValueChange={setUploadSource}>
+                          <SelectTrigger className="h-9 w-36 text-xs">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="smartphone">Smartphone</SelectItem>
+                            <SelectItem value="digital_camera">Digital camera</SelectItem>
+                            <SelectItem value="drone">Drone capture</SelectItem>
+                            <SelectItem value="upload">Repository</SelectItem>
+                          </SelectContent>
+                        </Select>
 
-              {/* Drag and Drop Batch Uploader */}
-              <div className="mb-4">
-                <MultiFileUploadZone onFilesSelected={handleBatchFiles} isUploading={isUploading} />
-              </div>
+                        {/* Live Camera Button */}
+                        <Button
+                          type="button"
+                          size="sm"
+                          onClick={() => setCameraModalOpen(true)}
+                          className="h-9 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium gap-1.5 shadow-xs"
+                        >
+                          <Camera className="size-3.5" />
+                          <span>Take Photo</span>
+                        </Button>
+
+                        {/* Direct Mobile Device Camera Input */}
+                        <label className="cursor-pointer">
+                          <input
+                            type="file"
+                            accept="image/*"
+                            capture="environment"
+                            onChange={handleUploadFile}
+                            disabled={isUploading}
+                            className="hidden"
+                          />
+                          <span className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-border bg-secondary hover:bg-secondary/80 text-foreground text-xs font-medium transition-all shadow-xs">
+                            <Smartphone className="size-3.5 text-primary" />
+                            <span>Mobile Cam</span>
+                          </span>
+                        </label>
+
+                        {/* File upload */}
+                        <label className="cursor-pointer">
+                          <input
+                            type="file"
+                            multiple
+                            accept="image/jpeg,image/png"
+                            onChange={handleUploadFile}
+                            disabled={isUploading}
+                            className="hidden"
+                          />
+                          <span className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg bg-primary hover:opacity-90 text-primary-foreground text-xs font-medium transition-all shadow-xs">
+                            {isUploading ? (
+                              <>
+                                <Loader2 className="size-3.5 animate-spin" />
+                                <span>Uploading...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Upload className="size-3.5" />
+                                <span>Upload files</span>
+                              </>
+                            )}
+                          </span>
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Drag and Drop Batch Uploader */}
+                  <div className="mb-4">
+                    <MultiFileUploadZone onFilesSelected={handleBatchFiles} isUploading={isUploading} />
+                  </div>
+                </>
+              ) : null}
 
               {/* Upload Queue Progress & Retry */}
               {uploadQueue.length > 0 && (
@@ -1334,15 +1386,17 @@ export function InspectionDetailPage() {
                               </Button>
                             )}
 
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="h-7 px-1.5 text-[11px] text-destructive hover:bg-destructive/10 ml-auto"
-                              onClick={() => setDeletePhoto(img)}
-                              title="Remove photo"
-                            >
-                              <Trash2 className="size-3" />
-                            </Button>
+                            {!isImageSetLocked && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 px-1.5 text-[11px] text-destructive hover:bg-destructive/10 ml-auto"
+                                onClick={() => setDeletePhoto(img)}
+                                title="Remove photo"
+                              >
+                                <Trash2 className="size-3" />
+                              </Button>
+                            )}
                           </div>
                         </div>
                       );
@@ -1507,8 +1561,8 @@ export function InspectionDetailPage() {
             onConfirmWarning={handleConfirmWarning}
             onRetryProcessing={handleRunPreprocess}
             onCalibrate={(imgId) => setCalibratingImageId(imgId)}
-            onReplace={(imgId) => setReplacePhotoId(imgId)}
-            onRemove={(imgId) => setDeletePhoto(dbImages.find((img: any) => img.id === imgId) || { id: imgId })}
+            onReplace={!isImageSetLocked ? (imgId) => setReplacePhotoId(imgId) : undefined}
+            onRemove={!isImageSetLocked ? (imgId) => setDeletePhoto(dbImages.find((img: any) => img.id === imgId) || { id: imgId }) : undefined}
             onTransform={(p) => setTransformPhoto(p)}
             onTransformed={(updated) => {
               fetchData();

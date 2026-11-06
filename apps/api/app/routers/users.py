@@ -15,6 +15,7 @@ router = APIRouter(prefix="/me", tags=["User Profile & Sessions"])
 
 class UpdateProfileRequest(BaseModel):
     name: Optional[str] = None
+    role: Optional[str] = None
 
 class ChangePasswordRequest(BaseModel):
     currentPassword: str
@@ -41,8 +42,20 @@ def update_profile(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user)
 ):
+    updated = False
+    details = {}
     if req.name and req.name.strip():
         user.name = req.name.strip()
+        updated = True
+        details["updated_name"] = user.name
+    if req.role and req.role.strip():
+        valid_roles = {"inspector", "engineer", "civil-engineer", "civil_engineer", "maintenance", "manager", "admin"}
+        norm_role = req.role.strip().lower()
+        if norm_role in valid_roles:
+            user.role = norm_role
+            updated = True
+            details["updated_role"] = user.role
+    if updated:
         db.commit()
         log_audit_event(
             db,
@@ -50,10 +63,20 @@ def update_profile(
             action="USER_UPDATED_PROFILE",
             entity_type="user",
             entity_id=user.id,
-            details={"updated_name": user.name},
+            details=details,
             user_id=user.id
         )
-    return {"success": True, "user": {"id": user.id, "name": user.name, "email": user.email}}
+    return {
+        "success": True,
+        "user": {
+            "id": user.id,
+            "name": user.name,
+            "email": user.email,
+            "role": user.role,
+            "organizationName": user.organization.name if user.organization else "Unassigned",
+            "organizationId": user.organization_id,
+        }
+    }
 
 @router.post("/password")
 def change_password(

@@ -15,7 +15,7 @@ from app.services.severity_engine import evaluate_severity
 
 router = APIRouter(prefix="", tags=["Engineer Findings & Annotations"])
 
-ENGINEER_ROLES = {"admin", "engineer", "civil-engineer", "inspector", "lead_inspector"}
+ENGINEER_ROLES = {"admin", "engineer", "civil-engineer", "civil_engineer"}
 
 def require_engineer(user: User):
     user_role = (user.role or "").lower()
@@ -384,6 +384,16 @@ def verify_geometry(
     detection = db.query(Detection).filter(Detection.id == detection_id).first()
     if not detection:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Finding not found")
+
+    inspection = db.query(Inspection).filter(
+        Inspection.id == detection.inspection_id,
+        Inspection.organization_id == current_user.organization_id
+    ).first()
+    if inspection and inspection.status in ("reviewed", "reported", "closed"):
+        raise HTTPException(
+            status_code=status.HTTP_423_LOCKED,
+            detail={"code": "INSPECTION_LOCKED", "message": "Cannot verify findings after inspection sign-off. Record is permanently locked."}
+        )
 
     detection.verified_by = current_user.id
     detection.verified_at = datetime.now(timezone.utc)

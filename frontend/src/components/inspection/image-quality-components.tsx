@@ -2689,7 +2689,7 @@ export function ImageQualityCard({
   onUpdatePhoto,
 }: {
   photo: any;
-  onRemove: (id: string) => void;
+  onRemove?: (id: string) => void;
   onReplace?: (id: string) => void;
   onConfirmWarning?: (id: string) => void;
   onRetryProcessing?: (id: string) => void;
@@ -2943,14 +2943,18 @@ export function ImageQualityCard({
                         Replace file
                       </DropdownMenuItem>
                     )}
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                      onClick={() => onRemove(photo.id)}
-                      className="text-destructive focus:text-destructive"
-                    >
-                      <Trash2 className="size-3.5 mr-2" />
-                      Remove photo
-                    </DropdownMenuItem>
+                    {onRemove && (
+                      <>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          onClick={() => onRemove(photo.id)}
+                          className="text-destructive focus:text-destructive"
+                        >
+                          <Trash2 className="size-3.5 mr-2" />
+                          Remove photo
+                        </DropdownMenuItem>
+                      </>
+                    )}
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>

@@ -14,8 +14,12 @@ import {
   ScanSearch,
   Maximize2,
   RefreshCw,
+  Lock,
+  Clock,
+  Eye,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useAuth } from "@/store/auth-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -91,6 +95,16 @@ export function AnalysisDetailPage() {
     deleteFinding,
     createWorkOrder,
   } = useAppStore();
+
+  const { user: authUser } = useAuth();
+  const currentRole =
+    authUser?.role ||
+    (state.session?.role === "maintenance-engineer"
+      ? "maintenance"
+      : state.session?.role) ||
+    "engineer";
+  const isEngineerOrAdmin = currentRole === "engineer" || currentRole === "admin";
+  const isInspector = currentRole === "inspector";
 
   // Redirect immediately if id is "new"
   useEffect(() => {
@@ -518,23 +532,38 @@ export function AnalysisDetailPage() {
 
             {/* Note: "Run analysis" button removed per specification */}
 
-            {inspection.findings.length === 0 ? (
+            {inspection.findings.length === 0 && isEngineerOrAdmin && inspection.status !== "reviewed" ? (
               <Button variant="outline" size="sm" onClick={handleMarkNoDefects} className="h-9 gap-1.5 text-xs">
                 <ShieldCheck className="size-4 text-emerald-500" />
                 Record no defects
               </Button>
             ) : null}
 
-            {inspection.status !== "reviewed" ? (
+            {inspection.status === "reviewed" ? (
+              <div className="px-3 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 font-semibold text-xs flex items-center gap-1.5 shadow-2xs">
+                <Lock className="size-3.5" />
+                <span>Signed Off & Sealed</span>
+              </div>
+            ) : isEngineerOrAdmin ? (
               <Button
                 size="sm"
                 onClick={() => setSignOffOpen(true)}
-                className="h-9 gap-1.5 rounded-xl text-xs font-semibold bg-primary hover:opacity-90 shadow-xs"
+                className="h-9 gap-1.5 rounded-xl text-xs font-semibold bg-primary hover:opacity-90 shadow-xs cursor-pointer"
               >
                 <CircleCheck className="size-4" />
                 Sign off review
               </Button>
-            ) : null}
+            ) : isInspector ? (
+              <div className="px-3 py-1.5 rounded-xl bg-secondary border border-border text-muted-foreground text-xs font-medium flex items-center gap-1.5 shadow-2xs">
+                <Clock className="size-3.5 text-amber-500" />
+                <span>Awaiting Civil Engineer Sign-off</span>
+              </div>
+            ) : (
+              <div className="px-3 py-1.5 rounded-xl bg-secondary border border-border text-muted-foreground text-xs font-medium flex items-center gap-1.5 shadow-2xs">
+                <Eye className="size-3.5" />
+                <span>Read-only View</span>
+              </div>
+            )}
           </div>
         }
       />
@@ -818,28 +847,47 @@ export function AnalysisDetailPage() {
                           </div>
 
                           <div className="flex items-center gap-2 pt-1">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => {
-                                toast.success(`Photo ${index + 1} verified as sound concrete surface.`);
-                              }}
-                              className="h-8 rounded-lg text-xs font-semibold gap-1.5 border-emerald-500/40 text-emerald-500 hover:bg-emerald-500/10"
-                            >
-                              <CircleCheck className="size-3.5" />
-                              Confirm Sound Surface
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => {
-                                handleOpenFlagModal(`photo-${frame.id}`, "Flagged false negative — manual inspection suggested.");
-                              }}
-                              className="h-8 rounded-lg text-xs text-muted-foreground hover:text-foreground"
-                            >
-                              <Flag className="size-3.5" />
-                              Flag Missed Defect
-                            </Button>
+                            {inspection.status === "reviewed" ? (
+                              <div className="w-full py-1.5 px-2.5 rounded-lg bg-secondary/60 text-[11px] text-muted-foreground flex items-center gap-1.5">
+                                <Lock className="size-3.5 text-emerald-500" />
+                                <span>Certified Sound Concrete Surface (Locked)</span>
+                              </div>
+                            ) : isInspector ? (
+                              <div className="w-full py-1.5 px-2.5 rounded-lg bg-secondary/60 text-[11px] text-muted-foreground flex items-center gap-1.5">
+                                <Clock className="size-3.5 text-amber-500" />
+                                <span>Sound Surface · Awaiting Engineer Sign-off</span>
+                              </div>
+                            ) : isEngineerOrAdmin ? (
+                              <>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => {
+                                    toast.success(`Photo ${index + 1} verified as sound concrete surface.`);
+                                  }}
+                                  className="h-8 rounded-lg text-xs font-semibold gap-1.5 border-emerald-500/40 text-emerald-500 hover:bg-emerald-500/10 cursor-pointer"
+                                >
+                                  <CircleCheck className="size-3.5" />
+                                  Confirm Sound Surface
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => {
+                                    handleOpenFlagModal(`photo-${frame.id}`, "Flagged false negative — manual inspection suggested.");
+                                  }}
+                                  className="h-8 rounded-lg text-xs text-muted-foreground hover:text-foreground cursor-pointer"
+                                >
+                                  <Flag className="size-3.5" />
+                                  Flag Missed Defect
+                                </Button>
+                              </>
+                            ) : (
+                              <div className="w-full py-1.5 px-2.5 rounded-lg bg-secondary/50 text-[11px] text-muted-foreground flex items-center gap-1.5">
+                                <Eye className="size-3.5" />
+                                <span>Read-only Surface Observation</span>
+                              </div>
+                            )}
                           </div>
                         </div>
                       );
@@ -1007,55 +1055,77 @@ export function AnalysisDetailPage() {
                           </p>
                         ) : null}
 
-                        {/* Decision Actions: Confirm, Flag, Work Order, Discard */}
-                        <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-border/50">
-                          {!isAllConfirmed && (
-                            <Button
-                              size="sm"
-                              onClick={handleConfirmAllForFrame}
-                              className="h-8 rounded-lg text-xs font-semibold gap-1 bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs"
-                            >
-                              <CircleCheck className="size-3.5" />
-                              Confirm
-                            </Button>
-                          )}
+                        {/* Decision Actions: Role & Lock Adaptive */}
+                        <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-border/50">
+                          {inspection.status === "reviewed" ? (
+                            <div className="w-full py-1.5 px-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/25 text-[11px] text-emerald-400 font-semibold flex items-center justify-between">
+                              <span className="flex items-center gap-1.5">
+                                <Lock className="size-3.5" />
+                                <span>Defect certified & signed off</span>
+                              </span>
+                              <span className="font-mono text-[10px] uppercase font-bold tracking-wider">LOCKED</span>
+                            </div>
+                          ) : isInspector ? (
+                            <div className="w-full py-2 px-3 rounded-lg bg-secondary/80 border border-border text-[11px] text-muted-foreground font-medium flex items-center gap-2">
+                              <Lock className="size-3.5 text-amber-400 shrink-0" />
+                              <span>Submitted for review · Civil Engineer verification required</span>
+                            </div>
+                          ) : isEngineerOrAdmin ? (
+                            <>
+                              {!isAllConfirmed && (
+                                <Button
+                                  size="sm"
+                                  onClick={handleConfirmAllForFrame}
+                                  className="h-8 rounded-lg text-xs font-semibold gap-1 bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs cursor-pointer"
+                                >
+                                  <CircleCheck className="size-3.5" />
+                                  Confirm
+                                </Button>
+                              )}
 
-                          {!isAnyFlagged && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => handleOpenFlagModal(primaryFinding.id, primaryFinding.note)}
-                              className="h-8 rounded-lg text-xs font-semibold gap-1 border-amber-500/30 text-amber-500 hover:bg-amber-500/10"
-                            >
-                              <Flag className="size-3.5" />
-                              Flag
-                            </Button>
-                          )}
+                              {!isAnyFlagged && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handleOpenFlagModal(primaryFinding.id, primaryFinding.note)}
+                                  className="h-8 rounded-lg text-xs font-semibold gap-1 border-amber-500/30 text-amber-500 hover:bg-amber-500/10 cursor-pointer"
+                                >
+                                  <Flag className="size-3.5" />
+                                  Flag
+                                </Button>
+                              )}
 
-                          {isAllConfirmed && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => {
-                                setOrderFinding(primaryFinding);
-                                setOrderOpen(true);
-                              }}
-                              className="h-8 rounded-lg text-xs font-semibold gap-1"
-                            >
-                              <Wrench className="size-3.5 text-primary" />
-                              Work order
-                            </Button>
-                          )}
+                              {isAllConfirmed && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => {
+                                    setOrderFinding(primaryFinding);
+                                    setOrderOpen(true);
+                                  }}
+                                  className="h-8 rounded-lg text-xs font-semibold gap-1 text-primary hover:bg-primary/10 border-primary/30 cursor-pointer"
+                                >
+                                  <Wrench className="size-3.5" />
+                                  Work order
+                                </Button>
+                              )}
 
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={handleDiscardAllForFrame}
-                            className="ml-auto h-8 rounded-lg text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                          >
-                            <Trash2 className="size-3.5" />
-                            Discard
-                          </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={handleDiscardAllForFrame}
+                                className="ml-auto h-8 rounded-lg text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10 cursor-pointer"
+                              >
+                                <Trash2 className="size-3.5" />
+                                Discard
+                              </Button>
+                            </>
+                          ) : (
+                            <div className="w-full py-1.5 px-2.5 rounded-lg bg-secondary/50 border border-border text-[11px] text-muted-foreground flex items-center gap-1.5">
+                              <Eye className="size-3.5" />
+                              <span>Read-only inspection findings</span>
+                            </div>
+                          )}
                         </div>
                       </div>
                     );

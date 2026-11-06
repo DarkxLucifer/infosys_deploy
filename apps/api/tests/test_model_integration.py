@@ -457,7 +457,7 @@ def test_role_permissions_and_engineer_sign_off():
         db,
         asset.id,
         inspector.id,
-        status="pending_review",
+        status="in_progress",
         notes="Signoff Survey"
     )
     insp_id = insp.id
