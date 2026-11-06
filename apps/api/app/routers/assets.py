@@ -19,7 +19,7 @@ VALID_ASSET_TYPES = {
     "building", "dam", "culvert", "pier"
 }
 
-ALLOWED_MANAGERS = {"admin", "manager", "engineer", "civil-engineer", "inspector"}
+ALLOWED_MANAGERS = {"admin", "manager", "engineer", "civil-engineer"}
 
 TYPE_PREFIX_MAP = {
     "bridge": "BR",

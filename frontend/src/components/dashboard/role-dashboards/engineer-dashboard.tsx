@@ -285,7 +285,7 @@ export function CivilEngineerDashboard() {
                       <td className="py-2.5 px-4 text-muted-foreground font-mono">{item.date}</td>
                       <td className="py-2.5 px-4 text-right">
                         <Link
-                          to={`/app/inspections/${item.inspectionId}`}
+                          to={`/app/review/${item.inspectionId}`}
                           className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-primary hover:opacity-90 text-primary-foreground font-semibold text-[11px] transition-all shadow-xs"
                         >
                           <span>Review</span>

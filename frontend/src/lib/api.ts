@@ -1725,6 +1725,12 @@ export const apiService = {
     total: number;
     page: number;
     pageSize: number;
+    counts?: {
+      all: number;
+      ai_analysing: number;
+      needs_review: number;
+      reviewed: number;
+    };
   }> {
     const page = params.page || 1;
     const pageSize = params.pageSize || 10;

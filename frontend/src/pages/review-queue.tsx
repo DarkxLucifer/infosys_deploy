@@ -48,14 +48,18 @@ export default function ReviewQueuePage() {
       setItems(res.items);
       setTotal(res.total);
 
-      // Also get all counts
-      const allRes = await api.getReviewQueue({ status: "all", pageSize: 100 });
-      setCounts({
-        all: allRes.total,
-        ai_analysing: allRes.items.filter((i: QueueItem) => i.status === "ai_analysing").length,
-        needs_review: allRes.items.filter((i: QueueItem) => i.status === "needs_review").length,
-        reviewed: allRes.items.filter((i: QueueItem) => i.status === "reviewed").length,
-      });
+      // Set real live counts from backend response
+      if (res.counts) {
+        setCounts(res.counts);
+      } else {
+        const allRes = await api.getReviewQueue({ status: "all", pageSize: 100 });
+        setCounts({
+          all: allRes.total,
+          ai_analysing: allRes.items.filter((i: QueueItem) => i.status === "ai_analysing").length,
+          needs_review: allRes.items.filter((i: QueueItem) => i.status === "needs_review").length,
+          reviewed: allRes.items.filter((i: QueueItem) => i.status === "reviewed").length,
+        });
+      }
     } catch {
       // Keep existing
     } finally {

@@ -31,12 +31,25 @@ export function MaintenanceEngineerDashboard() {
     loadData();
   }, [selectedRange]);
 
-  const handleUpdateStatus = (woId: string, newStatus: MaintenanceItem["status"]) => {
+  const handleUpdateStatus = async (woId: string, newStatus: MaintenanceItem["status"]) => {
     if (!data) return;
-    const updated = data.workOrders.map((wo) =>
-      wo.id === woId ? { ...wo, status: newStatus } : wo
-    );
-    setData({ ...data, workOrders: updated });
+    try {
+      if (newStatus === "closed") {
+        const note = window.prompt("Mandatory resolution note for closure (ACI / AASHTO verification):", "On-site repair executed and verified by technician.");
+        if (!note || !note.trim()) return;
+        await api.transitionWorkOrder(woId, { to_status: "closed", note: note.trim() });
+      } else {
+        await api.transitionWorkOrder(woId, { to_status: newStatus });
+      }
+      loadData();
+    } catch (e) {
+      console.warn("Status transition error:", e);
+      // Optimistic update fallback
+      const updated = data.workOrders.map((wo) =>
+        wo.id === woId ? { ...wo, status: newStatus } : wo
+      );
+      setData({ ...data, workOrders: updated });
+    }
   };
 
   const handleSetDueDate = (woId: string, newDate: string) => {

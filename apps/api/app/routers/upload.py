@@ -715,6 +715,12 @@ async def upload_image_endpoint(
     file_bytes = await file.read()
     filename = file.filename or "uploaded_photo.jpg"
 
+    if ".." in filename or "/" in filename or "\\" in filename:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "INVALID_FILENAME", "message": "Filename contains invalid path traversal characters."}
+        )
+
     # Step 1: Full 7-check Quality Assessment
     report = assess_quality(
         file_bytes,
@@ -736,10 +742,25 @@ async def upload_image_endpoint(
 
     # Enforcement: Hard rejected files are never saved or processed
     if overall == "rejected":
+        rej_code = "IMAGE_QUALITY_REJECTED"
+        st_code = status.HTTP_422_UNPROCESSABLE_ENTITY
+        reason_str = str(report.get("reason", "")).lower()
+
+        dup_check = next((c for c in report.get("checks", []) if c.get("key") == "duplicate"), None)
+        is_real_dup = bool(dup_check and dup_check.get("status") == "fail" and dup_check.get("value") != "N/A")
+
+        if "header" in reason_str or file_bytes.startswith(b"MZ") or "magic" in reason_str:
+            rej_code = "INVALID_IMAGE_HEADER"
+        elif "corrupt" in reason_str or "incomplete" in reason_str or "damaged" in reason_str or "unsupported" in reason_str:
+            rej_code = "CORRUPT_IMAGE"
+        elif is_real_dup:
+            rej_code = "DUPLICATE_IMAGE"
+            st_code = status.HTTP_409_CONFLICT
+
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=st_code,
             detail={
-                "code": "IMAGE_QUALITY_REJECTED",
+                "code": rej_code,
                 "message": report["reason"],
                 "report": report
             }
@@ -750,9 +771,10 @@ async def upload_image_endpoint(
     sha_hash = report["metrics"].get("sha256") or compute_sha256(file_bytes)
     phash_val = report["metrics"].get("phash") or "0000000000000000"
 
-    # Save original image to disk
+    # Save original image to disk (safely sanitized against path traversal)
     insp_prefix = inspection.id if inspection else "standalone"
-    orig_filename = f"{insp_prefix}_{sha_hash[:12]}_{filename}"
+    safe_filename = os.path.basename(filename.replace("\\", "/")) or "uploaded_photo.jpg"
+    orig_filename = f"{insp_prefix}_{sha_hash[:12]}_{safe_filename}"
     orig_path = os.path.join(UPLOAD_DIR, orig_filename)
     with open(orig_path, "wb") as f:
         f.write(file_bytes)
@@ -2463,6 +2485,70 @@ def retry_processing_endpoint(
         "imageId": image.id,
         "processedUrl": f"/api/v1/images/{image.id}/file?variant=processed",
         "aiClassification": pred
+    }
+
+
+# ─── Deterministic Preprocessing Pipeline Endpoint ────────────────────────────
+
+class PreprocessProfileRequest(BaseModel):
+    profile_name: Optional[str] = "standard_crack_enhancement"
+    custom_steps: Optional[List[Dict[str, Any]]] = None
+
+
+@router.post("/images/{image_id}/preprocess")
+@router.post("/inspections/{inspection_id}/images/{image_id}/preprocess")
+def preprocess_pipeline_endpoint(
+    image_id: str,
+    req: Optional[PreprocessProfileRequest] = None,
+    inspection_id: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Executes deterministic, byte-reproducible preprocessing pipeline (Check K1-K3)."""
+    image = db.query(InspectionImage).filter(
+        InspectionImage.id == image_id,
+        InspectionImage.organization_id == current_user.organization_id,
+        InspectionImage.is_deleted == False
+    ).first()
+    if not image:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image not found")
+
+    inspection = db.query(Inspection).filter(Inspection.id == image.inspection_id).first()
+    enforce_image_visibility(current_user, image, inspection)
+
+    if not os.path.exists(image.original_path):
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Original image file missing from storage.")
+
+    with open(image.original_path, "rb") as f:
+        orig_bytes = f.read()
+
+    from app.services.preprocessing import run_preprocessing_pipeline
+    profile = (req.profile_name if req and req.profile_name else "standard_crack_enhancement")
+    custom_steps = req.custom_steps if req else None
+
+    proc_bytes, checksum, steps_record = run_preprocessing_pipeline(
+        orig_bytes,
+        profile_name=profile,
+        custom_steps=custom_steps
+    )
+
+    proc_filename = f"proc_{image.id}_{profile}_{checksum[:10]}.png"
+    proc_path = os.path.join(PROCESSED_DIR, proc_filename)
+    with open(proc_path, "wb") as f:
+        f.write(proc_bytes)
+
+    image.processed_path = proc_path
+    image.processing_status = "complete"
+    db.commit()
+
+    return {
+        "status": "success",
+        "imageId": image.id,
+        "checksum": checksum,
+        "stepsApplied": [s["step"] for s in steps_record],
+        "stepsRecord": steps_record,
+        "profile": profile,
+        "processedUrl": f"/api/v1/images/{image.id}/file?variant=processed"
     }
 
 

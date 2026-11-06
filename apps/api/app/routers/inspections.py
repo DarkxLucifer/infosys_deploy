@@ -963,6 +963,60 @@ def sign_off_inspection(
     )
     db.add(prio_rec)
 
+    # Auto-generate or link Work Order if defects exist and no WO exists yet (Section 16)
+    from app.models.all_models import WorkOrder, WorkOrderEvent
+    existing_wo = db.query(WorkOrder).filter(WorkOrder.inspection_id == inspection.id).first()
+    if not existing_wo and max_sev != "no_visible_damage":
+        days_map = {
+            "urgent_engineering_review": 2,
+            "high": 14,
+            "medium": 60,
+            "low": 180,
+            "routine_monitoring": 365
+        }
+        sla_days = days_map.get(prio_result["recommended_priority"], 30)
+        due_dt = datetime.now(timezone.utc) + timedelta(days=sla_days)
+
+        crew_map = {
+            "longitudinal": "Structural Injection Crew",
+            "transverse": "Bridge Maintenance Specialists",
+            "alligator": "Pavement & Road Crew",
+            "spalling": "Concrete Repair Team",
+            "exposed_reinforcement": "Heavy Structural Crew",
+            "corrosion": "Durability Specialists",
+            "potholes": "Road Maintenance Crew",
+            "water_leakage": "Waterproofing Specialists",
+            "hairline": "Routine Survey Crew"
+        }
+        team_name = crew_map.get(first_defect_type, "Civil Maintenance Crew")
+
+        wo_count = db.query(WorkOrder).filter(WorkOrder.organization_id == current_user.organization_id).count()
+        new_wo = WorkOrder(
+            id=f"WO-{wo_count + 1:04d}",
+            organization_id=current_user.organization_id,
+            asset_id=inspection.asset_id,
+            inspection_id=inspection.id,
+            finding_id=detections[0].id if detections else None,
+            action=sugg_action,
+            priority=prio_result["recommended_priority"],
+            team=team_name,
+            due_date=due_dt,
+            repair_window=f"Within {sla_days} days" if sla_days > 2 else "Within 48 hours (Urgent)",
+            status="open",
+            created_by=current_user.id
+        )
+        db.add(new_wo)
+        db.flush()
+
+        evt = WorkOrderEvent(
+            work_order_id=new_wo.id,
+            actor_id=current_user.id,
+            from_status="none",
+            to_status="open",
+            note=f"Work order auto-generated upon engineering sign-off with recommended priority: {prio_result['recommended_priority']}."
+        )
+        db.add(evt)
+
     # Notifications
     inspector = inspection.inspector
     if inspector:

@@ -66,6 +66,94 @@ def get_pipeline_counts(
         "last_refreshed_at": datetime.now(timezone.utc).isoformat()
     }
 
+def get_real_asset_measurements(db: Session, org_id: str) -> dict:
+    from app.models.all_models import Asset, Inspection, Detection, Measurement
+    assets = db.query(Asset).filter(Asset.organization_id == org_id).all()
+    found = None
+    for a in assets:
+        insps = db.query(Inspection).filter(
+            Inspection.asset_id == a.id
+        ).order_by(desc(Inspection.inspection_date), desc(Inspection.created_at)).all()
+        insp_meas = []
+        for insp in insps:
+            det_ids = [d.id for d in db.query(Detection.id).filter(Detection.inspection_id == insp.id).all()]
+            if det_ids:
+                meas_list = db.query(Measurement).filter(Measurement.detection_id.in_(det_ids)).all()
+                if meas_list:
+                    max_l = max([m.length for m in meas_list if m.length] or [0])
+                    max_w = max([m.max_width for m in meas_list if m.max_width] or [0])
+                    unit = meas_list[0].unit or "px"
+                    calib = any(m.calibrated for m in meas_list)
+                    insp_meas.append({
+                        "id": insp.id,
+                        "date": insp.inspection_date.strftime("%Y-%m-%d") if insp.inspection_date else "N/A",
+                        "max_l": round(max_l, 1),
+                        "max_w": round(max_w, 1),
+                        "unit": unit,
+                        "calib": calib
+                    })
+        if len(insp_meas) >= 1:
+            found = (a, insp_meas)
+            break
+
+    if not found:
+        first_asset = db.query(Asset).filter(Asset.organization_id == org_id).first()
+        return {
+            "assetCode": first_asset.id if first_asset else "INF-001",
+            "assetName": first_asset.name if first_asset else "Primary Infrastructure Asset",
+            "latestInspectionDate": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            "previousInspectionDate": "N/A",
+            "latestLength": {"value": 0, "unit": "px", "isCalibrated": False, "label": "0 px"},
+            "latestMaxWidth": {"value": 0, "unit": "px", "isCalibrated": False, "label": "0 px"},
+            "previousLength": {"value": 0, "unit": "px", "isCalibrated": False, "label": "0 px"},
+            "previousMaxWidth": {"value": 0, "unit": "px", "isCalibrated": False, "label": "0 px"},
+            "progression": {
+                "canCompare": False,
+                "changeText": "No previous baseline available for cross-epoch progression.",
+                "warningNotice": None
+            }
+        }
+
+    a, insp_meas = found
+    latest = insp_meas[0]
+    prev = insp_meas[1] if len(insp_meas) > 1 else None
+
+    if prev and prev["max_l"] > 0:
+        growth_l = ((latest["max_l"] - prev["max_l"]) / prev["max_l"]) * 100
+    else:
+        growth_l = 0.0
+
+    if prev and prev["max_w"] > 0:
+        growth_w = ((latest["max_w"] - prev["max_w"]) / prev["max_w"]) * 100
+    else:
+        growth_w = 0.0
+
+    if prev:
+        sign_l = "+" if growth_l >= 0 else ""
+        sign_w = "+" if growth_w >= 0 else ""
+        change_text = f"Crack length changed by {sign_l}{growth_l:.1f}% and max aperture changed by {sign_w}{growth_w:.1f}% since baseline on {prev['date']}."
+        warning = "Active crack aperture dilation detected. Requires prioritized sealing & monitoring." if growth_w > 10 else None
+    else:
+        change_text = "Baseline inspection recorded. No previous cross-epoch baseline available."
+        warning = None
+
+    return {
+        "assetCode": a.id,
+        "assetName": a.name,
+        "latestInspectionDate": latest["date"],
+        "previousInspectionDate": prev["date"] if prev else "N/A",
+        "latestLength": {"value": latest["max_l"], "unit": latest["unit"], "isCalibrated": latest["calib"], "label": f"{latest['max_l']} {latest['unit']}"},
+        "latestMaxWidth": {"value": latest["max_w"], "unit": latest["unit"], "isCalibrated": latest["calib"], "label": f"{latest['max_w']} {latest['unit']}"},
+        "previousLength": {"value": prev["max_l"], "unit": prev["unit"], "isCalibrated": prev["calib"], "label": f"{prev['max_l']} {prev['unit']}"} if prev else {"value": 0, "unit": "px", "isCalibrated": False, "label": "0 px"},
+        "previousMaxWidth": {"value": prev["max_w"], "unit": prev["unit"], "isCalibrated": prev["calib"], "label": f"{prev['max_w']} {prev['unit']}"} if prev else {"value": 0, "unit": "px", "isCalibrated": False, "label": "0 px"},
+        "progression": {
+            "canCompare": prev is not None,
+            "changeText": change_text,
+            "warningNotice": warning
+        }
+    }
+
+
 def compute_inspection_highest_severity(db: Session, inspection_id: str) -> str:
     """
     Computes genuine highest damage severity for an inspection from its detections
@@ -454,21 +542,7 @@ def get_role_dashboard_metrics(
             },
             "reviewQueue": formatted_review_queue,
             "crackTypeCounts": crack_type_counts,
-            "selectedAssetMeasurements": {
-                "assetCode": first_asset.id if first_asset else "INF-001",
-                "assetName": first_asset.name if first_asset else "Primary Infrastructure Asset",
-                "latestInspectionDate": now.strftime("%Y-%m-%d"),
-                "previousInspectionDate": "N/A",
-                "latestLength": {"value": 0, "unit": "px", "isCalibrated": False, "label": "0 px"},
-                "latestMaxWidth": {"value": 0, "unit": "px", "isCalibrated": False, "label": "0 px"},
-                "previousLength": {"value": 0, "unit": "px", "isCalibrated": False, "label": "0 px"},
-                "previousMaxWidth": {"value": 0, "unit": "px", "isCalibrated": False, "label": "0 px"},
-                "progression": {
-                    "canCompare": False,
-                    "changeText": "No previous baseline available for cross-epoch progression.",
-                    "warningNotice": None
-                }
-            },
+            "selectedAssetMeasurements": get_real_asset_measurements(db, org_id),
             "conditionHistory": [],
             "reports": [],
             "aiPredictions": get_recent_ai_classifications(db, org_id, limit=8),
@@ -525,6 +599,7 @@ def get_role_dashboard_metrics(
                 "assigned_to": wo.assignee_id or "Unassigned",
                 "assignee_team": wo.team or "Field Crew A",
                 "due_date": wo.due_date.strftime("%Y-%m-%d") if wo.due_date else now.strftime("%Y-%m-%d"),
+                "is_urgent_review_request": wo.priority == "urgent_engineering_review",
                 "created_at": wo.created_at.strftime("%Y-%m-%d") if wo.created_at else now.strftime("%Y-%m-%d")
             })
 
@@ -897,6 +972,27 @@ def get_review_queue(
             or_(Inspection.id.ilike(term), Asset.id.ilike(term), Asset.name.ilike(term))
         )
 
+    # Compute real tab counts for review queue filter tabs
+    all_queue_statuses = ["pending_review", "in_review", "images_uploaded", "assigned", "in_progress", "draft", "reviewed", "reported", "closed"]
+    tab_counts = {
+        "all": db.query(Inspection).filter(
+            Inspection.organization_id == org_id,
+            Inspection.status.in_(all_queue_statuses)
+        ).count(),
+        "ai_analysing": db.query(Inspection).filter(
+            Inspection.organization_id == org_id,
+            Inspection.status.in_(["images_uploaded", "analysing", "assigned", "in_progress", "draft"])
+        ).count(),
+        "needs_review": db.query(Inspection).filter(
+            Inspection.organization_id == org_id,
+            Inspection.status.in_(["pending_review", "in_review"])
+        ).count(),
+        "reviewed": db.query(Inspection).filter(
+            Inspection.organization_id == org_id,
+            Inspection.status.in_(["reviewed", "reported", "closed"])
+        ).count(),
+    }
+
     total = query.count()
     inspections = query.order_by(desc(Inspection.created_at), desc(Inspection.inspection_date)).offset((page - 1) * pageSize).limit(pageSize).all()
 
@@ -911,14 +1007,32 @@ def get_review_queue(
         elif insp.status in ("reviewed", "reported", "closed"):
             status_label = "reviewed"
 
+        highest_sev = compute_inspection_highest_severity(db, insp.id)
+        defect_type_label = "Visual inspection"
+        confidence_val = 0.0
+
+        if det:
+            defect_type_label = det.defect_type.replace("_", " ").title()
+            confidence_val = round(det.confidence, 4) if (det and det.confidence is not None) else 0.95
+        else:
+            img = db.query(InspectionImage).filter(
+                InspectionImage.inspection_id == insp.id,
+                InspectionImage.is_deleted == False
+            ).first()
+            if img and img.quality_report and isinstance(img.quality_report, dict):
+                ai_cls = img.quality_report.get("ai_classification") or {}
+                if ai_cls:
+                    defect_type_label = "Crack Detected" if ai_cls.get("has_crack") else "Sound Concrete"
+                    confidence_val = round(float(ai_cls.get("crack_probability", 0.95)), 4)
+
         items.append({
             "id": insp.id,
             "assetCode": asset.id if asset else insp.asset_id,
             "assetName": asset.name if asset else "Unknown Structure",
-            "defectType": det.defect_type.replace("_", " ").title() if det else "Visual crack inspection",
-            "confidence": round(det.confidence, 4) if (det and det.confidence is not None) else 0.0,
+            "defectType": defect_type_label,
+            "confidence": confidence_val,
             "modelId": det.model_id if det else None,
-            "proposedSeverity": det.severity if det else "moderate",
+            "proposedSeverity": highest_sev,
             "status": status_label,
             "claimedBy": insp.claimed_by,
             "claimedByName": insp.claimant.name if insp.claimant else None,
@@ -929,5 +1043,6 @@ def get_review_queue(
         "items": items,
         "total": total,
         "page": page,
-        "pageSize": pageSize
+        "pageSize": pageSize,
+        "counts": tab_counts
     }
