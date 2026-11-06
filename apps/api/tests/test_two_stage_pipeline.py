@@ -106,18 +106,21 @@ def test_two_stage_resnet18_and_yolo_pipeline():
 
     # If classified as crack (as crack.jpg is):
     if ai_clf.get("has_crack") or ai_clf.get("crack_probability", 0) >= 0.80:
-        assert data.get("hasYolo") is True
-        yolo_path = os.path.join(os.getcwd(), "storage", "yolo", f"{image_id}.jpg")
-        assert os.path.exists(yolo_path), f"YOLO result image missing from disk: {yolo_path}"
+        has_stage2 = bool(data.get("hasRfdetr") or data.get("hasUnet") or data.get("hasYolo"))
+        assert has_stage2 is True, f"Expected Stage 2 model (RF-DETR, UNet, or YOLO) to run: {data}"
 
-        # Test variant delivery: 'processed' should return the YOLO result image
+        # Test variant delivery: 'processed' should return the defect detection/segmentation image
         res_proc = client.get(f"/api/v1/images/{image_id}/file?variant=processed", headers=headers)
         assert res_proc.status_code == 200
         assert res_proc.headers["content-type"] in ("image/jpeg", "image/png")
 
-        # Test variant 'yolo'
-        res_yolo = client.get(f"/api/v1/images/{image_id}/file?variant=yolo", headers=headers)
-        assert res_yolo.status_code == 200
+        # Test variant 'unet' or 'rfdetr'
+        if data.get("hasUnet"):
+            res_unet = client.get(f"/api/v1/images/{image_id}/file?variant=unet", headers=headers)
+            assert res_unet.status_code == 200
+        if data.get("hasRfdetr"):
+            res_rfdetr = client.get(f"/api/v1/images/{image_id}/file?variant=rfdetr", headers=headers)
+            assert res_rfdetr.status_code == 200
 
         # Test variant 'original'
         res_orig = client.get(f"/api/v1/images/{image_id}/file?variant=original", headers=headers)

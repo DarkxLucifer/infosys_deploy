@@ -23,6 +23,11 @@ import {
   XCircle,
   AlertTriangle,
   Cpu,
+  Maximize2,
+  Minimize2,
+  ZoomIn,
+  ZoomOut,
+  X,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -298,24 +303,65 @@ export function ImageCompare({
   metricsAfter?: any;
   className?: string;
 }) {
+  const unetMetrics = unetSegmentation || {};
+  const isCrackDefect = Boolean(
+    unetMetrics.has_crack ||
+    (unetMetrics.crack_area_pct !== undefined && unetMetrics.crack_area_pct > 0) ||
+    unetUrl
+  );
   const hasRfdetrDefects = Boolean(!modelFallback && rfdetrDetection?.has_defect);
-  const initialMode = hasRfdetrDefects ? "rfdetr" : (unetUrl ? "unet" : "compare");
+
+  // If cracked and UNet output is available, default view to UNet Segment!
+  const initialMode = (isCrackDefect && unetUrl) ? "unet" : (hasRfdetrDefects ? "rfdetr" : (unetUrl ? "unet" : "compare"));
   const [viewMode, setViewMode] = useState<"compare" | "orig" | "proc" | "rfdetr" | "unet" | "mask">(initialMode);
   const [compareTarget, setCompareTarget] = useState<"rfdetr" | "unet" | "processed">(
-    hasRfdetrDefects ? "rfdetr" : (unetUrl ? "unet" : "processed")
+    (isCrackDefect && unetUrl) ? "unet" : (hasRfdetrDefects ? "rfdetr" : (unetUrl ? "unet" : "processed"))
   );
   const [sliderPos, setSliderPos] = useState(50); // percent
   const containerRef = useRef<HTMLDivElement>(null);
   const isDragging = useRef(false);
 
+  // Full-screen Maximize state & zoom
+  const [isMaximized, setIsMaximized] = useState(false);
+  const [zoomLevel, setZoomLevel] = useState(1);
+  const [maximizedSliderPos, setMaximizedSliderPos] = useState(50);
+  const maximizedContainerRef = useRef<HTMLDivElement>(null);
+  const isMaximizedDragging = useRef(false);
+
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && isMaximized) {
+        setIsMaximized(false);
+      }
+    };
+    window.addEventListener("keydown", handleGlobalKeyDown);
+    return () => window.removeEventListener("keydown", handleGlobalKeyDown);
+  }, [isMaximized]);
+
   // If rfdetrUrl or unetUrl becomes available, automatically switch view
   useEffect(() => {
-    if (hasRfdetrDefects && compareTarget !== "rfdetr") {
-      setCompareTarget("rfdetr");
-    } else if (unetUrl && compareTarget !== "unet" && !hasRfdetrDefects) {
+    if (unetUrl && isCrackDefect && compareTarget !== "unet") {
       setCompareTarget("unet");
+      if (viewMode === "rfdetr" || viewMode === "compare") {
+        setViewMode("unet");
+      }
+    } else if (hasRfdetrDefects && compareTarget !== "rfdetr" && !unetUrl) {
+      setCompareTarget("rfdetr");
     }
-  }, [hasRfdetrDefects, unetUrl]);
+  }, [hasRfdetrDefects, unetUrl, isCrackDefect]);
+
+  const handleMaximizedPointerDown = () => {
+    isMaximizedDragging.current = true;
+  };
+  const handleMaximizedPointerUp = () => {
+    isMaximizedDragging.current = false;
+  };
+  const handleMaximizedPointerMove = (e: React.PointerEvent) => {
+    if (!isMaximizedDragging.current || !maximizedContainerRef.current) return;
+    const rect = maximizedContainerRef.current.getBoundingClientRect();
+    const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+    setMaximizedSliderPos(Math.round((x / rect.width) * 100));
+  };
 
   const handlePointerDown = () => {
     isDragging.current = true;
@@ -361,7 +407,6 @@ export function ImageCompare({
     );
   }
 
-  const unetMetrics = unetSegmentation || {};
   const hasUnetData = Boolean(unetMetrics.has_crack || (unetMetrics.crack_area_pct !== undefined && unetMetrics.crack_area_pct > 0));
 
   // Crack Type Classification (Longitudinal, Transverse, Alligator, Pothole)
@@ -521,7 +566,23 @@ export function ImageCompare({
               )}
             </div>
           )}
-          <span className="text-[11px] text-muted-foreground font-mono">
+
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              setZoomLevel(1);
+              setIsMaximized(true);
+            }}
+            className="h-7 text-xs px-2.5 gap-1.5 border-border hover:bg-muted font-semibold shadow-xs"
+            title="Maximize image in full-screen view"
+          >
+            <Maximize2 className="size-3.5 text-primary" />
+            <span>Maximize</span>
+          </Button>
+
+          <span className="text-[11px] text-muted-foreground font-mono hidden md:inline">
             {viewMode === "compare"
               ? `Split: ${sliderPos}% (Orig vs ${compareTarget === "rfdetr" ? "RF-DETR" : (compareTarget === "unet" ? "UNet Mask" : "Enhanced")})`
               : viewMode === "orig"
@@ -548,6 +609,20 @@ export function ImageCompare({
         className="relative aspect-video rounded-xl overflow-hidden border border-border bg-black select-none touch-none focus:outline-hidden focus:ring-2 focus:ring-primary cursor-ew-resize"
         aria-label="Image comparison viewer. Use left and right arrow keys to adjust split position."
       >
+        {/* Floating Maximize Image button on interactive stage */}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            setZoomLevel(1);
+            setIsMaximized(true);
+          }}
+          className="absolute top-2.5 right-2.5 z-20 px-2.5 py-1 rounded-lg bg-black/80 hover:bg-black/95 text-white border border-white/20 transition-all shadow-md flex items-center gap-1.5 text-[11px] font-semibold backdrop-blur-xs cursor-pointer hover:scale-105"
+          title="Maximize image in full-screen high-resolution view"
+        >
+          <Maximize2 className="size-3.5 text-primary" />
+          <span>Maximize</span>
+        </button>
         {viewMode === "orig" && (
           <img src={originalUrl} alt="Original capture" className="w-full h-full object-contain" />
         )}
@@ -729,6 +804,237 @@ export function ImageCompare({
           </div>
         </div>
       )}
+
+      {/* ─── Full-Screen Maximized Image Lightbox Modal ─── */}
+      {isMaximized && (
+        <div
+          className="fixed inset-0 z-50 bg-black/95 backdrop-blur-md flex flex-col select-none touch-none text-white animate-in fade-in duration-200"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Maximized Image Inspection"
+        >
+          {/* Top Toolbar */}
+          <div className="flex flex-wrap items-center justify-between px-4 py-2.5 border-b border-white/10 bg-black/85 backdrop-blur-xs z-10 gap-2 shrink-0">
+            <div className="flex items-center gap-2.5">
+              <Sparkles className="size-4 text-primary" />
+              <span className="font-bold text-sm tracking-tight text-white">
+                Maximized Inspection View
+              </span>
+              <span className="hidden sm:inline-block font-mono text-[11px] px-2 py-0.5 rounded bg-white/10 text-white/90 border border-white/15">
+                {viewMode === "compare"
+                  ? `Compare Split (${maximizedSliderPos}%)`
+                  : viewMode === "unet"
+                  ? `UNet Segmentation (${unetMetrics.crack_area_pct ?? 0}% Area)`
+                  : viewMode === "rfdetr"
+                  ? `RF-DETR (${rfdetrDetection?.num_detections ?? 0} defects)`
+                  : viewMode === "mask"
+                  ? "Binary Crack Mask"
+                  : viewMode === "proc"
+                  ? "Preprocessed (CLAHE)"
+                  : "Original Raw Capture"}
+              </span>
+            </div>
+
+            {/* Mode selector pills in maximized modal */}
+            <div className="inline-flex rounded-lg p-0.5 bg-zinc-900 border border-white/15 text-xs">
+              <button
+                type="button"
+                onClick={() => setViewMode("compare")}
+                className={`px-3 py-1 rounded-md font-semibold transition-all ${
+                  viewMode === "compare" ? "bg-white text-black shadow-xs font-bold" : "text-zinc-400 hover:text-white"
+                }`}
+              >
+                Compare Slider
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode("orig")}
+                className={`px-3 py-1 rounded-md font-semibold transition-all ${
+                  viewMode === "orig" ? "bg-white text-black shadow-xs font-bold" : "text-zinc-400 hover:text-white"
+                }`}
+              >
+                Original
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode("proc")}
+                className={`px-3 py-1 rounded-md font-semibold transition-all ${
+                  viewMode === "proc" ? "bg-white text-black shadow-xs font-bold" : "text-zinc-400 hover:text-white"
+                }`}
+              >
+                Processed
+              </button>
+              {rfdetrUrl && (
+                <button
+                  type="button"
+                  onClick={() => setViewMode("rfdetr")}
+                  className={`px-3 py-1 rounded-md font-semibold transition-all flex items-center gap-1.5 ${
+                    viewMode === "rfdetr" ? "bg-white text-black shadow-xs font-bold" : "text-zinc-400 hover:text-white"
+                  }`}
+                >
+                  <span>RF-DETR</span>
+                  {rfdetrDetection?.num_detections !== undefined && (
+                    <span className="px-1.5 py-0.2 rounded-full bg-zinc-700 text-[10px] font-mono text-white">
+                      {rfdetrDetection.num_detections}
+                    </span>
+                  )}
+                </button>
+              )}
+              {unetUrl && (
+                <button
+                  type="button"
+                  onClick={() => setViewMode("unet")}
+                  className={`px-3 py-1 rounded-md font-semibold transition-all flex items-center gap-1.5 ${
+                    viewMode === "unet" ? "bg-primary text-white shadow-xs font-bold" : "text-zinc-400 hover:text-white"
+                  }`}
+                >
+                  <Sparkles className="size-3 text-amber-300" />
+                  <span>UNet Segment</span>
+                  {unetMetrics.crack_area_pct !== undefined && (
+                    <span className="px-1.5 py-0.2 rounded-full bg-black/40 text-[10px] font-mono text-white">
+                      {unetMetrics.crack_area_pct}%
+                    </span>
+                  )}
+                </button>
+              )}
+              {(unetMaskUrl || unetUrl) && (
+                <button
+                  type="button"
+                  onClick={() => setViewMode("mask")}
+                  className={`px-3 py-1 rounded-md font-semibold transition-all ${
+                    viewMode === "mask" ? "bg-white text-black shadow-xs font-bold" : "text-zinc-400 hover:text-white"
+                  }`}
+                >
+                  Binary Mask
+                </button>
+              )}
+            </div>
+
+            {/* Zoom Controls & Close button */}
+            <div className="flex items-center gap-2">
+              <div className="hidden md:inline-flex items-center rounded-lg bg-zinc-900 border border-white/15 p-0.5 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setZoomLevel((z) => Math.max(0.5, Number((z - 0.25).toFixed(2))))}
+                  disabled={zoomLevel <= 0.5}
+                  className="p-1.5 hover:bg-white/10 rounded text-zinc-300 hover:text-white disabled:opacity-40"
+                  title="Zoom Out"
+                >
+                  <ZoomOut className="size-4" />
+                </button>
+                <span className="px-2 font-mono text-[11px] text-zinc-300 min-w-12 text-center">
+                  {Math.round(zoomLevel * 100)}%
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setZoomLevel((z) => Math.min(3.5, Number((z + 0.25).toFixed(2))))}
+                  disabled={zoomLevel >= 3.5}
+                  className="p-1.5 hover:bg-white/10 rounded text-zinc-300 hover:text-white disabled:opacity-40"
+                  title="Zoom In"
+                >
+                  <ZoomIn className="size-4" />
+                </button>
+                {zoomLevel !== 1 && (
+                  <button
+                    type="button"
+                    onClick={() => setZoomLevel(1)}
+                    className="px-2 py-1 text-[10px] font-mono hover:bg-white/10 rounded text-zinc-400 hover:text-white border-l border-white/10 ml-0.5"
+                    title="Reset Zoom to 100%"
+                  >
+                    Reset
+                  </button>
+                )}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsMaximized(false)}
+                className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors border border-white/20 flex items-center gap-1.5 text-xs font-medium cursor-pointer"
+                title="Close maximized view (Esc)"
+              >
+                <X className="size-4" />
+                <span className="hidden sm:inline">Close</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Maximized Image Stage */}
+          <div
+            ref={maximizedContainerRef}
+            onPointerDown={handleMaximizedPointerDown}
+            onPointerUp={handleMaximizedPointerUp}
+            onPointerMove={handleMaximizedPointerMove}
+            className="relative flex-1 w-full h-full overflow-hidden flex items-center justify-center p-2 md:p-4 bg-zinc-950"
+          >
+            <div
+              className="relative w-full h-full flex items-center justify-center transition-transform duration-100 ease-out"
+              style={{ transform: `scale(${zoomLevel})` }}
+            >
+              {viewMode === "orig" && (
+                <img src={originalUrl} alt="Original capture" className="max-w-full max-h-full object-contain" />
+              )}
+              {viewMode === "proc" && (
+                <img src={processedUrl || originalUrl} alt="Processed copy" className="max-w-full max-h-full object-contain" />
+              )}
+              {viewMode === "rfdetr" && (
+                <img src={rfdetrUrl || processedUrl || originalUrl} alt="RF-DETR Defect Detection" className="max-w-full max-h-full object-contain" />
+              )}
+              {viewMode === "unet" && (
+                <img src={unetUrl || processedUrl || originalUrl} alt="UNet Crack Segmentation" className="max-w-full max-h-full object-contain" />
+              )}
+              {viewMode === "mask" && (
+                <img src={unetMaskUrl || unetUrl || processedUrl || originalUrl} alt="Binary Crack Mask" className="max-w-full max-h-full object-contain bg-black" />
+              )}
+              {viewMode === "compare" && (
+                <div className="relative w-full h-full max-w-6xl max-h-[82vh] overflow-hidden flex items-center justify-center">
+                  <img
+                    src={compareBackgroundUrl || originalUrl}
+                    alt="Processed / AI Detection"
+                    className="absolute inset-0 w-full h-full object-contain"
+                  />
+                  <div
+                    className="absolute inset-0 overflow-hidden"
+                    style={{ width: `${maximizedSliderPos}%` }}
+                  >
+                    <img
+                      src={originalUrl}
+                      alt="Original"
+                      className="absolute inset-0 w-full h-full object-contain max-w-none"
+                      style={{ width: maximizedContainerRef.current ? `${maximizedContainerRef.current.clientWidth}px` : "100%" }}
+                    />
+                  </div>
+                  <div
+                    className="absolute top-0 bottom-0 w-0.5 bg-white shadow-[0_0_15px_rgba(0,0,0,0.9)] pointer-events-none"
+                    style={{ left: `${maximizedSliderPos}%` }}
+                  >
+                    <div className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 size-8 rounded-full bg-black/90 border-2 border-white flex items-center justify-center text-white shadow-xl">
+                      <Sliders className="size-4 rotate-90" />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Bottom Footer Info Bar */}
+          <div className="px-4 py-2.5 border-t border-white/10 bg-black/85 backdrop-blur-xs flex flex-wrap items-center justify-between text-xs text-zinc-300 gap-3 shrink-0">
+            <div className="flex items-center gap-4">
+              <span className="font-semibold text-white">{crackTypeDisplay}</span>
+              {hasUnetData && (
+                <span className="font-mono text-[11px] text-rose-300">
+                  Crack Area: {unetMetrics.crack_area_pct}% ({unetMetrics.crack_pixels?.toLocaleString()} px)
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2 text-[11px] text-zinc-400">
+              <span>Use Left/Right arrows or drag slider in Compare mode</span>
+              <span>•</span>
+              <kbd className="px-1.5 py-0.5 rounded bg-white/10 text-white font-mono text-[10px]">Esc</kbd>
+              <span>to exit</span>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -766,6 +1072,7 @@ export function ImageDetailsDrawer({
   const [augmentations, setAugmentations] = useState<any[]>([]);
   const [loadingAugs, setLoadingAugs] = useState(false);
   const [transformModalOpen, setTransformModalOpen] = useState(false);
+  const [isDrawerMaximized, setIsDrawerMaximized] = useState(false);
 
   useEffect(() => {
     if (!open || !photo?.id || photo.id.startsWith("client-")) {
@@ -825,7 +1132,39 @@ export function ImageDetailsDrawer({
     photo?.qualityReport?.ai_classification ||
     photo?.quality_report?.ai_classification;
 
-  const isCrackDetected = Boolean(aiClassification?.has_crack || (aiClassification?.crack_probability ?? 0) >= 0.80);
+  const rfdetrDetection =
+    details?.rfdetrDetection ||
+    details?.rfdetr_detection ||
+    details?.qualityReport?.rfdetr_detection ||
+    details?.quality_report?.rfdetr_detection ||
+    photo?.rfdetrDetection ||
+    photo?.rfdetr_detection ||
+    photo?.qualityReport?.rfdetr_detection ||
+    photo?.quality_report?.rfdetr_detection ||
+    aiClassification?.rfdetr_detection;
+
+  const unetSegmentation =
+    details?.unetSegmentation ||
+    details?.unet_segmentation ||
+    details?.qualityReport?.unet_segmentation ||
+    details?.quality_report?.unet_segmentation ||
+    photo?.unetSegmentation ||
+    photo?.unet_segmentation ||
+    photo?.qualityReport?.unet_segmentation ||
+    photo?.quality_report?.unet_segmentation ||
+    aiClassification?.unet_segmentation;
+
+  const isCrackDetected = Boolean(
+    aiClassification?.has_crack ||
+    aiClassification?.predicted_class === "Cracked" ||
+    (aiClassification?.crack_probability ?? 0) >= 0.80 ||
+    rfdetrDetection?.has_defect ||
+    Boolean(rfdetrDetection?.num_detections && rfdetrDetection.num_detections > 0) ||
+    unetSegmentation?.has_crack ||
+    (unetSegmentation?.crack_area_pct !== undefined && unetSegmentation.crack_area_pct > 0) ||
+    photo?.is_cracked ||
+    photo?.isCracked
+  );
 
   const rfdetrUrl =
     details?.rfdetrUrl ||
@@ -833,13 +1172,6 @@ export function ImageDetailsDrawer({
     (details?.hasRfdetr || photo?.hasRfdetr || isCrackDetected
       ? `/api/v1/images/${photo.id}/file?variant=rfdetr`
       : null);
-
-  const rfdetrDetection =
-    details?.rfdetrDetection ||
-    details?.rfdetr_detection ||
-    details?.qualityReport?.rfdetr_detection ||
-    details?.quality_report?.rfdetr_detection ||
-    photo?.rfdetrDetection ||
     photo?.rfdetr_detection ||
     photo?.qualityReport?.rfdetr_detection ||
     photo?.quality_report?.rfdetr_detection ||
@@ -895,17 +1227,6 @@ export function ImageDetailsDrawer({
     (details?.hasUnet || photo?.hasUnet || isCrackDetected
       ? `/api/v1/images/${photo.id}/file?variant=mask`
       : null);
-
-  const unetSegmentation =
-    details?.unetSegmentation ||
-    details?.unet_segmentation ||
-    details?.qualityReport?.unet_segmentation ||
-    details?.quality_report?.unet_segmentation ||
-    photo?.unetSegmentation ||
-    photo?.unet_segmentation ||
-    photo?.qualityReport?.unet_segmentation ||
-    photo?.quality_report?.unet_segmentation ||
-    aiClassification?.unet_segmentation;
 
   const handleRunAi = async () => {
     setAnalyzingAi(true);
@@ -1017,12 +1338,27 @@ export function ImageDetailsDrawer({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
-        className="w-full sm:max-w-xl md:max-w-2xl overflow-y-auto p-6 space-y-5 bg-card border-l border-border"
+        className={`w-full ${
+          isDrawerMaximized
+            ? "sm:max-w-4xl md:max-w-5xl lg:max-w-6xl xl:max-w-7xl"
+            : "sm:max-w-xl md:max-w-2xl"
+        } overflow-y-auto p-6 space-y-5 bg-card border-l border-border transition-all duration-300`}
       >
-        <SheetHeader className="space-y-1">
+        <SheetHeader className="space-y-2">
           <div className="flex items-center justify-between gap-2">
             <span className="font-mono text-xs text-primary font-bold">{photo.name || photo.id}</span>
             <div className="flex items-center gap-1.5">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => setIsDrawerMaximized(!isDrawerMaximized)}
+                className="h-6 px-2 text-[10px] gap-1 border-border font-semibold shadow-xs"
+                title={isDrawerMaximized ? "Restore side panel width" : "Maximize side panel width"}
+              >
+                {isDrawerMaximized ? <Minimize2 className="size-3" /> : <Maximize2 className="size-3" />}
+                <span className="hidden sm:inline">{isDrawerMaximized ? "Restore Width" : "Maximize Panel"}</span>
+              </Button>
               <QualityBadge status={photo.quality_status || photo.status} confirmed={photo.warningConfirmed} />
               <ProcessingBadge status={photo.processing_status || "complete"} />
               <ClassificationBadge photo={photo} classification={aiClassification} />
@@ -1034,6 +1370,52 @@ export function ImageDetailsDrawer({
           <SheetDescription className="text-xs text-muted-foreground">
             Deterministic classical computer vision audit and enhancement pipeline.
           </SheetDescription>
+
+          {/* Right Side Bar Header Photo Thumbnail: shows UNet model output image if cracked */}
+          <div className="p-2.5 rounded-xl border border-border bg-muted/30 flex items-center justify-between gap-3 shadow-xs mt-2">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="relative size-14 rounded-lg overflow-hidden border border-border bg-black shrink-0 shadow-xs">
+                <img
+                  src={
+                    (isCrackDetected && (unetUrl || (photo.id && !photo.id.startsWith("client-") ? `/api/v1/images/${photo.id}/file?variant=unet` : null))) ||
+                    photo.thumbnailUrl ||
+                    processedUrl ||
+                    originalUrl
+                  }
+                  alt="Inspection thumbnail"
+                  className="w-full h-full object-cover"
+                  onError={(e) => {
+                    const target = e.currentTarget;
+                    if (target.src !== originalUrl) {
+                      target.src = originalUrl;
+                    }
+                  }}
+                />
+                {isCrackDetected && (
+                  <div className="absolute bottom-0 inset-x-0 bg-primary/95 text-white font-mono text-[8px] font-bold text-center py-0.5 leading-none tracking-tight">
+                    UNet
+                  </div>
+                )}
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-foreground truncate">{photo.name || photo.id}</span>
+                  {isCrackDetected && (
+                    <span className="px-1.5 py-0.2 rounded-full bg-rose-500/10 border border-rose-500/30 text-[10px] font-bold text-rose-400">
+                      Crack Identified
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
+                  {isCrackDetected
+                    ? (unetSegmentation?.crack_area_pct !== undefined
+                        ? `UNet Pixel Segmentation: ${unetSegmentation.crack_area_pct}% crack area`
+                        : "UNet Model Output: Crack Segmentation Active")
+                    : "Sound Concrete Surface · No Crack Defect"}
+                </p>
+              </div>
+            </div>
+          </div>
         </SheetHeader>
 
         {loading ? (
@@ -2346,14 +2728,24 @@ export function ImageQualityCard({
     photo.qualityReport?.ai_classification ||
     photo.quality_report?.ai_classification;
 
-  const hasCrackDefect = Boolean(aiForThumb?.has_crack || aiForThumb?.predicted_class === "Cracked" || (aiForThumb?.crack_probability ?? 0) >= 0.80);
+  const hasCrackDefect = Boolean(
+    aiForThumb?.has_crack ||
+    aiForThumb?.predicted_class === "Cracked" ||
+    (aiForThumb?.crack_probability ?? 0) >= 0.80 ||
+    rfdetrDet?.has_defect ||
+    Boolean(rfdetrDet?.num_detections && rfdetrDet.num_detections > 0) ||
+    unetSeg?.has_crack ||
+    (unetSeg?.crack_area_pct !== undefined && unetSeg.crack_area_pct > 0) ||
+    photo.is_cracked ||
+    photo.isCracked
+  );
   const isRealServerId = Boolean(photo.id && !photo.id.startsWith("client-") && !photo.id.startsWith("temp-") && photo.id.length > 15);
   const isFallback = Boolean(photo.modelFallback || photo.model_fallback || (hasCrackDefect && (!rfdetrDet || !rfdetrDet.has_defect)));
 
   // For cracked images, use UNet segmentation model output as thumbnail on main dashboard
   const unetCandidate =
     photo.unetUrl ||
-    (hasCrackDefect && isRealServerId ? `/api/v1/images/${photo.id}/file?variant=unet` : null) ||
+    (isRealServerId ? `/api/v1/images/${photo.id}/file?variant=unet` : null) ||
     photo.annotatedUrl;
 
   const displayThumbnail =

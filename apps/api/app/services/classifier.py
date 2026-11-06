@@ -4,8 +4,10 @@ import logging
 from pathlib import Path
 from typing import Optional, Dict, Any, Union, List
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageFile
 import io
+
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 from app.config import settings
 
@@ -275,9 +277,30 @@ class CrackClassifier:
             # Multi-scale spatial inspection: full image + center focus + central bands
             base_img = None
             if isinstance(image_input, (str, Path)):
-                base_img = Image.open(str(image_input))
+                try:
+                    base_img = Image.open(str(image_input))
+                    base_img.load()
+                except Exception:
+                    try:
+                        import cv2
+                        cv_img = cv2.imread(str(image_input))
+                        if cv_img is not None:
+                            base_img = Image.fromarray(cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB))
+                    except Exception:
+                        pass
             elif isinstance(image_input, bytes):
-                base_img = Image.open(io.BytesIO(image_input))
+                try:
+                    base_img = Image.open(io.BytesIO(image_input))
+                    base_img.load()
+                except Exception:
+                    try:
+                        import cv2
+                        nparr = np.frombuffer(image_input, np.uint8)
+                        cv_img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                        if cv_img is not None:
+                            base_img = Image.fromarray(cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB))
+                    except Exception:
+                        pass
             elif isinstance(image_input, np.ndarray):
                 if image_input.ndim == 3 and image_input.shape[2] == 3:
                     import cv2

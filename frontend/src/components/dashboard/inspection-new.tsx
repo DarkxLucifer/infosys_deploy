@@ -613,11 +613,17 @@ export function InspectionNewPage() {
           (result.ai_classification?.crack_probability ?? 0) >= 0.80 ||
           result.aiClassification?.has_crack ||
           result.aiClassification?.predicted_class === "Cracked" ||
-          (result.aiClassification?.crack_probability ?? 0) >= 0.80
+          (result.aiClassification?.crack_probability ?? 0) >= 0.80 ||
+          rfdetrDetection?.has_defect ||
+          Boolean(rfdetrDetection?.num_detections && rfdetrDetection.num_detections > 0) ||
+          unetSegmentation?.has_crack ||
+          (unetSegmentation?.crack_area_pct !== undefined && unetSegmentation.crack_area_pct > 0) ||
+          result.is_cracked
         );
 
+        const unetCandidateUrl = unetUrl || (result.id ? `/api/v1/images/${result.id}/file?variant=unet` : null);
         // Result image to display on dashboard: UNet segmentation thumbnail if crack detected
-        const displayUrl = (isCrack && unetUrl) || (!modelFallback && rfdetrUrl) || unetUrl || processedUrl || originalUrl;
+        const displayUrl = (isCrack && unetCandidateUrl) ? unetCandidateUrl : ((!modelFallback && rfdetrUrl) || unetUrl || processedUrl || originalUrl);
 
         setPhotos((prev) =>
           prev.map((p) => {
@@ -652,7 +658,7 @@ export function InspectionNewPage() {
               modelFallback: modelFallback,
               model_fallback: modelFallback,
               yoloUrl: yoloUrl,
-              annotatedUrl: (isCrack && unetUrl) ? unetUrl : ((!modelFallback && rfdetrUrl) ? rfdetrUrl : (unetUrl || yoloUrl)),
+              annotatedUrl: (isCrack && unetCandidateUrl) ? unetCandidateUrl : ((!modelFallback && rfdetrUrl) ? rfdetrUrl : (unetUrl || yoloUrl)),
               hasYolo: hasYolo,
               yoloDetection: yoloDetection,
               yolo_detection: yoloDetection,

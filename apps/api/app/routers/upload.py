@@ -888,11 +888,19 @@ async def upload_image_endpoint(
     has_unet = bool(unet_file and os.path.exists(unet_file))
 
     p_crack = float(ai_clf.get("crack_probability", 0.0)) if isinstance(ai_clf, dict) else 0.0
-    is_crack_defect = (p_crack >= 0.80 or (isinstance(ai_clf, dict) and ai_clf.get("has_crack")))
+    is_crack_defect = bool(
+        p_crack >= 0.80 or
+        (isinstance(ai_clf, dict) and ai_clf.get("has_crack")) or
+        (rfdetr_det and rfdetr_det.get("has_defect")) or
+        (unet_seg and (unet_seg.get("has_crack") or (unet_seg.get("crack_area_pct") or 0) > 0)) or
+        getattr(img_record, "is_cracked", False)
+    )
 
     # Display UNet segmentation result image as default preview / thumbnail for cracked images
     default_preview = f"/api/v1/images/{img_record.id}/file?variant=processed"
-    if is_crack_defect and has_unet:
+    if (is_crack_defect or has_unet) and unet_file and os.path.exists(unet_file):
+        default_preview = f"/api/v1/images/{img_record.id}/file?variant=unet"
+    elif is_crack_defect and has_unet:
         default_preview = f"/api/v1/images/{img_record.id}/file?variant=unet"
     elif has_rfdetr and not model_fallback:
         default_preview = f"/api/v1/images/{img_record.id}/file?variant=rfdetr"
@@ -999,10 +1007,20 @@ def list_inspection_images(
         qr_item = img.quality_report or {}
         ai_item = qr_item.get("ai_classification") if isinstance(qr_item, dict) else None
         p_item_crack = float(ai_item.get("crack_probability", 0.0)) if isinstance(ai_item, dict) else 0.0
-        item_is_crack = (p_item_crack >= 0.80 or (isinstance(ai_item, dict) and ai_item.get("has_crack")))
+        item_rfdetr = qr_item.get("rfdetr_detection") if isinstance(qr_item, dict) else (ai_item.get("rfdetr_detection") if isinstance(ai_item, dict) else None)
+        item_unet = qr_item.get("unet_segmentation") if isinstance(qr_item, dict) else (ai_item.get("unet_segmentation") if isinstance(ai_item, dict) else None)
+        item_is_crack = bool(
+            p_item_crack >= 0.80 or
+            (isinstance(ai_item, dict) and ai_item.get("has_crack")) or
+            (item_rfdetr and item_rfdetr.get("has_defect")) or
+            (item_unet and (item_unet.get("has_crack") or (item_unet.get("crack_area_pct") or 0) > 0)) or
+            getattr(img, "is_cracked", False)
+        )
 
         default_preview = f"/api/v1/images/{img.id}/file?variant=processed"
-        if item_is_crack and has_unet:
+        if (item_is_crack or has_unet) and unet_file and os.path.exists(unet_file):
+            default_preview = f"/api/v1/images/{img.id}/file?variant=unet"
+        elif item_is_crack and has_unet:
             default_preview = f"/api/v1/images/{img.id}/file?variant=unet"
         elif has_rfdetr:
             default_preview = f"/api/v1/images/{img.id}/file?variant=rfdetr"
@@ -1546,10 +1564,16 @@ def get_image_file_variant(
     qr = image.quality_report or {}
     ai_clf = qr.get("ai_classification") if isinstance(qr, dict) else None
     p_crack = float(ai_clf.get("crack_probability", 0.0)) if isinstance(ai_clf, dict) else 0.0
-    is_crack_defect = (p_crack >= 0.80 or (isinstance(ai_clf, dict) and ai_clf.get("has_crack")))
-
     rfdetr_det = qr.get("rfdetr_detection") if isinstance(qr, dict) else (ai_clf.get("rfdetr_detection") if isinstance(ai_clf, dict) else None)
+    unet_seg = qr.get("unet_segmentation") if isinstance(qr, dict) else (ai_clf.get("unet_segmentation") if isinstance(ai_clf, dict) else None)
     model_fallback = bool(qr.get("model_fallback") if isinstance(qr, dict) else (ai_clf.get("model_fallback") if isinstance(ai_clf, dict) else False))
+    is_crack_defect = bool(
+        p_crack >= 0.80 or
+        (isinstance(ai_clf, dict) and ai_clf.get("has_crack")) or
+        (rfdetr_det and rfdetr_det.get("has_defect")) or
+        (unet_seg and (unet_seg.get("has_crack") or (unet_seg.get("crack_area_pct") or 0) > 0)) or
+        getattr(image, "is_cracked", False)
+    )
 
     proc_target = image.processed_path if (image.processed_path and os.path.exists(image.processed_path)) else image.original_path
 
@@ -1688,7 +1712,9 @@ def get_image_file_variant(
                 target_path = proc.output_path
 
     elif variant == "thumbnail":
-        if is_crack_defect and has_unet:
+        if (is_crack_defect or has_unet) and unet_file and os.path.exists(unet_file):
+            target_path = unet_file
+        elif is_crack_defect and has_unet:
             target_path = unet_file
         elif has_rfdetr and not model_fallback:
             target_path = rfdetr_thumb if (rfdetr_thumb and os.path.exists(rfdetr_thumb)) else rfdetr_file
