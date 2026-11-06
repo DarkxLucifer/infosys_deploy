@@ -1379,7 +1379,8 @@ export function ImageDetailsDrawer({
               <div className="relative size-14 rounded-lg overflow-hidden border border-border bg-black shrink-0 shadow-xs">
                 <img
                   src={
-                    (isCrackDetected && (unetUrl || (photo.id && !photo.id.startsWith("client-") ? `/api/v1/images/${photo.id}/file?variant=unet` : null))) ||
+                    photo.unetUrl ||
+                    (photo.id && !photo.id.startsWith("client-") ? `/api/v1/images/${photo.id}/file?variant=unet` : null) ||
                     photo.thumbnailUrl ||
                     processedUrl ||
                     originalUrl
@@ -2769,20 +2770,18 @@ export function ImageQualityCard({
   const isRealServerId = Boolean(photo.id && !photo.id.startsWith("client-") && !photo.id.startsWith("temp-") && photo.id.length > 15);
   const isFallback = Boolean(photo.modelFallback || photo.model_fallback || (hasCrackDefect && (!rfdetrDet || !rfdetrDet.has_defect)));
 
-  // For cracked images, use UNet segmentation model output as thumbnail on main dashboard
+  // The thumbnail area MUST ALWAYS show the UNet model output image as requested by the user
   const unetCandidate =
     photo.unetUrl ||
     (isRealServerId ? `/api/v1/images/${photo.id}/file?variant=unet` : null) ||
     photo.annotatedUrl;
 
   const displayThumbnail =
-    (hasCrackDefect ? unetCandidate : null) ||
-    (!isFallback && (photo.rfdetrUrl || (hasCrackDefect && isRealServerId ? `/api/v1/images/${photo.id}/file?variant=rfdetr` : null))) ||
-    photo.unetUrl ||
-    photo.annotatedUrl ||
-    (hasCrackDefect && isRealServerId ? `/api/v1/images/${photo.id}/file?variant=unet` : null) ||
+    unetCandidate ||
+    photo.thumbnailUrl ||
+    photo.previewUrl ||
     photo.processedUrl ||
-    photo.previewUrl;
+    photo.originalUrl;
 
   return (
     <>

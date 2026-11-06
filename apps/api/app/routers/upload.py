@@ -905,16 +905,8 @@ async def upload_image_endpoint(
         getattr(img_record, "is_cracked", False)
     )
 
-    # Display UNet segmentation result image as default preview / thumbnail for cracked images
-    default_preview = f"/api/v1/images/{img_record.id}/file?variant=processed"
-    if (is_crack_defect or has_unet) and unet_file and os.path.exists(unet_file):
-        default_preview = f"/api/v1/images/{img_record.id}/file?variant=unet"
-    elif is_crack_defect and has_unet:
-        default_preview = f"/api/v1/images/{img_record.id}/file?variant=unet"
-    elif has_rfdetr and not model_fallback:
-        default_preview = f"/api/v1/images/{img_record.id}/file?variant=rfdetr"
-    elif has_unet:
-        default_preview = f"/api/v1/images/{img_record.id}/file?variant=unet"
+    # The default preview & thumbnail MUST ALWAYS show the UNet model output image
+    default_preview = f"/api/v1/images/{img_record.id}/file?variant=unet"
 
     return {
         "id": img_record.id,
@@ -1034,15 +1026,8 @@ def list_inspection_images(
             getattr(img, "is_cracked", False)
         )
 
-        default_preview = f"/api/v1/images/{img.id}/file?variant=processed"
-        if (item_is_crack or has_unet) and unet_file and os.path.exists(unet_file):
-            default_preview = f"/api/v1/images/{img.id}/file?variant=unet"
-        elif item_is_crack and has_unet:
-            default_preview = f"/api/v1/images/{img.id}/file?variant=unet"
-        elif has_rfdetr:
-            default_preview = f"/api/v1/images/{img.id}/file?variant=rfdetr"
-        elif has_unet:
-            default_preview = f"/api/v1/images/{img.id}/file?variant=unet"
+        # Default preview and thumbnail MUST ALWAYS point to U-Net model output image
+        default_preview = f"/api/v1/images/{img.id}/file?variant=unet"
 
         item = {
             "id": img.id,
@@ -1062,18 +1047,18 @@ def list_inspection_images(
             "has_rfdetr": has_rfdetr,
             "hasYolo": has_yolo,
             "has_yolo": has_yolo,
-            "hasUnet": has_unet,
-            "has_unet": has_unet,
+            "hasUnet": True,
+            "has_unet": True,
             "originalUrl": f"/api/v1/images/{img.id}/file?variant=original",
             "previewUrl": f"{default_preview}{'&' if '?' in default_preview else '?'}v={img.sha256[:10] if img.sha256 else ''}",
-            "thumbnailUrl": f"/api/v1/images/{img.id}/file?variant=thumbnail&v={img.sha256[:10] if img.sha256 else ''}",
+            "thumbnailUrl": f"/api/v1/images/{img.id}/file?variant=unet&v={img.sha256[:10] if img.sha256 else ''}",
             "processedUrl": f"/api/v1/images/{img.id}/file?variant=processed&v={img.sha256[:10] if img.sha256 else ''}",
             "enhancedUrl": f"/api/v1/images/{img.id}/file?variant=enhanced&v={img.sha256[:10] if img.sha256 else ''}",
             "rfdetrUrl": (f"/api/v1/images/{img.id}/file?variant=rfdetr&v={img.sha256[:10] if img.sha256 else ''}") if has_rfdetr else None,
             "yoloUrl": (f"/api/v1/images/{img.id}/file?variant=yolo&v={img.sha256[:10] if img.sha256 else ''}") if has_yolo else None,
-            "annotatedUrl": (f"/api/v1/images/{img.id}/file?variant=unet&v={img.sha256[:10] if img.sha256 else ''}" if (item_is_crack and has_unet) else ((f"/api/v1/images/{img.id}/file?variant=rfdetr&v={img.sha256[:10] if img.sha256 else ''}") if has_rfdetr else ((f"/api/v1/images/{img.id}/file?variant=unet&v={img.sha256[:10] if img.sha256 else ''}") if has_unet else None))),
-            "unetUrl": (f"/api/v1/images/{img.id}/file?variant=unet&v={img.sha256[:10] if img.sha256 else ''}") if has_unet else None,
-            "unetMaskUrl": (f"/api/v1/images/{img.id}/file?variant=mask&v={img.sha256[:10] if img.sha256 else ''}") if has_unet else None,
+            "annotatedUrl": f"/api/v1/images/{img.id}/file?variant=unet&v={img.sha256[:10] if img.sha256 else ''}",
+            "unetUrl": f"/api/v1/images/{img.id}/file?variant=unet&v={img.sha256[:10] if img.sha256 else ''}",
+            "unetMaskUrl": f"/api/v1/images/{img.id}/file?variant=mask&v={img.sha256[:10] if img.sha256 else ''}",
             "createdAt": img.created_at.isoformat()
         }
 
@@ -1144,9 +1129,6 @@ def list_inspection_images(
                         item["has_rfdetr"] = has_rfdetr
                         if has_rfdetr and not qr.get("model_fallback"):
                             item["rfdetrUrl"] = f"/api/v1/images/{img.id}/file?variant=rfdetr"
-                            if not (p_crack >= 0.80 and has_unet):
-                                item["annotatedUrl"] = f"/api/v1/images/{img.id}/file?variant=rfdetr"
-                                item["previewUrl"] = f"/api/v1/images/{img.id}/file?variant=rfdetr"
                     except Exception as rfdetr_err:
                         logger.warning("On-demand RF-DETR generation error in list_inspection_images for %s: %s", img.id, rfdetr_err)
 
@@ -1385,14 +1367,8 @@ def get_image_details(
 
     v_tag = image.sha256[:10] if image.sha256 else ""
 
-    if is_crack_defect and has_unet:
-        default_preview = f"/api/v1/images/{image.id}/file?variant=unet"
-    elif has_rfdetr and not model_fallback:
-        default_preview = f"/api/v1/images/{image.id}/file?variant=rfdetr"
-    elif has_unet:
-        default_preview = f"/api/v1/images/{image.id}/file?variant=unet"
-    else:
-        default_preview = f"/api/v1/images/{image.id}/file?variant=processed"
+    # The default preview & thumbnail MUST ALWAYS show the UNet model output image
+    default_preview = f"/api/v1/images/{image.id}/file?variant=unet"
 
     response = {
         "id": image.id,
@@ -1427,8 +1403,8 @@ def get_image_details(
         "has_yolo": has_yolo,
         "yoloDetection": yolo_det,
         "yolo_detection": yolo_det,
-        "hasUnet": has_unet,
-        "has_unet": has_unet,
+        "hasUnet": True,
+        "has_unet": True,
         "unetSegmentation": unet_seg,
         "unet_segmentation": unet_seg,
         "hasGeometry": has_geo,
@@ -1439,15 +1415,15 @@ def get_image_details(
         "damage_assessment": (image.quality_report.get("damage_assessment") if (image.quality_report and isinstance(image.quality_report, dict)) else None) or (crack_geo.get("summary", {}).get("damage_assessment") if (crack_geo and isinstance(crack_geo, dict)) else None),
         "calibration": image.calibration,
         "originalUrl": f"/api/v1/images/{image.id}/file?variant=original&v={v_tag}",
-        "thumbnailUrl": f"/api/v1/images/{image.id}/file?variant=thumbnail&v={v_tag}",
+        "thumbnailUrl": f"/api/v1/images/{image.id}/file?variant=unet&v={v_tag}",
         "previewUrl": f"{default_preview}{'&' if '?' in default_preview else '?'}v={v_tag}",
         "processedUrl": (f"/api/v1/images/{image.id}/file?variant=processed&v={v_tag}") if image.processing_status == "complete" else None,
         "enhancedUrl": (f"/api/v1/images/{image.id}/file?variant=enhanced&v={v_tag}") if image.processing_status == "complete" else None,
         "rfdetrUrl": (f"/api/v1/images/{image.id}/file?variant=rfdetr&v={v_tag}") if has_rfdetr else None,
         "yoloUrl": (f"/api/v1/images/{image.id}/file?variant=yolo&v={v_tag}") if has_yolo else None,
-        "annotatedUrl": (f"/api/v1/images/{image.id}/file?variant=unet&v={v_tag}" if (is_crack_defect and has_unet) else ((f"/api/v1/images/{image.id}/file?variant=rfdetr&v={v_tag}") if (has_rfdetr and not model_fallback) else ((f"/api/v1/images/{image.id}/file?variant=unet&v={v_tag}") if has_unet else (f"/api/v1/images/{image.id}/file?variant=yolo&v={v_tag}" if has_yolo else None)))),
-        "unetUrl": (f"/api/v1/images/{image.id}/file?variant=unet&v={v_tag}") if has_unet else None,
-        "unetMaskUrl": (f"/api/v1/images/{image.id}/file?variant=mask&v={v_tag}") if has_unet else None,
+        "annotatedUrl": f"/api/v1/images/{image.id}/file?variant=unet&v={v_tag}",
+        "unetUrl": f"/api/v1/images/{image.id}/file?variant=unet&v={v_tag}",
+        "unetMaskUrl": f"/api/v1/images/{image.id}/file?variant=mask&v={v_tag}",
         "geometryUrl": (f"/api/v1/images/{image.id}/file?variant=geometry&v={v_tag}") if has_geo else None,
         "damageAssessment": (image.quality_report.get("damage_assessment") if (image.quality_report and isinstance(image.quality_report, dict)) else None) or (crack_geo.get("summary", {}).get("damage_assessment") if (crack_geo and isinstance(crack_geo, dict)) else None),
         "damage_assessment": (image.quality_report.get("damage_assessment") if (image.quality_report and isinstance(image.quality_report, dict)) else None) or (crack_geo.get("summary", {}).get("damage_assessment") if (crack_geo and isinstance(crack_geo, dict)) else None),
@@ -1702,14 +1678,28 @@ def get_image_file_variant(
                 target_path = proc.output_path
 
     elif variant == "thumbnail":
-        if (is_crack_defect or has_unet) and unet_file and os.path.exists(unet_file):
+        if has_unet:
             target_path = unet_file
-        elif is_crack_defect and has_unet:
-            target_path = unet_file
-        elif has_rfdetr and not model_fallback:
-            target_path = rfdetr_thumb if (rfdetr_thumb and os.path.exists(rfdetr_thumb)) else rfdetr_file
-        elif has_unet:
-            target_path = unet_file
+        elif proc_target and os.path.exists(proc_target):
+            try:
+                from app.services.unet_segmentor import get_unet_segmentor
+                segmentor = get_unet_segmentor()
+                mm_scale = image.calibration.get("mm_per_pixel") if (image.calibration and isinstance(image.calibration, dict)) else None
+                segmentor.segment(
+                    image_input=proc_target,
+                    threshold=0.5,
+                    save_overlay_path=unet_file,
+                    save_mask_path=unet_mask,
+                    mm_per_pixel=mm_scale
+                )
+                if os.path.exists(unet_file):
+                    target_path = unet_file
+                elif image.thumbnail_path and os.path.exists(image.thumbnail_path):
+                    target_path = image.thumbnail_path
+                else:
+                    target_path = proc_target
+            except Exception:
+                target_path = image.thumbnail_path if (image.thumbnail_path and os.path.exists(image.thumbnail_path)) else proc_target
         elif image.thumbnail_path and os.path.exists(image.thumbnail_path):
             target_path = image.thumbnail_path
 
@@ -2235,14 +2225,33 @@ def confirm_warning_endpoint(
     db.commit()
     db.refresh(image)
 
-    rfdetr_file = find_stored_file("rfdetr", f"{image.id}.jpg")
-    yolo_file = find_stored_file("yolo", f"{image.id}.jpg")
-    unet_file = find_stored_file("unet", f"{image.id}.jpg")
-    geo_file = find_stored_file("geometry", f"{image.id}.jpg")
+    rfdetr_file = find_stored_file("rfdetr", f"{image.id}.jpg") or os.path.join(RFDETR_DIR, f"{image.id}.jpg")
+    yolo_file = find_stored_file("yolo", f"{image.id}.jpg") or os.path.join(YOLO_DIR, f"{image.id}.jpg")
+    unet_file = find_stored_file("unet", f"{image.id}.jpg") or os.path.join(UNET_DIR, f"{image.id}.jpg")
+    unet_mask_file = find_stored_file("unet", f"{image.id}_mask.png") or os.path.join(UNET_DIR, f"{image.id}_mask.png")
+    geo_file = find_stored_file("geometry", f"{image.id}.jpg") or os.path.join(GEOMETRY_DIR, f"{image.id}.jpg")
     has_rfdetr = bool(rfdetr_file and os.path.exists(rfdetr_file))
     has_yolo = bool(yolo_file and os.path.exists(yolo_file))
     has_unet = bool(unet_file and os.path.exists(unet_file))
     has_geo = bool(geo_file and os.path.exists(geo_file))
+
+    # Ensure U-Net segmentation overlay is generated if not yet on disk
+    if not has_unet and target_to_classify and os.path.exists(target_to_classify):
+        try:
+            from app.services.unet_segmentor import get_unet_segmentor
+            segmentor = get_unet_segmentor()
+            mm_scale = image.calibration.get("mm_per_pixel") if (image.calibration and isinstance(image.calibration, dict)) else None
+            segmentor.segment(
+                image_input=target_to_classify,
+                threshold=0.5,
+                save_overlay_path=unet_file,
+                save_mask_path=unet_mask_file,
+                mm_per_pixel=mm_scale
+            )
+            has_unet = os.path.exists(unet_file)
+        except Exception as unet_e:
+            logger.warning("UNet on-demand error in confirm_warning: %s", unet_e)
+
     qr = image.quality_report or {}
     ai_clf = qr.get("ai_classification") if isinstance(qr, dict) else None
     rfdetr_det = qr.get("rfdetr_detection") if isinstance(qr, dict) else (ai_clf.get("rfdetr_detection") if isinstance(ai_clf, dict) else None)
@@ -2252,16 +2261,8 @@ def confirm_warning_endpoint(
     unet_seg = qr.get("unet_segmentation") if isinstance(qr, dict) else None
     crack_geo = qr.get("crack_geometry") if isinstance(qr, dict) else None
 
-    p_crack = float(ai_clf.get("crack_probability", 0.0)) if isinstance(ai_clf, dict) else 0.0
-    is_crack_defect = (p_crack >= 0.80 or (isinstance(ai_clf, dict) and ai_clf.get("has_crack")))
-
-    default_preview = f"/api/v1/images/{image.id}/file?variant=processed"
-    if is_crack_defect and has_unet:
-        default_preview = f"/api/v1/images/{image.id}/file?variant=unet"
-    elif has_rfdetr and not model_fallback:
-        default_preview = f"/api/v1/images/{image.id}/file?variant=rfdetr"
-    elif has_unet:
-        default_preview = f"/api/v1/images/{image.id}/file?variant=unet"
+    # The confirmed image thumbnail and preview must ALWAYS show the UNet model output image
+    default_preview = f"/api/v1/images/{image.id}/file?variant=unet"
 
     return {
         "status": "accepted",
@@ -2285,8 +2286,8 @@ def confirm_warning_endpoint(
         "unet_segmentation": unet_seg,
         "hasYolo": has_yolo,
         "has_yolo": has_yolo,
-        "hasUnet": has_unet,
-        "has_unet": has_unet,
+        "hasUnet": True,
+        "has_unet": True,
         "hasGeometry": has_geo,
         "has_geometry": has_geo,
         "crackGeometry": crack_geo,
@@ -2295,12 +2296,13 @@ def confirm_warning_endpoint(
         "damage_assessment": qr.get("damage_assessment") or (crack_geo.get("summary", {}).get("damage_assessment") if crack_geo else None),
         "calibration": image.calibration,
         "previewUrl": default_preview,
+        "thumbnailUrl": default_preview,
         "processedUrl": f"/api/v1/images/{image.id}/file?variant=processed",
         "rfdetrUrl": f"/api/v1/images/{image.id}/file?variant=rfdetr" if has_rfdetr else None,
         "yoloUrl": f"/api/v1/images/{image.id}/file?variant=yolo" if has_yolo else None,
-        "annotatedUrl": (f"/api/v1/images/{image.id}/file?variant=unet" if (is_crack_defect and has_unet) else ((f"/api/v1/images/{image.id}/file?variant=rfdetr") if (has_rfdetr and not model_fallback) else ((f"/api/v1/images/{image.id}/file?variant=unet") if has_unet else (f"/api/v1/images/{image.id}/file?variant=yolo" if has_yolo else None)))),
-        "unetUrl": f"/api/v1/images/{image.id}/file?variant=unet" if has_unet else None,
-        "unetMaskUrl": f"/api/v1/images/{image.id}/file?variant=mask" if has_unet else None,
+        "annotatedUrl": default_preview,
+        "unetUrl": default_preview,
+        "unetMaskUrl": f"/api/v1/images/{image.id}/file?variant=mask",
         "geometryUrl": f"/api/v1/images/{image.id}/file?variant=geometry" if has_geo else None
     }
 

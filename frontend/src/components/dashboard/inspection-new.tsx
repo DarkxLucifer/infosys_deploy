@@ -98,6 +98,10 @@ interface UploadedPhoto {
   quality_report?: any;
   crackGeometry?: any;
   crack_geometry?: any;
+  hasGeometry?: boolean;
+  has_geometry?: boolean;
+  damageAssessment?: any;
+  damage_assessment?: any;
   version?: number;
 }
 
@@ -791,10 +795,9 @@ export function InspectionNewPage() {
   const handleConfirmWarning = useCallback(async (id: string) => {
     try {
       const res = await api.confirmImageWarning(id);
-      const hasUnet = Boolean(res.hasUnet || res.has_unet);
-      const unetUrl = res.unetUrl || (hasUnet ? `/api/v1/images/${id}/file?variant=unet` : null);
-      const displayUrl = unetUrl || res.previewUrl || res.preview_url || `/api/v1/images/${id}/file?variant=unet`;
+      const unetUrl = res.unetUrl || `/api/v1/images/${id}/file?variant=unet`;
       const bust = `?v=${Date.now()}`;
+      const unetBusted = `${unetUrl}${unetUrl.includes("?") ? "&" : "?"}v=${Date.now()}`;
 
       setPhotos((prev) =>
         prev.map((p) =>
@@ -805,26 +808,28 @@ export function InspectionNewPage() {
                 quality_status: "accepted",
                 processing_status: "complete",
                 warningConfirmed: true,
-                previewUrl: `${displayUrl}${displayUrl.includes("?") ? "&" : "?"}v=${Date.now()}`,
-                yoloUrl: null,
-                annotatedUrl: unetUrl ? `${unetUrl}${bust}` : null,
-                hasYolo: false,
-                yoloDetection: null,
-                hasUnet: hasUnet,
-                unetUrl: unetUrl ? `${unetUrl}${bust}` : null,
-                unetMaskUrl: res.unetMaskUrl || (hasUnet ? `/api/v1/images/${id}/file?variant=mask${bust}` : null),
-                unetSegmentation: res.unetSegmentation || res.unet_segmentation,
-                aiClassification: res.aiClassification || res.ai_classification,
-                hasGeometry: Boolean(res.hasGeometry || res.has_geometry || res.crackGeometry || res.crack_geometry),
-                has_geometry: Boolean(res.hasGeometry || res.has_geometry || res.crackGeometry || res.crack_geometry),
-                crackGeometry: res.crackGeometry || res.crack_geometry,
-                crack_geometry: res.crackGeometry || res.crack_geometry,
-                damageAssessment: res.damageAssessment || res.damage_assessment,
-                damage_assessment: res.damageAssessment || res.damage_assessment,
+                thumbnailUrl: unetBusted,
+                previewUrl: unetBusted,
+                annotatedUrl: unetBusted,
+                unetUrl: unetBusted,
+                hasUnet: true,
+                has_unet: true,
+                yoloUrl: res.yoloUrl || p.yoloUrl || `/api/v1/images/${id}/file?variant=yolo`,
+                hasYolo: Boolean(res.hasYolo ?? p.hasYolo ?? true),
+                yoloDetection: res.yoloDetection || p.yoloDetection,
+                unetMaskUrl: res.unetMaskUrl || `/api/v1/images/${id}/file?variant=mask${bust}`,
+                unetSegmentation: res.unetSegmentation || res.unet_segmentation || p.unetSegmentation,
+                aiClassification: res.aiClassification || res.ai_classification || p.aiClassification,
+                hasGeometry: Boolean(res.hasGeometry || res.has_geometry || res.crackGeometry || res.crack_geometry || p.hasGeometry),
+                has_geometry: Boolean(res.hasGeometry || res.has_geometry || res.crackGeometry || res.crack_geometry || p.hasGeometry),
+                crackGeometry: res.crackGeometry || res.crack_geometry || p.crackGeometry,
+                crack_geometry: res.crackGeometry || res.crack_geometry || p.crackGeometry,
+                damageAssessment: res.damageAssessment || res.damage_assessment || p.damageAssessment,
+                damage_assessment: res.damageAssessment || res.damage_assessment || p.damageAssessment,
                 calibration: res.calibration || p.calibration,
-                geometryUrl: res.geometryUrl,
-                processedUrl: res.preview_url || `/api/v1/images/${id}/file?variant=processed`,
-                processingRun: res.processing_run,
+                geometryUrl: res.geometryUrl || p.geometryUrl,
+                processedUrl: res.processedUrl || res.preview_url || `/api/v1/images/${id}/file?variant=processed`,
+                processingRun: res.processing_run || p.processingRun,
               }
             : p
         )

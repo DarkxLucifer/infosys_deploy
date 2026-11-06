@@ -1087,7 +1087,7 @@ export function InspectionDetailPage() {
                       const modelFallback = Boolean(img.modelFallback || img.model_fallback || (hasCrack && !hasRfdetr));
                       const unetSeg = qr.unet_segmentation || img.unetSegmentation;
                       const hasUnet = Boolean(img.hasUnet || unetSeg || hasCrack);
-                      const defaultMode: "orig" | "proc" | "rfdetr" | "yolo" | "unet" = (hasRfdetr && !modelFallback) ? "rfdetr" : (hasCrack ? "unet" : "orig");
+                      const defaultMode: "orig" | "proc" | "rfdetr" | "yolo" | "unet" = "unet";
                       const mode = viewMode[img.id] || defaultMode;
                       const tok = getAuthToken();
                       const tokQuery = tok ? `?token=${encodeURIComponent(tok)}` : "";
