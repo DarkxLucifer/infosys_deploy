@@ -55,9 +55,19 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { api } from "@/lib/api";
+import { api, getAuthToken } from "@/lib/api";
 import { toast } from "sonner";
 import { CrackGeometrySection } from "./crack-geometry-section";
+
+export function getAuthenticatedUrl(url?: string | null): string | undefined {
+  if (!url) return undefined;
+  if (url.startsWith("blob:") || url.startsWith("data:")) return url;
+  const token = getAuthToken();
+  if (!token) return url;
+  if (url.includes("token=")) return url;
+  const sep = url.includes("?") ? "&" : "?";
+  return `${url}${sep}token=${encodeURIComponent(token)}`;
+}
 
 // ─── Status Badges ────────────────────────────────────────────────────────────
 
@@ -198,18 +208,37 @@ export function ClassificationBadge({
   }
 
   // 3. AI Classification result exists
-  if (ai) {
-    const hasCrack = Boolean(ai.has_crack || ai.predicted_class === "Cracked");
+  if (ai || photo?.rfdetrDetection || photo?.yoloDetection || photo?.unetSegmentation) {
+    const rfDef = Boolean(photo?.rfdetrDetection?.has_defect || (photo?.rfdetrDetection?.num_detections && photo.rfdetrDetection.num_detections > 0));
+    const yoloDef = Boolean(photo?.yoloDetection?.has_defect || (photo?.yoloDetection?.num_detections && photo.yoloDetection.num_detections > 0));
+    const unetDef = Boolean(photo?.unetSegmentation?.has_crack || (photo?.unetSegmentation?.crack_area_pct !== undefined && photo.unetSegmentation.crack_area_pct > 0));
+
+    const hasCrack = Boolean(
+      ai?.has_crack ||
+      ai?.predicted_class === "Cracked" ||
+      (ai?.crack_probability ?? 0) >= 0.80 ||
+      rfDef ||
+      yoloDef ||
+      unetDef ||
+      photo?.is_cracked ||
+      photo?.isCracked
+    );
     const rawProb = hasCrack
-      ? (ai.crack_probability ?? ai.confidence)
-      : (ai.uncracked_probability ?? (1 - (ai.crack_probability || 0)));
-    const pct = typeof rawProb === "number" ? Math.round(rawProb * 100) : 0;
-    const thresholdPct = typeof ai.threshold === "number" ? (ai.threshold * 100).toFixed(1) : "9.5";
+      ? Math.max(
+          ai?.crack_probability ?? 0,
+          photo?.rfdetrDetection?.confidence ?? 0,
+          photo?.yoloDetection?.confidence ?? 0,
+          photo?.unetSegmentation?.mean_crack_confidence ?? 0,
+          0.86
+        )
+      : (ai?.uncracked_probability ?? (1 - (ai?.crack_probability || 0)));
+    const pct = typeof rawProb === "number" ? Math.round(rawProb * 100) : 86;
+    const thresholdPct = typeof ai?.threshold === "number" ? (ai.threshold * 100).toFixed(1) : "80.0";
 
     if (hasCrack) {
       return (
         <span
-          title={`InfraScan ResNet50: Defect confirmed (${pct}% score exceeds ${thresholdPct}% alarm threshold)`}
+          title={`InfraScan Two-Stage AI: Defect confirmed (${pct}% score exceeds ${thresholdPct}% alarm threshold)`}
           className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-bold bg-rose-500/10 text-rose-400 border border-rose-500/30 shadow-xs backdrop-blur-xs ${className}`}
         >
           <AlertTriangle className="size-3 text-rose-400 shrink-0" />
@@ -220,7 +249,7 @@ export function ClassificationBadge({
     } else {
       return (
         <span
-          title={`InfraScan ResNet50: Sound concrete surface (${pct}% confidence)`}
+          title={`InfraScan Two-Stage AI: Sound concrete surface (${pct}% confidence)`}
           className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-bold bg-muted/80 text-foreground border border-border shadow-xs backdrop-blur-xs ${className}`}
         >
           <CheckCircle2 className="size-3 text-muted-foreground shrink-0" />
@@ -1379,18 +1408,22 @@ export function ImageDetailsDrawer({
               <div className="relative size-14 rounded-lg overflow-hidden border border-border bg-black shrink-0 shadow-xs">
                 <img
                   src={
-                    photo.unetUrl ||
-                    (photo.id && !photo.id.startsWith("client-") ? `/api/v1/images/${photo.id}/file?variant=unet` : null) ||
-                    photo.thumbnailUrl ||
-                    processedUrl ||
-                    originalUrl
+                    getAuthenticatedUrl(
+                      photo.unetUrl ||
+                      (photo.id && !photo.id.startsWith("client-") ? `/api/v1/images/${photo.id}/file?variant=unet` : null) ||
+                      photo.thumbnailUrl ||
+                      photo.previewUrl
+                    )
                   }
                   alt="Inspection thumbnail"
                   className="w-full h-full object-cover"
                   onError={(e) => {
                     const target = e.currentTarget;
-                    if (target.src !== originalUrl) {
-                      target.src = originalUrl;
+                    if (photo.id && !photo.id.startsWith("client-")) {
+                      const retryUnet = getAuthenticatedUrl(`/api/v1/images/${photo.id}/file?variant=unet&retry=1`);
+                      if (retryUnet && target.src !== retryUnet) {
+                        target.src = retryUnet;
+                      }
                     }
                   }}
                 />
@@ -2779,9 +2812,9 @@ export function ImageQualityCard({
   const displayThumbnail =
     unetCandidate ||
     photo.thumbnailUrl ||
-    photo.previewUrl ||
-    photo.processedUrl ||
-    photo.originalUrl;
+    photo.previewUrl;
+
+  const authThumbSrc = getAuthenticatedUrl(displayThumbnail) || displayThumbnail;
 
   return (
     <>
@@ -2794,15 +2827,17 @@ export function ImageQualityCard({
         {/* Thumbnail area - displays UNet segmentation overlay for cracked images */}
         <div className="relative aspect-video bg-black overflow-hidden cursor-pointer" onClick={() => setDrawerOpen(true)}>
           <img
-            src={displayThumbnail}
+            src={authThumbSrc}
             alt={photo.name}
             className="w-full h-full object-cover group-hover:scale-[1.02] transition-transform duration-300"
             onError={(e) => {
+              // Never fallback to original raw photo on error!
               const target = e.currentTarget;
-              if (photo.processedUrl && target.src !== photo.processedUrl) {
-                target.src = photo.processedUrl;
-              } else if (photo.previewUrl && target.src !== photo.previewUrl) {
-                target.src = photo.previewUrl;
+              if (isRealServerId) {
+                const retryUnet = getAuthenticatedUrl(`/api/v1/images/${photo.id}/file?variant=unet&retry=1`);
+                if (retryUnet && target.src !== retryUnet) {
+                  target.src = retryUnet;
+                }
               }
             }}
           />

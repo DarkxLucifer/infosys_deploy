@@ -37,7 +37,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { api } from "@/lib/api";
+import { api, getAuthToken } from "@/lib/api";
 import { ComplianceNote, PageHeader, PageShell } from "./page-shell";
 import {
   ImageQualityCard,
@@ -102,6 +102,7 @@ interface UploadedPhoto {
   has_geometry?: boolean;
   damageAssessment?: any;
   damage_assessment?: any;
+  hasCrack?: boolean;
   version?: number;
 }
 
@@ -624,9 +625,17 @@ export function InspectionNewPage() {
           result.is_cracked
         );
 
-        const unetCandidateUrl = unetUrl || (result.id ? `/api/v1/images/${result.id}/file?variant=unet` : null);
-        // Result image to display on dashboard: UNet segmentation thumbnail if crack detected
-        const displayUrl = (isCrack && unetCandidateUrl) ? unetCandidateUrl : ((!modelFallback && rfdetrUrl) || unetUrl || processedUrl || originalUrl);
+        const token = getAuthToken();
+        const tokenParam = token ? `token=${encodeURIComponent(token)}` : "";
+        const baseUnetCandidate = unetUrl || (result.id ? `/api/v1/images/${result.id}/file?variant=unet` : null);
+        const unetCandidateUrl = baseUnetCandidate
+          ? (baseUnetCandidate.includes("token=")
+              ? baseUnetCandidate
+              : `${baseUnetCandidate}${baseUnetCandidate.includes("?") ? "&" : "?"}${tokenParam}`)
+          : null;
+
+        // Result image to display on dashboard: U-Net segmentation thumbnail unconditionally
+        const displayUrl = unetCandidateUrl || ((!modelFallback && rfdetrUrl) || unetUrl || processedUrl || originalUrl);
 
         setPhotos((prev) =>
           prev.map((p) => {
@@ -648,9 +657,10 @@ export function InspectionNewPage() {
               ai_classification: result.ai_classification || result.aiClassification || result.quality_report?.ai_classification || result.qualityReport?.ai_classification,
               aiDetection: result.ai_detection || result.aiDetection,
               processingRun: result.processing_run || result.processingRun,
+              thumbnailUrl: displayUrl,
               previewUrl: displayUrl,
               originalUrl: originalUrl,
-              processedUrl: processedUrl,
+              processedUrl: displayUrl,
               hasRfdetr: hasRfdetr,
               has_rfdetr: hasRfdetr,
               rfdetrUrl: rfdetrUrl,
@@ -661,15 +671,17 @@ export function InspectionNewPage() {
               modelFallback: modelFallback,
               model_fallback: modelFallback,
               yoloUrl: yoloUrl,
-              annotatedUrl: (isCrack && unetCandidateUrl) ? unetCandidateUrl : ((!modelFallback && rfdetrUrl) ? rfdetrUrl : (unetUrl || yoloUrl)),
+              annotatedUrl: displayUrl,
               hasYolo: hasYolo,
               yoloDetection: yoloDetection,
               yolo_detection: yoloDetection,
-              hasUnet: hasUnet,
-              unetUrl: unetUrl,
+              hasUnet: true,
+              has_unet: true,
+              unetUrl: unetCandidateUrl,
               unetMaskUrl: unetMaskUrl,
               unetSegmentation: unetSegmentation,
               unet_segmentation: unetSegmentation,
+              hasCrack: isCrack,
               hasGeometry: Boolean(result.hasGeometry || result.has_geometry || result.crackGeometry || result.crack_geometry),
               has_geometry: Boolean(result.hasGeometry || result.has_geometry || result.crackGeometry || result.crack_geometry),
               crackGeometry: result.crackGeometry || result.crack_geometry || result.qualityReport?.crack_geometry || result.quality_report?.crack_geometry,
@@ -795,9 +807,12 @@ export function InspectionNewPage() {
   const handleConfirmWarning = useCallback(async (id: string) => {
     try {
       const res = await api.confirmImageWarning(id);
-      const unetUrl = res.unetUrl || `/api/v1/images/${id}/file?variant=unet`;
-      const bust = `?v=${Date.now()}`;
-      const unetBusted = `${unetUrl}${unetUrl.includes("?") ? "&" : "?"}v=${Date.now()}`;
+      const token = getAuthToken();
+      const tokenParam = token ? `token=${encodeURIComponent(token)}` : "";
+      const baseUnet = res.unetUrl || `/api/v1/images/${id}/file?variant=unet`;
+      const sep = baseUnet.includes("?") ? "&" : "?";
+      const unetBusted = `${baseUnet}${sep}v=${Date.now()}${tokenParam ? `&${tokenParam}` : ""}`;
+      const bust = `?v=${Date.now()}${tokenParam ? `&${tokenParam}` : ""}`;
 
       setPhotos((prev) =>
         prev.map((p) =>
@@ -814,10 +829,10 @@ export function InspectionNewPage() {
                 unetUrl: unetBusted,
                 hasUnet: true,
                 has_unet: true,
-                yoloUrl: res.yoloUrl || p.yoloUrl || `/api/v1/images/${id}/file?variant=yolo`,
+                yoloUrl: res.yoloUrl ? `${res.yoloUrl}${tokenParam ? `&${tokenParam}` : ""}` : (p.yoloUrl || `/api/v1/images/${id}/file?variant=yolo${bust}`),
                 hasYolo: Boolean(res.hasYolo ?? p.hasYolo ?? true),
                 yoloDetection: res.yoloDetection || p.yoloDetection,
-                unetMaskUrl: res.unetMaskUrl || `/api/v1/images/${id}/file?variant=mask${bust}`,
+                unetMaskUrl: res.unetMaskUrl ? `${res.unetMaskUrl}${tokenParam ? `&${tokenParam}` : ""}` : `/api/v1/images/${id}/file?variant=mask${bust}`,
                 unetSegmentation: res.unetSegmentation || res.unet_segmentation || p.unetSegmentation,
                 aiClassification: res.aiClassification || res.ai_classification || p.aiClassification,
                 hasGeometry: Boolean(res.hasGeometry || res.has_geometry || res.crackGeometry || res.crack_geometry || p.hasGeometry),
@@ -828,7 +843,7 @@ export function InspectionNewPage() {
                 damage_assessment: res.damageAssessment || res.damage_assessment || p.damageAssessment,
                 calibration: res.calibration || p.calibration,
                 geometryUrl: res.geometryUrl || p.geometryUrl,
-                processedUrl: res.processedUrl || res.preview_url || `/api/v1/images/${id}/file?variant=processed`,
+                processedUrl: unetBusted, // Unconditionally keep U-Net model output image, NEVER revert to raw photo
                 processingRun: res.processing_run || p.processingRun,
               }
             : p
