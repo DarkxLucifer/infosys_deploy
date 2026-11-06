@@ -28,6 +28,7 @@ import {
   ZoomIn,
   ZoomOut,
   X,
+  ShieldCheck,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -634,18 +635,18 @@ export function ImageCompare({
         {viewMode === "rfdetr" && (
           <>
             <img src={rfdetrUrl || processedUrl || originalUrl} alt="RF-DETR Defect Detection" className="w-full h-full object-contain" />
-            <div className="absolute top-3 left-3 px-2.5 py-1 rounded-md bg-black/80 backdrop-blur-xs border border-white/20 font-mono text-[10px] text-white pointer-events-none flex items-center gap-1.5 shadow-md">
-              <Cpu className="size-3 text-blue-400" />
-              <span>RF-DETR Medium (rdd2022-rfdetr-medium)</span>
+            <div className="absolute top-3 left-3 px-3 py-1.5 rounded-lg bg-neutral-900/90 backdrop-blur-md border border-neutral-700/80 font-mono text-xs font-semibold text-white pointer-events-none flex items-center gap-2 shadow-lg z-20" style={{ color: "#ffffff" }}>
+              <Cpu className="size-3.5 text-blue-400 shrink-0" style={{ color: "#60a5fa" }} />
+              <span className="text-white font-semibold" style={{ color: "#ffffff" }}>RF-DETR Medium (rdd2022)</span>
             </div>
             {rfdetrDetection && (
-              <div className="absolute top-3 right-3 px-2.5 py-1 rounded-md bg-black/80 backdrop-blur-xs border border-white/20 font-mono text-[10px] text-white pointer-events-none shadow-md">
+              <div className="absolute top-3 right-3 px-3 py-1.5 rounded-lg bg-neutral-900/90 backdrop-blur-md border border-neutral-700/80 font-mono text-xs font-semibold text-white pointer-events-none shadow-lg z-20" style={{ color: "#ffffff" }}>
                 {rfdetrDetection.num_detections > 0 ? (
-                  <span className="text-white font-semibold">
+                  <span className="text-white font-semibold" style={{ color: "#ffffff" }}>
                     {rfdetrDetection.num_detections} defect(s) · {rfdetrDetection.primary_label || "Crack"}
                   </span>
                 ) : (
-                  <span className="text-zinc-400">
+                  <span className="text-zinc-300">
                     0 defect bboxes &rarr; U-Net Fallback
                   </span>
                 )}
@@ -657,14 +658,14 @@ export function ImageCompare({
         {viewMode === "unet" && (
           <>
             <img src={unetUrl || processedUrl || originalUrl} alt="UNet Crack Segmentation" className="w-full h-full object-contain" />
-            <div className="absolute top-3 left-3 px-2.5 py-1 rounded-md bg-black/80 backdrop-blur-xs border border-white/20 font-mono text-[10px] text-white pointer-events-none flex items-center gap-1.5 shadow-md">
-              <Sparkles className="size-3 text-blue-400" />
-              <span>UNet (best_model.pth) {modelFallback ? "· Fallback Active" : "CrackSeg9k"}</span>
+            <div className="absolute top-3 left-3 px-3 py-1.5 rounded-lg bg-neutral-900/90 backdrop-blur-md border border-neutral-700/80 font-mono text-xs font-semibold text-white pointer-events-none flex items-center gap-2 shadow-lg z-20" style={{ color: "#ffffff" }}>
+              <Sparkles className="size-3.5 text-blue-400 shrink-0" style={{ color: "#60a5fa" }} />
+              <span className="text-white font-semibold" style={{ color: "#ffffff" }}>UNet (best_model.pth) {modelFallback ? "· Fallback Active" : "CrackSeg9k"}</span>
             </div>
             {unetMetrics.crack_area_pct !== undefined && (
-              <div className="absolute top-3 right-3 px-2.5 py-1 rounded-md bg-black/80 backdrop-blur-xs border border-white/20 font-mono text-[10px] text-white pointer-events-none shadow-md">
-                <span className="font-semibold text-white">{unetMetrics.crack_area_pct}% Area</span>
-                <span className="text-zinc-400"> · {unetMetrics.crack_pixels?.toLocaleString()} px</span>
+              <div className="absolute top-3 right-3 px-3 py-1.5 rounded-lg bg-neutral-900/90 backdrop-blur-md border border-neutral-700/80 font-mono text-xs font-semibold text-white pointer-events-none shadow-lg z-20" style={{ color: "#ffffff" }}>
+                <span className="font-bold text-white" style={{ color: "#ffffff" }}>{unetMetrics.crack_area_pct}% Area</span>
+                <span className="text-zinc-300"> · {unetMetrics.crack_pixels?.toLocaleString()} px</span>
               </div>
             )}
           </>
@@ -673,7 +674,7 @@ export function ImageCompare({
         {viewMode === "mask" && (
           <>
             <img src={unetMaskUrl || unetUrl || processedUrl || originalUrl} alt="Binary Crack Mask" className="w-full h-full object-contain bg-zinc-950" />
-            <div className="absolute top-3 left-3 px-2.5 py-1 rounded-md bg-black/85 backdrop-blur-xs border border-white/20 font-mono text-[10px] text-white pointer-events-none shadow-md">
+            <div className="absolute top-3 left-3 px-3 py-1.5 rounded-lg bg-neutral-900/90 backdrop-blur-md border border-neutral-700/80 font-mono text-xs font-semibold text-white pointer-events-none shadow-lg z-20" style={{ color: "#ffffff" }}>
               Binary Pixel Segmentation Mask (384×384)
             </div>
           </>
@@ -1452,6 +1453,13 @@ export function ImageDetailsDrawer({
                 unetSegmentation={unetSegmentation}
                 metricsBefore={processingRun?.metricsBefore}
                 metricsAfter={processingRun?.metricsAfter}
+              />
+
+              {/* Individual Image Damage Severity Assessment (AASHTO / ASTM & PDF §10) */}
+              <PhotoDamageSeverityCard
+                photo={photo}
+                details={details}
+                onCalibrate={onCalibrate}
               />
 
               {/* Multi-Stage AI Crack Classification Assessment Card */}
@@ -3034,31 +3042,44 @@ export function SessionDamageAssessmentCard({
   photos.forEach((photo, idx) => {
     const geo = photo.crackGeometry || photo.crack_geometry || photo.quality_report?.crack_geometry || photo.qualityReport?.crack_geometry;
     const summary = geo?.summary || {};
-    const calib = photo.calibration || {};
+    const calib = photo.calibration || photo.qualityReport?.calibration || {};
+    const unet = photo.unetSegmentation || photo.unet_segmentation || photo.qualityReport?.unet_segmentation || photo.quality_report?.unet_segmentation;
+    const rfdetr = photo.rfdetrDetection || photo.rfdetr_detection || photo.qualityReport?.rfdetr_detection || photo.quality_report?.rfdetr_detection;
+    const dmg = photo.damageAssessment || photo.damage_assessment || photo.qualityReport?.damage_assessment || photo.quality_report?.damage_assessment || summary.damage_assessment;
 
-    const isCalibrated = Boolean(calib.is_calibrated || summary.is_calibrated);
+    const isCalibrated = Boolean(calib.is_calibrated || summary.is_calibrated || calib.calibrated);
     const scale = Number(calib.scale_factor_mm_per_pixel || calib.mm_per_pixel || summary.calibration_mm_per_pixel || summary.mm_per_pixel || 0);
 
-    const crackCount = Number(summary.crack_count || 0);
-    const crackArea = Number(summary.total_crack_area_pixels || summary.crack_area_px || 0);
-    const surfaceArea = Number(summary.total_surface_area_pixels || summary.inspected_surface_area_px || (photo.width && photo.height ? photo.width * photo.height : 0));
+    const crackCount = Number(summary.crack_count || (unet?.has_crack ? 1 : (rfdetr?.num_detections || 0)));
+    let crackArea = Number(summary.total_crack_area_pixels || summary.crack_area_px || unet?.crack_pixels || 0);
+    let surfaceArea = Number(summary.total_surface_area_pixels || summary.inspected_surface_area_px || (photo.width && photo.height ? photo.width * photo.height : 0));
 
-    let density = Number(summary.crack_coverage_pct || summary.crack_density_pct || 0);
+    let density = Number(summary.crack_coverage_pct || summary.crack_density_pct || unet?.crack_area_pct || 0);
     if (density <= 0 && surfaceArea > 0 && crackArea > 0) {
       density = (crackArea / surfaceArea) * 100;
     }
+    if (density > 0 && crackArea <= 0 && surfaceArea > 0) {
+      crackArea = Math.round((density / 100) * surfaceArea);
+    }
+    if (density > 0 && surfaceArea <= 0 && crackArea > 0) {
+      surfaceArea = Math.round(crackArea / (density / 100));
+    }
 
-    const peakWidthPx = Number(summary.maximum_crack_width_px || 0);
-    const peakWidthMm = summary.maximum_crack_width_mm != null ? Number(summary.maximum_crack_width_mm) : (isCalibrated && scale > 0 ? peakWidthPx * scale : null);
+    const peakWidthPx = Number(summary.maximum_crack_width_px || unet?.max_width_px || 0);
+    const peakWidthMm = summary.maximum_crack_width_mm != null
+      ? Number(summary.maximum_crack_width_mm)
+      : (unet?.max_width_mm != null
+        ? Number(unet.max_width_mm)
+        : (isCalibrated && scale > 0 && peakWidthPx > 0 ? peakWidthPx * scale : null));
     const branches = Number(summary.total_branch_count || 0);
-    const defectType = String(photo.activeStage2Model || photo.defect_type || "").toLowerCase();
+    const defectType = String(photo.activeStage2Model || photo.defect_type || rfdetr?.primary_label || "").toLowerCase();
 
-    const minDim = photo.width && photo.height ? Math.min(photo.width, photo.height) : null;
+    const minDim = photo.width && photo.height ? Math.min(photo.width, photo.height) : (surfaceArea > 0 ? Math.sqrt(surfaceArea) : null);
     const relThickness = minDim && minDim > 0 ? peakWidthPx / minDim : null;
 
-    const hasCracks = crackCount > 0 || crackArea > 0 || summary.has_cracks;
+    const hasCracks = crackCount > 0 || crackArea > 0 || density > 0 || summary.has_cracks || Boolean(unet?.has_crack) || Boolean(rfdetr?.has_defect);
 
-    if (geo || photo.quality_status || photo.status === "valid" || photo.processing_status === "complete") {
+    if (geo || unet || rfdetr || dmg || photo.quality_status || photo.status === "valid" || photo.processing_status === "complete") {
       analyzedCount++;
     }
 
@@ -3069,17 +3090,21 @@ export function SessionDamageAssessmentCard({
     }
 
     sumCrackArea += crackArea;
-    sumSurfaceArea += surfaceArea;
+    sumSurfaceArea += (surfaceArea > 0 ? surfaceArea : 1000000);
 
     let photoCode = "none";
     let pFactor = "Zero cracks";
     let pVal = "0.0% coverage";
 
-    if (defectType.includes("rebar") || defectType.includes("exposed_reinforcement")) {
+    if (dmg && dmg.severity_code) {
+      photoCode = dmg.severity_code;
+      pFactor = dmg.controlling_factor || "AI Assessment";
+      pVal = dmg.controlling_value || `${density.toFixed(2)}% coverage`;
+    } else if (defectType.includes("rebar") || defectType.includes("exposed_reinforcement")) {
       photoCode = "critical";
       pFactor = "Exposed Rebar";
       pVal = "Critical Defect";
-    } else if (!hasCracks || crackArea <= 0) {
+    } else if (!hasCracks || (crackArea <= 0 && density <= 0)) {
       photoCode = "none";
       pFactor = "Sound Surface";
       pVal = "0.0% coverage";
@@ -3295,6 +3320,343 @@ export function SessionDamageAssessmentCard({
         <span className="text-foreground font-bold">{distribution.moderate} Moderate</span>
         <span className="text-muted-foreground">·</span>
         <span className="text-foreground font-bold">{distribution.minor} Minor</span>
+      </div>
+
+      {/* Engineering Decision Support Disclaimer */}
+      <div className="p-2 rounded-lg bg-amber-500/5 border border-amber-500/30 text-[10px] text-muted-foreground flex items-start gap-1.5">
+        <AlertTriangle className="size-3.5 text-amber-500 shrink-0 mt-0.5" />
+        <span className="leading-tight">
+          Decision Support: Automated optical assessment does not certify structural safety. Final structural appraisal requires qualified civil engineer review.
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// ─── Individual Photo Damage Severity Assessment Card (Right Sidebar / Drawer) ──
+
+export function PhotoDamageSeverityCard({
+  photo,
+  details,
+  onCalibrate,
+}: {
+  photo: any;
+  details?: any;
+  onCalibrate?: (photo: any) => void;
+}) {
+  const geo =
+    details?.crackGeometry ||
+    details?.crack_geometry ||
+    photo?.crackGeometry ||
+    photo?.crack_geometry ||
+    details?.qualityReport?.crack_geometry ||
+    photo?.qualityReport?.crack_geometry ||
+    photo?.quality_report?.crack_geometry;
+  const summary = geo?.summary || {};
+  const calib =
+    details?.calibration ||
+    photo?.calibration ||
+    details?.qualityReport?.calibration ||
+    photo?.qualityReport?.calibration ||
+    {};
+  const unet =
+    details?.unetSegmentation ||
+    details?.unet_segmentation ||
+    photo?.unetSegmentation ||
+    photo?.unet_segmentation ||
+    details?.qualityReport?.unet_segmentation ||
+    photo?.qualityReport?.unet_segmentation ||
+    photo?.quality_report?.unet_segmentation;
+  const rfdetr =
+    details?.rfdetrDetection ||
+    details?.rfdetr_detection ||
+    photo?.rfdetrDetection ||
+    photo?.rfdetr_detection ||
+    details?.qualityReport?.rfdetr_detection ||
+    photo?.qualityReport?.rfdetr_detection ||
+    photo?.quality_report?.rfdetr_detection;
+  const dmg =
+    details?.damageAssessment ||
+    details?.damage_assessment ||
+    photo?.damageAssessment ||
+    photo?.damage_assessment ||
+    details?.qualityReport?.damage_assessment ||
+    photo?.qualityReport?.damage_assessment ||
+    summary?.damage_assessment;
+
+  const isCalibrated = Boolean(calib.is_calibrated || summary.is_calibrated || calib.calibrated);
+  const scale = Number(
+    calib.scale_factor_mm_per_pixel ||
+      calib.mm_per_pixel ||
+      summary.calibration_mm_per_pixel ||
+      summary.mm_per_pixel ||
+      0
+  );
+
+  const crackCount = Number(summary.crack_count || (unet?.has_crack ? 1 : rfdetr?.num_detections || 0));
+  let crackArea = Number(summary.total_crack_area_pixels || summary.crack_area_px || unet?.crack_pixels || 0);
+  let surfaceArea = Number(
+    summary.total_surface_area_pixels ||
+      summary.inspected_surface_area_px ||
+      (photo?.width && photo?.height
+        ? photo.width * photo.height
+        : details?.width && details?.height
+        ? details.width * details.height
+        : 0)
+  );
+
+  let density = Number(summary.crack_coverage_pct || summary.crack_density_pct || unet?.crack_area_pct || 0);
+  if (density <= 0 && surfaceArea > 0 && crackArea > 0) {
+    density = (crackArea / surfaceArea) * 100;
+  }
+  if (density > 0 && crackArea <= 0 && surfaceArea > 0) {
+    crackArea = Math.round((density / 100) * surfaceArea);
+  }
+  if (density > 0 && surfaceArea <= 0 && crackArea > 0) {
+    surfaceArea = Math.round(crackArea / (density / 100));
+  }
+
+  const peakWidthPx = Number(summary.maximum_crack_width_px || unet?.max_width_px || 0);
+  const peakWidthMm =
+    summary.maximum_crack_width_mm != null
+      ? Number(summary.maximum_crack_width_mm)
+      : unet?.max_width_mm != null
+      ? Number(unet.max_width_mm)
+      : isCalibrated && scale > 0 && peakWidthPx > 0
+      ? peakWidthPx * scale
+      : null;
+  const branches = Number(summary.total_branch_count || 0);
+  const defectType = String(
+    photo?.activeStage2Model || details?.activeStage2Model || photo?.defect_type || rfdetr?.primary_label || ""
+  ).toLowerCase();
+
+  const minDim =
+    photo?.width && photo?.height
+      ? Math.min(photo.width, photo.height)
+      : details?.width && details?.height
+      ? Math.min(details.width, details.height)
+      : surfaceArea > 0
+      ? Math.sqrt(surfaceArea)
+      : null;
+  const relThickness = minDim && minDim > 0 ? peakWidthPx / minDim : null;
+
+  const hasCracks =
+    crackCount > 0 ||
+    crackArea > 0 ||
+    density > 0 ||
+    summary.has_cracks ||
+    Boolean(unet?.has_crack) ||
+    Boolean(rfdetr?.has_defect);
+
+  let photoCode = "none";
+  let pFactor = "Zero cracks";
+  let pVal = "0.0% coverage";
+
+  if (dmg && dmg.severity_code) {
+    photoCode = dmg.severity_code;
+    pFactor = dmg.controlling_factor || "AI Assessment";
+    pVal = dmg.controlling_value || `${density.toFixed(2)}% coverage`;
+  } else if (defectType.includes("rebar") || defectType.includes("exposed_reinforcement")) {
+    photoCode = "critical";
+    pFactor = "Exposed Rebar";
+    pVal = "Critical Defect";
+  } else if (!hasCracks || (crackArea <= 0 && density <= 0)) {
+    photoCode = "none";
+    pFactor = "Sound Surface";
+    pVal = "0.0% coverage";
+  } else if (isCalibrated && peakWidthMm != null) {
+    if (peakWidthMm > 8.0) {
+      photoCode = "critical";
+      pFactor = "Peak Width";
+      pVal = `${peakWidthMm.toFixed(2)} mm (> 8.0 mm)`;
+    } else if (density > 9.0) {
+      photoCode = "critical";
+      pFactor = "Crack Density";
+      pVal = `${density.toFixed(2)}% (> 9.0%)`;
+    } else if (branches > 50) {
+      photoCode = "critical";
+      pFactor = "Alligator Fatigue";
+      pVal = `${branches} branches`;
+    } else if (peakWidthMm > 5.0) {
+      photoCode = "severe";
+      pFactor = "Peak Width";
+      pVal = `${peakWidthMm.toFixed(2)} mm (5.0 - 8.0 mm)`;
+    } else if (density > 5.0) {
+      photoCode = "severe";
+      pFactor = "Crack Density";
+      pVal = `${density.toFixed(2)}% (5.0 - 9.0%)`;
+    } else if (branches > 10) {
+      photoCode = "severe";
+      pFactor = "Fatigue Branches";
+      pVal = `${branches} branches`;
+    } else if (peakWidthMm >= 3.0) {
+      photoCode = "moderate";
+      pFactor = "Peak Width";
+      pVal = `${peakWidthMm.toFixed(2)} mm (3.0 - 5.0 mm)`;
+    } else if (density >= 2.0) {
+      photoCode = "moderate";
+      pFactor = "Crack Density";
+      pVal = `${density.toFixed(2)}% (2.0 - 5.0%)`;
+    } else {
+      photoCode = "minor";
+      pFactor = "Minor Width";
+      pVal = `${peakWidthMm.toFixed(2)} mm (< 3.0 mm)`;
+    }
+  } else {
+    if (density > 9.0) {
+      photoCode = "critical";
+      pFactor = "Crack Density";
+      pVal = `${density.toFixed(2)}% (> 9.0%)`;
+    } else if (relThickness != null && relThickness >= 0.09) {
+      photoCode = "critical";
+      pFactor = "Relative Width";
+      pVal = `${(relThickness * 100).toFixed(1)}% frame`;
+    } else if (branches > 50) {
+      photoCode = "critical";
+      pFactor = "Alligator Network";
+      pVal = `${branches} branches`;
+    } else if (density >= 2.5) {
+      photoCode = "severe";
+      pFactor = "Crack Density";
+      pVal = `${density.toFixed(2)}% (2.5 - 9.0%)`;
+    } else if (relThickness != null && relThickness >= 0.045) {
+      photoCode = "severe";
+      pFactor = "Relative Width";
+      pVal = `${(relThickness * 100).toFixed(1)}% frame`;
+    } else if (branches > 10) {
+      photoCode = "severe";
+      pFactor = "Interconnected Branches";
+      pVal = `${branches} branches`;
+    } else if (density >= 0.5) {
+      photoCode = "moderate";
+      pFactor = "Crack Density";
+      pVal = `${density.toFixed(2)}% (0.5 - 2.5%)`;
+    } else if (relThickness != null && relThickness >= 0.015) {
+      photoCode = "moderate";
+      pFactor = "Relative Width";
+      pVal = `${(relThickness * 100).toFixed(1)}% frame`;
+    } else {
+      photoCode = "minor";
+      pFactor = "Superficial Fissure";
+      pVal = `${density.toFixed(2)}% (< 0.5%)`;
+    }
+  }
+
+  const severityTitles: Record<string, string> = {
+    none: "No Visible Damage",
+    minor: "Minor Damage",
+    moderate: "Moderate Damage",
+    severe: "Severe Damage",
+    critical: "Critical / Requires Urgent Review",
+  };
+
+  const priorityLabels: Record<string, string> = {
+    critical: "Urgent Engineering Review",
+    severe: "High Priority (14-30 Days)",
+    moderate: "Medium Priority (60-90 Days)",
+    minor: "Low Priority (Monitor)",
+    none: "Routine Monitoring",
+  };
+
+  const basisLabel = isCalibrated
+    ? `AASHTO / ASTM Scale (${scale} mm/px)`
+    : "PDF §10 Scale-Invariant Mode";
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-4 space-y-3 shadow-xs">
+      <div className="flex items-center justify-between gap-2 border-b border-border/70 pb-2.5">
+        <div>
+          <h4 className="text-xs font-bold text-foreground flex items-center gap-1.5">
+            <ShieldCheck className="size-4 text-primary" />
+            Damage Severity Assessment
+          </h4>
+          <p className="text-[10px] text-muted-foreground font-mono">
+            {basisLabel}
+          </p>
+        </div>
+        <Badge
+          variant="outline"
+          className="text-[10px] px-2 py-0.5 font-mono uppercase tracking-wider border-foreground/30 text-foreground bg-background"
+        >
+          {photoCode === "critical"
+            ? "CRITICAL"
+            : photoCode === "severe"
+            ? "SEVERE"
+            : photoCode === "moderate"
+            ? "MODERATE"
+            : photoCode === "minor"
+            ? "MINOR"
+            : "SOUND"}
+        </Badge>
+      </div>
+
+      {/* Main Overall Display */}
+      <div className="p-3 rounded-lg bg-background border border-foreground/30 space-y-1.5 shadow-xs">
+        <div className="flex items-center justify-between">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+            Structural Damage Classification
+          </span>
+          <span className="text-[10px] font-mono text-muted-foreground">
+            {isCalibrated ? "Calibrated mm" : "Density & Morphology"}
+          </span>
+        </div>
+        <div className="text-sm font-extrabold text-foreground tracking-tight">
+          {severityTitles[photoCode] || "No Visible Damage"}
+        </div>
+        <div className="flex items-center gap-1.5 text-xs text-foreground/80 pt-0.5 border-t border-border/40">
+          <span className="font-semibold text-muted-foreground text-[11px]">Controlling Defect:</span>
+          <span className="font-mono text-foreground font-bold text-[11px]">
+            {pFactor} ({pVal})
+          </span>
+        </div>
+      </div>
+
+      {/* 2x2 Metric Breakdown */}
+      <div className="grid grid-cols-2 gap-2 text-xs">
+        <div className="p-2.5 rounded-lg bg-background border border-foreground/30 shadow-xs">
+          <span className="text-[10px] text-muted-foreground font-bold block uppercase tracking-wider">
+            Crack Density
+          </span>
+          <span className="text-sm font-bold text-foreground font-mono">{density.toFixed(2)}%</span>
+        </div>
+        <div className="p-2.5 rounded-lg bg-background border border-foreground/30 shadow-xs">
+          <span className="text-[10px] text-muted-foreground font-bold block uppercase tracking-wider">
+            Peak Width
+          </span>
+          <span className="text-sm font-bold text-foreground font-mono truncate block">
+            {isCalibrated && peakWidthMm != null ? `${peakWidthMm.toFixed(2)} mm` : `${peakWidthPx.toFixed(1)} px`}
+          </span>
+        </div>
+        <div className="p-2.5 rounded-lg bg-background border border-foreground/30 shadow-xs">
+          <span className="text-[10px] text-muted-foreground font-bold block uppercase tracking-wider">
+            Priority Action
+          </span>
+          <span className="text-xs font-bold text-foreground truncate block pt-0.5">
+            {priorityLabels[photoCode] || "Routine Monitoring"}
+          </span>
+        </div>
+        <div className="p-2.5 rounded-lg bg-background border border-foreground/30 shadow-xs">
+          <span className="text-[10px] text-muted-foreground font-bold block uppercase tracking-wider">
+            Calibration Status
+          </span>
+          <div className="flex items-center justify-between gap-1 pt-0.5">
+            <span className="text-xs font-semibold text-foreground truncate">
+              {isCalibrated ? `${scale} mm/px` : "Uncalibrated"}
+            </span>
+            {!isCalibrated && onCalibrate && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => onCalibrate(photo)}
+                className="h-5 text-[9px] px-1.5 py-0 border-border"
+              >
+                <Ruler className="size-2.5 mr-1 text-primary" />
+                Calibrate
+              </Button>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Engineering Decision Support Disclaimer */}

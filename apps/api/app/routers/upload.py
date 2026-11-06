@@ -914,6 +914,10 @@ async def upload_image_endpoint(
             report["yolo_detection"] = pred["yolo_detection"]
         if pred.get("unet_segmentation"):
             report["unet_segmentation"] = pred["unet_segmentation"]
+        if pred.get("crack_geometry"):
+            report["crack_geometry"] = pred["crack_geometry"]
+        if pred.get("damage_assessment"):
+            report["damage_assessment"] = pred["damage_assessment"]
 
     if inspection and inspection.status in ("draft", "assigned", "in_progress"):
         inspection.status = "images_uploaded"
@@ -936,6 +940,17 @@ async def upload_image_endpoint(
     model_fallback = bool(report.get("model_fallback") if isinstance(report, dict) else (ai_clf.get("model_fallback") if isinstance(ai_clf, dict) else False))
     yolo_det = (report.get("yolo_detection") if isinstance(report, dict) else None) or (ai_clf.get("yolo_detection") if isinstance(ai_clf, dict) else None)
     unet_seg = (report.get("unet_segmentation") if isinstance(report, dict) else None) or (ai_clf.get("unet_segmentation") if isinstance(ai_clf, dict) else None)
+    crack_geo = (
+        (report.get("crack_geometry") if isinstance(report, dict) else None)
+        or (ai_clf.get("crack_geometry") if isinstance(ai_clf, dict) else None)
+        or (img_record.quality_report.get("crack_geometry") if (img_record.quality_report and isinstance(img_record.quality_report, dict)) else None)
+    )
+    dmg_assess = (
+        (report.get("damage_assessment") if isinstance(report, dict) else None)
+        or (ai_clf.get("damage_assessment") if isinstance(ai_clf, dict) else None)
+        or (crack_geo.get("summary", {}).get("damage_assessment") if (crack_geo and isinstance(crack_geo, dict)) else None)
+        or (img_record.quality_report.get("damage_assessment") if (img_record.quality_report and isinstance(img_record.quality_report, dict)) else None)
+    )
 
     rfdetr_file = find_stored_file("rfdetr", f"{img_record.id}.jpg")
     yolo_file = find_stored_file("yolo", f"{img_record.id}.jpg")
@@ -997,6 +1012,14 @@ async def upload_image_endpoint(
         "has_yolo": has_yolo,
         "hasUnet": has_unet,
         "has_unet": has_unet,
+        "hasGeometry": bool(crack_geo),
+        "has_geometry": bool(crack_geo),
+        "crackGeometry": crack_geo,
+        "crack_geometry": crack_geo,
+        "damageAssessment": dmg_assess,
+        "damage_assessment": dmg_assess,
+        "calibration": img_record.calibration,
+        "geometryUrl": (f"/api/v1/images/{img_record.id}/file?variant=geometry") if crack_geo else None,
         "previewUrl": default_preview,
         "originalUrl": f"/api/v1/images/{img_record.id}/file?variant=original",
         "thumbnailUrl": f"/api/v1/images/{img_record.id}/file?variant=thumbnail",
@@ -1495,6 +1518,9 @@ def get_image_details(
         "has_geometry": has_geo,
         "crackGeometry": crack_geo,
         "crack_geometry": crack_geo,
+        "damageAssessment": (image.quality_report.get("damage_assessment") if (image.quality_report and isinstance(image.quality_report, dict)) else None) or (crack_geo.get("summary", {}).get("damage_assessment") if (crack_geo and isinstance(crack_geo, dict)) else None),
+        "damage_assessment": (image.quality_report.get("damage_assessment") if (image.quality_report and isinstance(image.quality_report, dict)) else None) or (crack_geo.get("summary", {}).get("damage_assessment") if (crack_geo and isinstance(crack_geo, dict)) else None),
+        "calibration": image.calibration,
         "originalUrl": f"/api/v1/images/{image.id}/file?variant=original&v={v_tag}",
         "thumbnailUrl": f"/api/v1/images/{image.id}/file?variant=thumbnail&v={v_tag}",
         "previewUrl": f"{default_preview}{'&' if '?' in default_preview else '?'}v={v_tag}",
@@ -1506,8 +1532,8 @@ def get_image_details(
         "unetUrl": (f"/api/v1/images/{image.id}/file?variant=unet&v={v_tag}") if has_unet else None,
         "unetMaskUrl": (f"/api/v1/images/{image.id}/file?variant=mask&v={v_tag}") if has_unet else None,
         "geometryUrl": (f"/api/v1/images/{image.id}/file?variant=geometry&v={v_tag}") if has_geo else None,
-        "damageAssessment": qr.get("damage_assessment") or (crack_geo.get("summary", {}).get("damage_assessment") if crack_geo else None),
-        "damage_assessment": qr.get("damage_assessment") or (crack_geo.get("summary", {}).get("damage_assessment") if crack_geo else None),
+        "damageAssessment": (image.quality_report.get("damage_assessment") if (image.quality_report and isinstance(image.quality_report, dict)) else None) or (crack_geo.get("summary", {}).get("damage_assessment") if (crack_geo and isinstance(crack_geo, dict)) else None),
+        "damage_assessment": (image.quality_report.get("damage_assessment") if (image.quality_report and isinstance(image.quality_report, dict)) else None) or (crack_geo.get("summary", {}).get("damage_assessment") if (crack_geo and isinstance(crack_geo, dict)) else None),
         "createdAt": image.created_at.isoformat()
     }
 
@@ -2369,6 +2395,9 @@ def confirm_warning_endpoint(
         "has_geometry": has_geo,
         "crackGeometry": crack_geo,
         "crack_geometry": crack_geo,
+        "damageAssessment": qr.get("damage_assessment") or (crack_geo.get("summary", {}).get("damage_assessment") if crack_geo else None),
+        "damage_assessment": qr.get("damage_assessment") or (crack_geo.get("summary", {}).get("damage_assessment") if crack_geo else None),
+        "calibration": image.calibration,
         "previewUrl": default_preview,
         "processedUrl": f"/api/v1/images/{image.id}/file?variant=processed",
         "rfdetrUrl": f"/api/v1/images/{image.id}/file?variant=rfdetr" if has_rfdetr else None,
@@ -2558,6 +2587,9 @@ def analyze_image_endpoint(
         "has_geometry": has_geo,
         "crackGeometry": qr.get("crack_geometry"),
         "crack_geometry": qr.get("crack_geometry"),
+        "damageAssessment": qr.get("damage_assessment") or (qr.get("crack_geometry", {}).get("summary", {}).get("damage_assessment") if qr.get("crack_geometry") else None),
+        "damage_assessment": qr.get("damage_assessment") or (qr.get("crack_geometry", {}).get("summary", {}).get("damage_assessment") if qr.get("crack_geometry") else None),
+        "calibration": image.calibration,
         "yoloDetection": qr.get("yolo_detection"),
         "yolo_detection": qr.get("yolo_detection"),
         "hasYolo": has_yolo,
@@ -3233,6 +3265,9 @@ async def transform_image_endpoint(
         "has_geometry": has_geo,
         "crackGeometry": pred.get("crack_geometry") if pred else None,
         "crack_geometry": pred.get("crack_geometry") if pred else None,
+        "damageAssessment": pred.get("damage_assessment") if pred else None,
+        "damage_assessment": pred.get("damage_assessment") if pred else None,
+        "calibration": image.calibration,
         "hasYolo": has_yolo,
         "has_yolo": has_yolo,
         "yoloDetection": pred.get("yolo_detection") if pred else None,

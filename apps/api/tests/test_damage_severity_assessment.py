@@ -308,3 +308,4 @@ def test_batch_aggregation():
     assert batch_res["uncalibrated_count"] == 2
     assert batch_res["requires_engineer_review"] is True
     assert ENGINEERING_DISCLAIMER in batch_res["disclaimer"]
+

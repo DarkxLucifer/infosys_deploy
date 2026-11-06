@@ -90,6 +90,10 @@ export interface CrackGeometrySummary {
   crack_severity_category?: string;
   crack_severity_code?: string;
   severity_assessment?: SeverityAssessmentDetail;
+  damage_assessment?: any;
+  crack_density_pct?: number;
+  total_branch_count?: number;
+  has_cracks?: boolean;
 }
 
 export interface CrackGeometryReport {
@@ -333,6 +337,120 @@ export function CrackGeometrySection({
   const currentCategory = summary?.crack_severity_category || sevAssessment?.category || (isCalibrated ? "None" : "Uncalibrated");
   const currentCode = summary?.crack_severity_code || sevAssessment?.category_code || (isCalibrated ? "no_visible_damage" : "uncalibrated");
 
+  const dmg =
+    summary?.damage_assessment ||
+    details?.damageAssessment ||
+    details?.damage_assessment ||
+    photo?.damageAssessment ||
+    photo?.damage_assessment;
+
+  const density = Number(summary?.crack_coverage_pct || summary?.crack_density_pct || 0);
+  const peakWidthMm = summary?.maximum_crack_width_mm;
+  const peakWidthPx = Number(summary?.maximum_crack_width_px || 0);
+  const branches = Number(summary?.total_branch_count || 0);
+  const surfaceArea = Number(summary?.inspected_surface_area_px || 0);
+  const minDim = surfaceArea > 0 ? Math.sqrt(surfaceArea) : 1000;
+  const relThickness = minDim > 0 ? peakWidthPx / minDim : 0;
+  const hasCracks = Number(summary?.crack_count || 0) > 0 || density > 0 || summary?.has_cracks;
+
+  let damageCode = "none";
+  let damageFactor = "Sound surface";
+  let damageVal = "0.0% coverage";
+
+  if (dmg && dmg.severity_code) {
+    damageCode = dmg.severity_code;
+    damageFactor = dmg.controlling_factor || "AI Assessment";
+    damageVal = dmg.controlling_value || `${density.toFixed(2)}% coverage`;
+  } else if (!hasCracks) {
+    damageCode = "none";
+    damageFactor = "Sound surface";
+    damageVal = "No cracks";
+  } else if (isCalibrated && peakWidthMm != null) {
+    if (peakWidthMm > 8.0) {
+      damageCode = "critical";
+      damageFactor = "Peak Width";
+      damageVal = `${peakWidthMm.toFixed(2)} mm (> 8.0 mm)`;
+    } else if (density > 9.0) {
+      damageCode = "critical";
+      damageFactor = "Crack Density";
+      damageVal = `${density.toFixed(2)}% (> 9.0%)`;
+    } else if (branches > 50) {
+      damageCode = "critical";
+      damageFactor = "Alligator Fatigue";
+      damageVal = `${branches} branches`;
+    } else if (peakWidthMm > 5.0) {
+      damageCode = "severe";
+      damageFactor = "Peak Width";
+      damageVal = `${peakWidthMm.toFixed(2)} mm (5.0 - 8.0 mm)`;
+    } else if (density > 5.0) {
+      damageCode = "severe";
+      damageFactor = "Crack Density";
+      damageVal = `${density.toFixed(2)}% (5.0 - 9.0%)`;
+    } else if (branches > 10) {
+      damageCode = "severe";
+      damageFactor = "Fatigue Branches";
+      damageVal = `${branches} branches`;
+    } else if (peakWidthMm >= 3.0) {
+      damageCode = "moderate";
+      damageFactor = "Peak Width";
+      damageVal = `${peakWidthMm.toFixed(2)} mm (3.0 - 5.0 mm)`;
+    } else if (density >= 2.0) {
+      damageCode = "moderate";
+      damageFactor = "Crack Density";
+      damageVal = `${density.toFixed(2)}% (2.0 - 5.0%)`;
+    } else {
+      damageCode = "minor";
+      damageFactor = "Minor Width";
+      damageVal = `${peakWidthMm.toFixed(2)} mm (< 3.0 mm)`;
+    }
+  } else {
+    if (density > 9.0) {
+      damageCode = "critical";
+      damageFactor = "Crack Density";
+      damageVal = `${density.toFixed(2)}% (> 9.0%)`;
+    } else if (relThickness >= 0.09) {
+      damageCode = "critical";
+      damageFactor = "Relative Width";
+      damageVal = `${(relThickness * 100).toFixed(1)}% frame`;
+    } else if (branches > 50) {
+      damageCode = "critical";
+      damageFactor = "Alligator Network";
+      damageVal = `${branches} branches`;
+    } else if (density >= 2.5) {
+      damageCode = "severe";
+      damageFactor = "Crack Density";
+      damageVal = `${density.toFixed(2)}% (2.5 - 9.0%)`;
+    } else if (relThickness >= 0.045) {
+      damageCode = "severe";
+      damageFactor = "Relative Width";
+      damageVal = `${(relThickness * 100).toFixed(1)}% frame`;
+    } else if (branches > 10) {
+      damageCode = "severe";
+      damageFactor = "Interconnected Branches";
+      damageVal = `${branches} branches`;
+    } else if (density >= 0.5) {
+      damageCode = "moderate";
+      damageFactor = "Crack Density";
+      damageVal = `${density.toFixed(2)}% (0.5 - 2.5%)`;
+    } else if (relThickness >= 0.015) {
+      damageCode = "moderate";
+      damageFactor = "Relative Width";
+      damageVal = `${(relThickness * 100).toFixed(1)}% frame`;
+    } else {
+      damageCode = "minor";
+      damageFactor = "Superficial Fissure";
+      damageVal = `${density.toFixed(2)}% (< 0.5%)`;
+    }
+  }
+
+  const damageTitles: Record<string, string> = {
+    none: "No Visible Damage",
+    minor: "Minor Damage",
+    moderate: "Moderate Damage",
+    severe: "Severe Damage",
+    critical: "Critical / Requires Urgent Review",
+  };
+
   return (
     <div className="space-y-4 text-xs">
       {/* ─── Top Hero: Primary Geometry Metric (Clean 1-3 colors) ─── */}
@@ -440,6 +558,59 @@ export function CrackGeometrySection({
             </div>
             <span className="text-[10px] text-muted-foreground block">
               Inspected Surface − Crack Area (Sound Concrete)
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* ─── Damage Severity Assessment (AASHTO / ASTM & PDF §10 Standards) ─── */}
+      <div className="p-4 rounded-xl border border-border bg-card space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-2.5">
+          <div className="space-y-0.5">
+            <div className="flex items-center gap-2 flex-wrap">
+              <ShieldCheck className="size-4 text-primary" />
+              <h4 className="font-bold text-foreground text-xs uppercase tracking-wide">
+                Damage Severity Assessment
+              </h4>
+              <Badge
+                variant="outline"
+                className="text-[10px] px-2 py-0.5 font-mono uppercase tracking-wider border-foreground/30 text-foreground bg-background"
+              >
+                {damageCode === "critical"
+                  ? "CRITICAL"
+                  : damageCode === "severe"
+                  ? "SEVERE"
+                  : damageCode === "moderate"
+                  ? "MODERATE"
+                  : damageCode === "minor"
+                  ? "MINOR"
+                  : "SOUND"}
+              </Badge>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              {isCalibrated
+                ? "Governed by physical crack widths and density (AASHTO / ASTM Standards)."
+                : "Scale-invariant assessment derived from crack surface density and morphology (PDF §10)."}
+            </p>
+          </div>
+          <span className="text-[10px] font-mono text-muted-foreground">
+            {isCalibrated ? `Calibrated (${summary?.mm_per_pixel} mm/px)` : "PDF §10 Scale-Invariant"}
+          </span>
+        </div>
+
+        {/* Severity Banner */}
+        <div className="p-3 rounded-lg bg-background border border-foreground/30 space-y-1 shadow-xs">
+          <div className="flex items-center justify-between text-[10px] text-muted-foreground font-mono">
+            <span>STRUCTURAL DAMAGE LEVEL</span>
+            <span>{isCalibrated ? "Calibrated mm" : "Relative Ratio & Density"}</span>
+          </div>
+          <div className="text-base font-extrabold text-foreground tracking-tight">
+            {damageTitles[damageCode] || "No Visible Damage"}
+          </div>
+          <div className="flex items-center gap-1.5 text-xs text-foreground/80 pt-1 border-t border-border/40">
+            <span className="font-semibold text-muted-foreground text-[11px]">Controlling Defect:</span>
+            <span className="font-mono text-foreground font-bold text-[11px]">
+              {damageFactor} ({damageVal})
             </span>
           </div>
         </div>

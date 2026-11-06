@@ -262,7 +262,7 @@ export function OpticalCalibrationModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[96vw] max-w-3xl sm:max-w-3xl md:max-w-4xl max-h-[88vh] overflow-y-auto overflow-x-hidden p-4 sm:p-6 space-y-4">
+      <DialogContent className="w-[96vw] max-w-2xl sm:max-w-2xl md:max-w-3xl max-h-[85vh] overflow-y-auto overflow-x-hidden p-4 sm:p-5 space-y-3">
         {/* Header: Clean 1-3 colors (Neutral + Primary accent) */}
         <DialogHeader className="space-y-1">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border pb-3">
@@ -367,13 +367,13 @@ export function OpticalCalibrationModal({
             <div
               ref={containerRef}
               onClick={handleCanvasClick}
-              className="relative rounded-xl border border-border bg-black overflow-hidden flex items-center justify-center cursor-crosshair min-h-[240px] max-h-[380px] select-none w-full"
+              className="relative rounded-xl border border-border bg-black overflow-hidden flex items-center justify-center cursor-crosshair min-h-[200px] max-h-[290px] select-none w-full"
             >
               <img
                 ref={imageRef}
                 src={imageUrl}
                 alt="Calibration Target"
-                className="w-full h-full object-contain max-h-[380px] pointer-events-none"
+                className="w-full h-full object-contain max-h-[290px] pointer-events-none"
               />
 
               {/* SVG Overlay for Reference Line: Clean Primary Blue (#2563EB) */}
@@ -445,11 +445,16 @@ export function OpticalCalibrationModal({
                 </div>
               )}
 
-              {/* Floating Distance Badge: High-contrast white text on dark viewport */}
+              {/* Floating Distance Badge: Explicit high-contrast white text on dark pill */}
               {p1 && p2 && (
-                <div className="absolute bottom-3 left-1/2 -translate-x-1/2 bg-black/90 backdrop-blur-md border border-white/25 text-white px-3.5 py-1.5 rounded-full text-xs font-mono font-bold flex items-center gap-2 shadow-xl z-20">
-                  <MoveHorizontal className="size-3.5 text-blue-400" />
-                  <span>Pixel Distance: {pixelDistance.toFixed(1)} px</span>
+                <div
+                  className="absolute bottom-3 left-1/2 -translate-x-1/2 bg-neutral-900/95 border-2 border-primary/60 px-4 py-1.5 rounded-full text-xs font-mono font-bold flex items-center gap-2 shadow-2xl z-30 pointer-events-none"
+                  style={{ color: "#ffffff" }}
+                >
+                  <MoveHorizontal className="size-4 shrink-0 text-blue-400" style={{ color: "#60a5fa" }} />
+                  <span className="text-white font-mono font-bold text-xs" style={{ color: "#ffffff" }}>
+                    Pixel Distance: {pixelDistance.toFixed(1)} px
+                  </span>
                 </div>
               )}
             </div>
