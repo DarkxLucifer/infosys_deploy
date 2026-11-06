@@ -65,6 +65,7 @@ class CrackClassifier:
         self.metadata = DEFAULT_METADATA.copy()
         self.is_loaded = False
         self.engine_type: Optional[str] = None
+        self.device = None
         self.session = None
         self.torch_model = None
         self.error_message: Optional[str] = None
@@ -110,7 +111,37 @@ class CrackClassifier:
             self.error_message = f"Model directory not found: {self.model_dir}"
             return
 
-        # 1. Search candidate paths for ONNX file
+        import torch
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        is_cuda = self.device.type == "cuda"
+
+        # 1. If CUDA GPU is available, prioritize TorchScript on GPU for maximum throughput
+        if is_cuda:
+            if self._allow_fallback:
+                candidate_ts = [
+                    self.torchscript_path,
+                    self.model_dir / "infrascan_crack_resnet18_torchscript.pt",
+                    Path(r"d:\project\aiml prime\project\infosys\storage\models\infrascan_crack_resnet18_torchscript.pt"),
+                    Path(r"C:\Users\yashr\Downloads\infrascan_crack_results\models\infrascan_crack_resnet18_torchscript.pt")
+                ]
+            else:
+                candidate_ts = [self.torchscript_path, self.model_dir / "infrascan_crack_resnet18_torchscript.pt"]
+
+            for tp in candidate_ts:
+                if tp.exists():
+                    try:
+                        self.torch_model = torch.jit.load(str(tp), map_location=self.device)
+                        self.torch_model.eval()
+                        self.engine_type = "torchscript"
+                        self.torchscript_path = tp
+                        self.is_loaded = True
+                        self.error_message = None
+                        logger.info("Successfully loaded ResNet-18 TorchScript on GPU (%s) from %s", self.device, tp)
+                        return
+                    except Exception as e:
+                        logger.warning("Failed to load TorchScript on GPU (%s): %s. Falling back to ONNX.", tp, e)
+
+        # 2. Search candidate paths for ONNX file
         if self._allow_fallback:
             candidate_onnx = [
                 self.onnx_path,
@@ -144,32 +175,32 @@ class CrackClassifier:
                     logger.warning("Failed to load ONNX model (%s): %s. Attempting fallback.", op, e)
                     self.error_message = f"ONNX load error: {e}"
 
-        # 2. Try TorchScript fallback
-        if self._allow_fallback:
-            candidate_ts = [
-                self.torchscript_path,
-                self.model_dir / "infrascan_crack_resnet18_torchscript.pt",
-                Path(r"d:\project\aiml prime\project\infosys\storage\models\infrascan_crack_resnet18_torchscript.pt"),
-                Path(r"C:\Users\yashr\Downloads\infrascan_crack_results\models\infrascan_crack_resnet18_torchscript.pt")
-            ]
-        else:
-            candidate_ts = [self.torchscript_path, self.model_dir / "infrascan_crack_resnet18_torchscript.pt"]
+        # 3. TorchScript CPU fallback if ONNX failed or on CPU
+        if not is_cuda:
+            if self._allow_fallback:
+                candidate_ts = [
+                    self.torchscript_path,
+                    self.model_dir / "infrascan_crack_resnet18_torchscript.pt",
+                    Path(r"d:\project\aiml prime\project\infosys\storage\models\infrascan_crack_resnet18_torchscript.pt"),
+                    Path(r"C:\Users\yashr\Downloads\infrascan_crack_results\models\infrascan_crack_resnet18_torchscript.pt")
+                ]
+            else:
+                candidate_ts = [self.torchscript_path, self.model_dir / "infrascan_crack_resnet18_torchscript.pt"]
 
-        for tp in candidate_ts:
-            if tp.exists():
-                try:
-                    import torch
-                    self.torch_model = torch.jit.load(str(tp), map_location=torch.device("cpu"))
-                    self.torch_model.eval()
-                    self.engine_type = "torchscript"
-                    self.torchscript_path = tp
-                    self.is_loaded = True
-                    self.error_message = None
-                    logger.info("Successfully loaded TorchScript model from %s", tp)
-                    return
-                except Exception as e:
-                    logger.error("Failed to load TorchScript model (%s): %s", tp, e)
-                    self.error_message = f"TorchScript load error: {e}"
+            for tp in candidate_ts:
+                if tp.exists():
+                    try:
+                        self.torch_model = torch.jit.load(str(tp), map_location=torch.device("cpu"))
+                        self.torch_model.eval()
+                        self.engine_type = "torchscript"
+                        self.torchscript_path = tp
+                        self.is_loaded = True
+                        self.error_message = None
+                        logger.info("Successfully loaded TorchScript model on CPU from %s", tp)
+                        return
+                    except Exception as e:
+                        logger.error("Failed to load TorchScript model (%s): %s", tp, e)
+                        self.error_message = f"TorchScript load error: {e}"
 
         # 3. Direct PyTorch model with state_dict
         if self._allow_fallback:
@@ -329,27 +360,36 @@ class CrackClassifier:
             all_p_cracked = []
             all_p_uncracked = []
 
-            for p in patches:
-                tensor = self.preprocess_image(p)
+            if self.engine_type in ("torchscript", "pytorch") and self.torch_model is not None:
+                import torch
+                tensors = [self.preprocess_image(p) for p in patches]
+                batch_arr = np.concatenate(tensors, axis=0)  # shape (N, 3, 224, 224)
+                dev = self.device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
+                batch_tensor = torch.from_numpy(batch_arr).to(dev)
 
-                if self.engine_type == "onnx" and self.session is not None:
-                    input_name = self.session.get_inputs()[0].name
-                    outputs = self.session.run(None, {input_name: tensor})
-                    logits = outputs[0][0]  # shape (2,)
-                elif self.engine_type in ("torchscript", "pytorch") and self.torch_model is not None:
-                    import torch
-                    with torch.no_grad():
-                        inp = torch.from_numpy(tensor)
-                        out = self.torch_model(inp)
-                        logits = out.cpu().numpy()[0]
-                else:
-                    raise RuntimeError("No active model inference engine found.")
+                with torch.inference_mode():
+                    out = self.torch_model(batch_tensor)
+                    logits_all = out.detach().cpu().numpy()
 
-                # Softmax calculation: Index 0 is Uncracked, Index 1 is Cracked
-                e_x = np.exp(logits - np.max(logits))
-                probs = e_x / e_x.sum(axis=0)
-                all_p_uncracked.append(float(probs[0]))
-                all_p_cracked.append(float(probs[1]))
+                for logits in logits_all:
+                    e_x = np.exp(logits - np.max(logits))
+                    probs = e_x / e_x.sum(axis=0)
+                    all_p_uncracked.append(float(probs[0]))
+                    all_p_cracked.append(float(probs[1]))
+            else:
+                for p in patches:
+                    tensor = self.preprocess_image(p)
+                    if self.engine_type == "onnx" and self.session is not None:
+                        input_name = self.session.get_inputs()[0].name
+                        outputs = self.session.run(None, {input_name: tensor})
+                        logits = outputs[0][0]  # shape (2,)
+                    else:
+                        raise RuntimeError("No active model inference engine found.")
+
+                    e_x = np.exp(logits - np.max(logits))
+                    probs = e_x / e_x.sum(axis=0)
+                    all_p_uncracked.append(float(probs[0]))
+                    all_p_cracked.append(float(probs[1]))
 
             # Maximal crack response across scales
             p_cracked = max(all_p_cracked)

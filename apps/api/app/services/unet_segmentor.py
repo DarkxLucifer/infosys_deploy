@@ -118,8 +118,14 @@ class UNetCrackSegmentor:
             self.model.load_state_dict(ckpt["model_state_dict"])
             self.model.to(self.device)
             self.model.eval()
+
+            # Warmup pass on GPU with FP16 autocast
+            if self.device.type == "cuda":
+                with torch.inference_mode(), torch.autocast("cuda", dtype=torch.float16):
+                    _ = self.model(torch.zeros((1, 3, 384, 384), device=self.device))
+
             self.is_loaded = True
-            logger.info("Successfully loaded UNet model (Dice: %.2f%%, Base Channels: %d)", self.metrics.get("dice", 0.7514) * 100, base_ch)
+            logger.info("Successfully loaded UNet model on %s with FP16 Tensor Cores (Dice: %.2f%%, Base Channels: %d)", self.device, self.metrics.get("dice", 0.7514) * 100, base_ch)
         except Exception as e:
             logger.error("Failed to load UNet model: %s", e)
             self.is_loaded = False
@@ -166,8 +172,12 @@ class UNetCrackSegmentor:
         tensor_norm = (tensor - mean) / std
         tensor_input = tensor_norm.unsqueeze(0).to(self.device)
 
-        with torch.no_grad():
-            logits = self.model(tensor_input)
+        with torch.inference_mode():
+            if self.device.type == "cuda":
+                with torch.autocast("cuda", dtype=torch.float16):
+                    logits = self.model(tensor_input)
+            else:
+                logits = self.model(tensor_input)
             prob_384 = torch.sigmoid(logits).squeeze().cpu().numpy()
 
         # Resize probability map back to original dimensions

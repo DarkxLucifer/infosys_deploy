@@ -104,10 +104,18 @@ class RFDETRCrackDetector:
         try:
             logger.info("Loading RF-DETR Medium from %s...", self.model_path)
             import rfdetr
+            import torch
             self.model = rfdetr.RFDETRMedium(
                 pretrain_weights=str(self.model_path),
                 num_classes=4
             )
+            # Optimize for high-throughput GPU inference with FP16 Tensor Cores
+            if torch.cuda.is_available():
+                try:
+                    self.model.inference(compile=False, dtype="float16")
+                    logger.info("RF-DETR Medium optimized with FP16 Tensor Cores on GPU.")
+                except Exception as opt_err:
+                    logger.warning("RF-DETR FP16 optimization skipped: %s", opt_err)
             self.is_loaded = True
             logger.info("RF-DETR Medium loaded successfully.")
         except Exception as e:

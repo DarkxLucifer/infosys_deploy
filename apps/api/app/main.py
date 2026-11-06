@@ -61,11 +61,20 @@ async def lifespan(app: FastAPI):
     finally:
         db.close()
 
+    # Detect & Log Hardware Acceleration
+    import torch
+    if torch.cuda.is_available():
+        gpu_name = torch.cuda.get_device_name(0)
+        vram_mb = torch.cuda.get_device_properties(0).total_memory / (1024 * 1024)
+        logger.info("CUDA Hardware Acceleration Active: %s (%.0f MB VRAM)", gpu_name, vram_mb)
+    else:
+        logger.info("CUDA Hardware Acceleration: Not available (Running on CPU)")
+
     # Load & Warm Up AI Model Service (InfraScan Model v1.0 - ResNet-18)
     try:
         from app.services.classifier import get_classifier
         clf = get_classifier()
-        logger.info("InfraScan AI Model initialized: loaded=%s, engine=%s, version=%s", clf.is_loaded, clf.engine_type, clf.metadata.get("project_model_version"))
+        logger.info("InfraScan AI Model initialized: loaded=%s, engine=%s, device=%s, version=%s", clf.is_loaded, clf.engine_type, clf.device, clf.metadata.get("project_model_version"))
     except Exception as e:
         logger.error("Failed initializing classifier in lifespan: %s", e)
 
@@ -73,7 +82,7 @@ async def lifespan(app: FastAPI):
     try:
         from app.services.rfdetr_detector import get_rfdetr_detector
         rfdetr = get_rfdetr_detector()
-        logger.info("RF-DETR Medium initialized at startup: loaded=%s", rfdetr is not None)
+        logger.info("RF-DETR Medium initialized at startup: loaded=%s (FP16 GPU inference)", rfdetr is not None)
     except Exception as e:
         logger.warning("RF-DETR initialization skipped in lifespan: %s", e)
 
@@ -81,9 +90,17 @@ async def lifespan(app: FastAPI):
     try:
         from app.services.unet_segmentor import get_unet_segmentor
         unet = get_unet_segmentor()
-        logger.info("UNet Crack Segmentor initialized at startup: loaded=%s", unet is not None)
+        logger.info("UNet Crack Segmentor initialized at startup: loaded=%s, device=%s", unet is not None, unet.device if unet else None)
     except Exception as e:
         logger.warning("UNet initialization skipped in lifespan: %s", e)
+
+    # Preload YOLO crack detector at startup
+    try:
+        from app.services.yolo_detector import YoloCrackDetector
+        yolo = YoloCrackDetector()
+        logger.info("YOLO Crack Detector initialized at startup: loaded=%s, device=%s", yolo.is_loaded, getattr(yolo.model, 'device', 'cpu'))
+    except Exception as e:
+        logger.warning("YOLO initialization skipped in lifespan: %s", e)
 
     yield
 

@@ -89,10 +89,15 @@ class YoloCrackDetector:
             return
 
         try:
+            import torch
             from ultralytics import YOLO
             self.model = YOLO(str(self.model_path))
+            if torch.cuda.is_available():
+                self.model.to("cuda")
+                logger.info("Successfully loaded YOLO crack detection model on GPU (CUDA:0) from %s", self.model_path)
+            else:
+                logger.info("Successfully loaded YOLO crack detection model on CPU from %s", self.model_path)
             self.is_loaded = True
-            logger.info("Successfully loaded YOLO crack detection model from %s", self.model_path)
         except Exception as exc:
             self.error_message = f"Failed to load YOLO model: {exc}"
             logger.error(self.error_message, exc_info=True)
@@ -133,11 +138,14 @@ class YoloCrackDetector:
             )
 
         try:
+            import torch
+            dev_target = "cuda:0" if torch.cuda.is_available() else "cpu"
             # First pass with specified confidence
             results = self.model.predict(
                 source=pil_img,
                 conf=conf,
                 imgsz=imgsz,
+                device=dev_target,
                 verbose=False
             )
 
@@ -149,6 +157,7 @@ class YoloCrackDetector:
                     source=pil_img,
                     conf=0.04,
                     imgsz=imgsz,
+                    device=dev_target,
                     verbose=False
                 )
                 if results_fallback and len(results_fallback) > 0:
