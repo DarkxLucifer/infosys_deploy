@@ -5,7 +5,7 @@ import base64
 import logging
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, status, Response
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, status, Response, Body
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -23,6 +23,7 @@ from app.models.all_models import (
     ImageQualityReport,
     ImageProcessingRun,
     Detection,
+    Measurement,
     User,
     AuditLog
 )
@@ -149,6 +150,9 @@ class ScaleCalibrationRequest(BaseModel):
     mm_per_pixel: Optional[float] = Field(None, gt=0.0, description="Millimetres per pixel (must be > 0)")
     reference_line_length_mm: Optional[float] = Field(None, gt=0.0, description="Real physical length in mm")
     pixel_length: Optional[float] = Field(None, gt=0.0, description="Length in pixels")
+    reference_p1: Optional[List[float]] = Field(None, description="[x1, y1] line start in pixels")
+    reference_p2: Optional[List[float]] = Field(None, description="[x2, y2] line end in pixels")
+    width_metric: Optional[str] = Field("maximum", description="'maximum' or 'average'")
 
 
 class ImageTransformRequest(BaseModel):
@@ -502,6 +506,10 @@ def run_and_persist_ai_classification(
                 if qr.get("crack_geometry") and qr["crack_geometry"].get("success"):
                     geo_data = qr["crack_geometry"]
                     geo_sum = geo_data.get("summary", {})
+                    sev_info = geo_sum.get("severity_assessment", {})
+                    geo_sev = sev_info.get("category_code") if geo_sum.get("is_calibrated") else "uncalibrated"
+                    if geo_sum.get("crack_count", 0) == 0:
+                        geo_sev = "no_visible_damage"
                     geo_det = Detection(
                         inspection_id=insp_id,
                         image_id=image.id,
@@ -511,23 +519,45 @@ def run_and_persist_ai_classification(
                             "type": "crack_geometry_extraction",
                             "version": geo_data.get("version", "1.0.0"),
                             "total_crack_area_px": geo_sum.get("total_crack_area_px"),
+                            "total_crack_area_mm2": geo_sum.get("total_crack_area_mm2"),
                             "inspected_surface_area_px": geo_sum.get("inspected_surface_area_px"),
                             "unaffected_surface_area_px": geo_sum.get("unaffected_surface_area_px"),
                             "crack_coverage_pct": geo_sum.get("crack_coverage_pct"),
                             "crack_count": geo_sum.get("crack_count"),
                             "total_crack_length_px": geo_sum.get("total_crack_length_px"),
+                            "total_crack_length_mm": geo_sum.get("total_crack_length_mm"),
                             "average_crack_width_px": geo_sum.get("average_crack_width_px"),
+                            "average_crack_width_mm": geo_sum.get("average_crack_width_mm"),
                             "maximum_crack_width_px": geo_sum.get("maximum_crack_width_px"),
+                            "maximum_crack_width_mm": geo_sum.get("maximum_crack_width_mm"),
                             "is_calibrated": geo_sum.get("is_calibrated"),
+                            "mm_per_pixel": geo_sum.get("mm_per_pixel"),
+                            "controlling_metric": geo_sum.get("controlling_metric"),
+                            "severity_assessment": sev_info,
                             "cracks": geo_data.get("cracks", [])
                         },
-                        severity=severity,
+                        severity=geo_sev,
                         created_by=user_id,
                         confidence=unet_result.get("mean_crack_confidence", p_crack) if unet_result else p_crack,
                         model_id="InfraScan Crack Geometry v1.0",
-                        notes=f"Geometry: {geo_sum.get('crack_coverage_pct')}% crack coverage ({geo_sum.get('total_crack_area_px'):,} px), {geo_sum.get('crack_count')} crack regions."
+                        notes=f"Crack Measurement: {geo_sum.get('crack_coverage_pct')}% coverage, {geo_sum.get('crack_count')} regions. Max width: {geo_sum.get('maximum_crack_width_mm')} mm [{sev_info.get('category')}]." if geo_sum.get("is_calibrated") else f"Crack Measurement (uncalibrated): {geo_sum.get('crack_coverage_pct')}% coverage, {geo_sum.get('crack_count')} regions. Max width: {geo_sum.get('maximum_crack_width_px')} px."
                     )
                     db.add(geo_det)
+                    db.flush()
+
+                    # Persist Measurement model row
+                    is_cal = bool(geo_sum.get("is_calibrated"))
+                    meas = Measurement(
+                        detection_id=geo_det.id,
+                        length=float(geo_sum.get("total_crack_length_mm") if is_cal and geo_sum.get("total_crack_length_mm") is not None else geo_sum.get("total_crack_length_px", 0.0)),
+                        avg_width=float(geo_sum.get("average_crack_width_mm") if is_cal and geo_sum.get("average_crack_width_mm") is not None else geo_sum.get("average_crack_width_px", 0.0)),
+                        max_width=float(geo_sum.get("maximum_crack_width_mm") if is_cal and geo_sum.get("maximum_crack_width_mm") is not None else geo_sum.get("maximum_crack_width_px", 0.0)),
+                        area=float(geo_sum.get("total_crack_area_mm2") if is_cal and geo_sum.get("total_crack_area_mm2") is not None else geo_sum.get("total_crack_area_px", 0.0)),
+                        unit="mm" if is_cal else "px",
+                        calibrated=is_cal,
+                        density=float(geo_sum.get("crack_coverage_pct", 0.0))
+                    )
+                    db.add(meas)
 
                 # Persist overall classification detection record
                 det = Detection(
@@ -1807,6 +1837,7 @@ def get_processed_shortcut(
 class GeometryComputeRequest(BaseModel):
     force_recompute: Optional[bool] = False
     mm_per_pixel: Optional[float] = None
+    width_metric: Optional[str] = "maximum"
     min_region_area_px: Optional[int] = 10
     surface_mask_path: Optional[str] = None
 
@@ -1852,7 +1883,7 @@ def get_image_geometry_endpoint(
 @router.post("/inspections/{inspection_id}/images/{image_id}/geometry")
 def calculate_image_geometry_endpoint(
     image_id: str,
-    payload: Optional[GeometryComputeRequest] = None,
+    payload: Optional[GeometryComputeRequest] = Body(default=None),
     inspection_id: Optional[str] = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -1870,8 +1901,11 @@ def calculate_image_geometry_endpoint(
 
     # If cached and not forced recomputation
     if payload and not payload.force_recompute and payload.mm_per_pixel is None:
-        if image.quality_report and isinstance(image.quality_report, dict) and "crack_geometry" in image.quality_report:
-            return image.quality_report["crack_geometry"]
+        existing_geo = image.quality_report.get("crack_geometry") if (image.quality_report and isinstance(image.quality_report, dict)) else None
+        if existing_geo and isinstance(existing_geo, dict):
+            current_metric = existing_geo.get("summary", {}).get("controlling_metric")
+            if not payload.width_metric or payload.width_metric == current_metric:
+                return existing_geo
 
     return execute_geometry_calculation(image=image, payload=payload, inspection_id=inspection_id, user_id=current_user.id, db=db)
 
@@ -1884,10 +1918,21 @@ def execute_geometry_calculation(
     db: Session
 ) -> Dict[str, Any]:
     from app.services.crack_geometry import extract_crack_geometry
+    from sqlalchemy.orm.attributes import flag_modified
 
     unet_mask_path = find_stored_file("unet", f"{image.id}_mask.png") or os.path.join(UNET_DIR, f"{image.id}_mask.png")
     unet_file = find_stored_file("unet", f"{image.id}.jpg") or os.path.join(UNET_DIR, f"{image.id}.jpg")
-    proc_target = image.processed_path if (image.processed_path and os.path.exists(image.processed_path)) else image.original_path
+
+    proc_target = None
+    if image.processed_path and os.path.exists(image.processed_path):
+        proc_target = image.processed_path
+    elif image.processed_path:
+        proc_target = find_stored_file("processed", os.path.basename(image.processed_path))
+    if not proc_target:
+        if image.original_path and os.path.exists(image.original_path):
+            proc_target = image.original_path
+        elif image.original_path:
+            proc_target = find_stored_file("raw", os.path.basename(image.original_path))
 
     # If mask doesn't exist, execute U-Net on demand
     if not (unet_mask_path and os.path.exists(unet_mask_path)) and proc_target and os.path.exists(proc_target):
@@ -1905,55 +1950,139 @@ def execute_geometry_calculation(
         except Exception as e:
             logger.warning("Failed on-demand UNet for geometry: %s", e)
 
+    chosen_width_metric = (
+        payload.width_metric
+        if (payload and payload.width_metric)
+        else (
+            image.calibration.get("width_metric", "maximum")
+            if (image.calibration and isinstance(image.calibration, dict))
+            else "maximum"
+        )
+    )
+
+    mm_scale = None
+    if payload and payload.mm_per_pixel is not None:
+        if payload.mm_per_pixel <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={"code": "INVALID_SCALE", "message": "Optical scale factor mm_per_pixel must be strictly positive."}
+            )
+        mm_scale = payload.mm_per_pixel
+        cal = dict(image.calibration or {})
+        cal["mm_per_pixel"] = round(float(payload.mm_per_pixel), 6)
+        cal["mm_per_px"] = round(float(payload.mm_per_pixel), 6)
+        cal["calibrated"] = True
+        cal["width_metric"] = chosen_width_metric
+        if "method" not in cal:
+            cal["method"] = "direct_scale"
+        image.calibration = cal
+        flag_modified(image, "calibration")
+    elif image.calibration and isinstance(image.calibration, dict):
+        mm_scale = image.calibration.get("mm_per_pixel") or image.calibration.get("mm_per_px")
+        if payload and payload.width_metric:
+            cal = dict(image.calibration)
+            cal["width_metric"] = chosen_width_metric
+            image.calibration = cal
+            flag_modified(image, "calibration")
+
     if not (unet_mask_path and os.path.exists(unet_mask_path)):
-        return {
+        img_w = int(image.width or 800)
+        img_h = int(image.height or 600)
+        is_cal = bool(mm_scale)
+        scale_val = float(mm_scale) if is_cal else None
+        geo_empty = {
             "success": True,
             "summary": {
                 "total_crack_area_px": 0,
-                "inspected_surface_area_px": int(image.width * image.height),
-                "unaffected_surface_area_px": int(image.width * image.height),
+                "inspected_surface_area_px": img_w * img_h,
+                "unaffected_surface_area_px": img_w * img_h,
                 "crack_coverage_pct": 0.0,
                 "unaffected_surface_pct": 100.0,
                 "crack_count": 0,
                 "total_crack_length_px": 0.0,
                 "average_crack_width_px": 0.0,
                 "maximum_crack_width_px": 0.0,
-                "is_calibrated": False,
-                "unit": "px",
+                "is_calibrated": is_cal,
+                "mm_per_pixel": scale_val,
+                "unit": "mm" if is_cal else "px",
+                "image_width": img_w,
+                "image_height": img_h,
+                "has_surface_mask": False,
+                "total_crack_area_mm2": 0.0 if is_cal else None,
+                "inspected_surface_area_mm2": round(img_w * img_h * (scale_val ** 2), 2) if is_cal else None,
+                "unaffected_surface_area_mm2": round(img_w * img_h * (scale_val ** 2), 2) if is_cal else None,
+                "total_crack_length_mm": 0.0 if is_cal else None,
+                "average_crack_width_mm": 0.0 if is_cal else None,
+                "maximum_crack_width_mm": 0.0 if is_cal else None,
+                "controlling_metric": chosen_width_metric,
+                "crack_severity_category": "None" if is_cal else "Uncalibrated",
+                "crack_severity_code": "none" if is_cal else "uncalibrated",
+                "severity_assessment": {
+                    "category": "None" if is_cal else "Uncalibrated",
+                    "category_code": "none" if is_cal else "uncalibrated",
+                    "badge_color": "emerald" if is_cal else "zinc",
+                    "controlling_width_mm": 0.0 if is_cal else None,
+                    "controlling_metric": chosen_width_metric,
+                    "is_calibrated": is_cal,
+                    "description": "Sound concrete surface. No crack defect detected." if is_cal else "Uncalibrated: Millimetre measurements unavailable.",
+                    "threshold_range": "0.0 mm" if is_cal else "N/A (uncalibrated)",
+                    "requires_engineer_review": True,
+                    "warning": None if is_cal else "Uncalibrated: Millimetre measurements and crack-width severity classification are unavailable without verified optical scale calibration.",
+                }
             },
             "cracks": [],
             "visualization_path": None,
             "version": "1.0.0-infrascan-geometry"
         }
+        qr = dict(image.quality_report or {})
+        qr["crack_geometry"] = geo_empty
+        image.quality_report = qr
+        flag_modified(image, "quality_report")
+        db.commit()
+        return geo_empty
 
     geo_ann_path = os.path.join(GEOMETRY_DIR, f"{image.id}.jpg")
-    orig_target = image.original_path if (image.original_path and os.path.exists(image.original_path)) else proc_target
+    orig_target = None
+    if image.original_path and os.path.exists(image.original_path):
+        orig_target = image.original_path
+    elif image.original_path:
+        orig_target = find_stored_file("raw", os.path.basename(image.original_path))
+    if not orig_target:
+        orig_target = proc_target
 
-    mm_scale = None
-    if payload and payload.mm_per_pixel is not None:
-        mm_scale = payload.mm_per_pixel
-    elif image.calibration and isinstance(image.calibration, dict):
-        mm_scale = image.calibration.get("mm_per_pixel") or image.calibration.get("mm_per_px")
+    if not (orig_target and os.path.exists(orig_target)):
+        img_w = int(image.width or 800)
+        img_h = int(image.height or 600)
+        orig_target = np.zeros((img_h, img_w, 3), dtype=np.uint8)
 
     min_area = payload.min_region_area_px if (payload and payload.min_region_area_px) else 10
     surface_mask = payload.surface_mask_path if (payload and payload.surface_mask_path) else None
 
-    geo_res = extract_crack_geometry(
-        original_image=orig_target,
-        binary_mask=unet_mask_path,
-        orig_w=image.width,
-        orig_h=image.height,
-        surface_mask=surface_mask,
-        calibration=image.calibration if isinstance(image.calibration, dict) else None,
-        mm_per_pixel=float(mm_scale) if mm_scale else None,
-        min_region_area_px=min_area,
-        generate_visualization=True,
-        visualization_save_path=geo_ann_path
-    )
+    try:
+        geo_res = extract_crack_geometry(
+            original_image=orig_target,
+            binary_mask=unet_mask_path,
+            orig_w=image.width,
+            orig_h=image.height,
+            surface_mask=surface_mask,
+            calibration=image.calibration if isinstance(image.calibration, dict) else None,
+            mm_per_pixel=float(mm_scale) if mm_scale else None,
+            width_metric=chosen_width_metric,
+            min_region_area_px=min_area,
+            generate_visualization=True,
+            visualization_save_path=geo_ann_path
+        )
+    except Exception as e:
+        logger.error("Error running extract_crack_geometry on image %s: %s", image.id, e, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"code": "GEOMETRY_CALCULATION_ERROR", "message": f"Geometry extraction failed: {str(e)}"}
+        )
 
     qr = dict(image.quality_report or {})
     qr["crack_geometry"] = geo_res
     image.quality_report = qr
+    flag_modified(image, "quality_report")
 
     # Clean existing crack_geometry detection
     db.query(Detection).filter(
@@ -1964,8 +2093,11 @@ def execute_geometry_calculation(
     insp_id = inspection_id or image.inspection_id
     if insp_id:
         geo_sum = geo_res.get("summary", {})
-        cov = geo_sum.get("crack_coverage_pct", 0.0)
-        sev = "severe" if cov >= 5.0 else ("moderate" if cov >= 1.0 else "minor")
+        sev_info = geo_sum.get("severity_assessment", {})
+        geo_sev = sev_info.get("category_code") if geo_sum.get("is_calibrated") else "uncalibrated"
+        if geo_sum.get("crack_count", 0) == 0:
+            geo_sev = "no_visible_damage"
+
         geo_det = Detection(
             inspection_id=insp_id,
             image_id=image.id,
@@ -1975,23 +2107,49 @@ def execute_geometry_calculation(
                 "type": "crack_geometry_extraction",
                 "version": geo_res.get("version", "1.0.0"),
                 "total_crack_area_px": geo_sum.get("total_crack_area_px"),
+                "total_crack_area_mm2": geo_sum.get("total_crack_area_mm2"),
                 "inspected_surface_area_px": geo_sum.get("inspected_surface_area_px"),
                 "unaffected_surface_area_px": geo_sum.get("unaffected_surface_area_px"),
                 "crack_coverage_pct": geo_sum.get("crack_coverage_pct"),
                 "crack_count": geo_sum.get("crack_count"),
                 "total_crack_length_px": geo_sum.get("total_crack_length_px"),
+                "total_crack_length_mm": geo_sum.get("total_crack_length_mm"),
                 "average_crack_width_px": geo_sum.get("average_crack_width_px"),
+                "average_crack_width_mm": geo_sum.get("average_crack_width_mm"),
                 "maximum_crack_width_px": geo_sum.get("maximum_crack_width_px"),
+                "maximum_crack_width_mm": geo_sum.get("maximum_crack_width_mm"),
                 "is_calibrated": geo_sum.get("is_calibrated"),
+                "mm_per_pixel": geo_sum.get("mm_per_pixel"),
+                "controlling_metric": geo_sum.get("controlling_metric"),
+                "severity_assessment": sev_info,
                 "cracks": geo_res.get("cracks", [])
             },
-            severity=sev,
+            severity=geo_sev,
             created_by=user_id,
             confidence=0.95,
             model_id="InfraScan Crack Geometry v1.0",
-            notes=f"Geometry: {geo_sum.get('crack_coverage_pct')}% crack coverage ({geo_sum.get('total_crack_area_px'):,} px), {geo_sum.get('crack_count')} crack regions."
+            notes=(
+                f"Crack Measurement: {geo_sum.get('crack_coverage_pct')}% coverage, {geo_sum.get('crack_count')} regions. Max width: {geo_sum.get('maximum_crack_width_mm')} mm [{sev_info.get('category')}]."
+                if geo_sum.get("is_calibrated")
+                else f"Crack Measurement (uncalibrated): {geo_sum.get('crack_coverage_pct')}% coverage, {geo_sum.get('crack_count')} regions. Max width: {geo_sum.get('maximum_crack_width_px')} px."
+            )
         )
         db.add(geo_det)
+        db.flush()
+
+        # Link Measurement model row
+        is_cal = bool(geo_sum.get("is_calibrated"))
+        meas = Measurement(
+            detection_id=geo_det.id,
+            length=float(geo_sum.get("total_crack_length_mm") if is_cal and geo_sum.get("total_crack_length_mm") is not None else geo_sum.get("total_crack_length_px", 0.0)),
+            avg_width=float(geo_sum.get("average_crack_width_mm") if is_cal and geo_sum.get("average_crack_width_mm") is not None else geo_sum.get("average_crack_width_px", 0.0)),
+            max_width=float(geo_sum.get("maximum_crack_width_mm") if is_cal and geo_sum.get("maximum_crack_width_mm") is not None else geo_sum.get("maximum_crack_width_px", 0.0)),
+            area=float(geo_sum.get("total_crack_area_mm2") if is_cal and geo_sum.get("total_crack_area_mm2") is not None else geo_sum.get("total_crack_area_px", 0.0)),
+            unit="mm" if is_cal else "px",
+            calibrated=is_cal,
+            density=float(geo_sum.get("crack_coverage_pct", 0.0))
+        )
+        db.add(meas)
 
     db.commit()
     return geo_res
@@ -2377,13 +2535,20 @@ def calibrate_scale_endpoint(
     enforce_image_visibility(current_user, image, inspection)
 
     mm_per_px = req.mm_per_pixel
+    calc_pixel_len = req.pixel_length
     if req.method == "manual_line":
-        if not req.reference_line_length_mm or not req.pixel_length:
+        if (not calc_pixel_len or calc_pixel_len <= 0) and req.reference_p1 and req.reference_p2 and len(req.reference_p1) == 2 and len(req.reference_p2) == 2:
+            dx = float(req.reference_p2[0]) - float(req.reference_p1[0])
+            dy = float(req.reference_p2[1]) - float(req.reference_p1[1])
+            calc_pixel_len = math.sqrt(dx * dx + dy * dy)
+            req.pixel_length = round(calc_pixel_len, 2)
+
+        if not req.reference_line_length_mm or not calc_pixel_len or calc_pixel_len <= 0:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail={"code": "INVALID_CALIBRATION", "message": "Manual line calibration requires reference_line_length_mm and pixel_length."}
+                detail={"code": "INVALID_CALIBRATION", "message": "Manual line calibration requires known reference_line_length_mm and positive pixel_length."}
             )
-        mm_per_px = req.reference_line_length_mm / req.pixel_length
+        mm_per_px = float(req.reference_line_length_mm) / float(calc_pixel_len)
 
     if not mm_per_px or mm_per_px <= 0:
         raise HTTPException(
@@ -2391,11 +2556,17 @@ def calibrate_scale_endpoint(
             detail={"code": "INVALID_CALIBRATION", "message": "Computed scale mm_per_pixel must be strictly positive."}
         )
 
+    chosen_metric = req.width_metric if req.width_metric in ("average", "maximum") else "maximum"
     calib_record = {
         "method": req.method,
         "calibrated": True,
         "mm_per_pixel": round(mm_per_px, 6),
         "mm_per_px": round(mm_per_px, 6),
+        "reference_line_length_mm": req.reference_line_length_mm,
+        "pixel_length": round(req.pixel_length, 2) if req.pixel_length else None,
+        "reference_p1": req.reference_p1,
+        "reference_p2": req.reference_p2,
+        "width_metric": chosen_metric,
         "user_id": current_user.id,
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
@@ -2410,12 +2581,91 @@ def calibrate_scale_endpoint(
         details=calib_record
     )
     db.add(audit)
+    db.flush()
+
+    # Re-extract geometry & crack severity classification with new physical scale
+    geo_res = None
+    try:
+        geo_payload = GeometryComputeRequest(
+            force_recompute=True,
+            mm_per_pixel=mm_per_px,
+            width_metric=chosen_metric
+        )
+        geo_res = execute_geometry_calculation(
+            image=image,
+            payload=geo_payload,
+            inspection_id=inspection_id or image.inspection_id,
+            user_id=current_user.id,
+            db=db
+        )
+    except Exception as geo_err:
+        logger.warning("Failed recalculating geometry upon calibration for %s: %s", image.id, geo_err)
+
     db.commit()
 
     return {
         "status": "calibrated",
         "imageId": image.id,
-        "calibration": calib_record
+        "calibration": calib_record,
+        "crack_geometry": geo_res,
+        "crackGeometry": geo_res,
+        "severity_assessment": geo_res.get("summary", {}).get("severity_assessment") if geo_res else None,
+    }
+
+
+@router.delete("/images/{image_id}/calibration")
+@router.delete("/inspections/{inspection_id}/images/{image_id}/calibrate")
+def delete_image_calibration_endpoint(
+    image_id: str,
+    inspection_id: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Resets calibration on the image to uncalibrated mode and recomputes pixel geometry."""
+    image = db.query(InspectionImage).filter(
+        InspectionImage.id == image_id,
+        InspectionImage.organization_id == current_user.organization_id,
+        InspectionImage.is_deleted == False
+    ).first()
+    if not image:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image not found")
+
+    inspection = db.query(Inspection).filter(Inspection.id == image.inspection_id).first()
+    enforce_image_visibility(current_user, image, inspection)
+
+    image.calibration = None
+    db.flush()
+
+    geo_res = None
+    try:
+        geo_payload = GeometryComputeRequest(force_recompute=True, mm_per_pixel=None)
+        geo_res = execute_geometry_calculation(
+            image=image,
+            payload=geo_payload,
+            inspection_id=inspection_id or image.inspection_id,
+            user_id=current_user.id,
+            db=db
+        )
+    except Exception as e:
+        logger.warning("Failed recalculating uncalibrated geometry for %s: %s", image.id, e)
+
+    audit = AuditLog(
+        user_id=current_user.id,
+        actor_email=current_user.email,
+        action="IMAGE_CALIBRATE_RESET",
+        entity_type="inspection_image",
+        entity_id=image.id,
+        details={"status": "uncalibrated"}
+    )
+    db.add(audit)
+    db.commit()
+
+    return {
+        "status": "uncalibrated",
+        "imageId": image.id,
+        "calibration": None,
+        "crack_geometry": geo_res,
+        "crackGeometry": geo_res,
     }
 
 

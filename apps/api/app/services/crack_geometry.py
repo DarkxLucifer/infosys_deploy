@@ -153,6 +153,103 @@ def rule_suggest_crack_type(orientation: float, branch_count: int, length_px: fl
     return "Diagonal / Oblique"
 
 
+def classify_crack_severity(
+    width_mm: Optional[float],
+    metric: str = "maximum",
+    has_cracks: bool = True
+) -> Dict[str, Any]:
+    """
+    Classifies crack width severity according to civil engineering standards
+    as documented in FEATURES_AND_IMPLEMENTATION.md:
+    
+    | Crack width            | Category  |
+    |------------------------|-----------|
+    | Below 1 mm             | Hairline  |
+    | 1 mm to below 3 mm     | Minor     |
+    | 3 mm to 5 mm           | Moderate  |
+    | Above 5 mm             | Severe    |
+    
+    Exact boundary rules:
+    - Below 1 mm: Hairline (< 1.0 mm)
+    - 1 mm to below 3 mm: Minor (1.0 mm <= width < 3.0 mm)
+    - 3 mm to 5 mm: Moderate (3.0 mm <= width <= 5.0 mm)
+    - Above 5 mm: Severe (> 5.0 mm)
+    
+    Constraints:
+    - Never uses crack area coverage alone to determine severity.
+    - Never assigns millimetre classifications to uncalibrated images.
+    - Empty segmentation masks return 'None' (Sound Surface) with zero values.
+    - Controlling metric ('maximum' or 'average') is configurable and clearly identified
+      for qualified civil engineering review and approval.
+    """
+    if not has_cracks:
+        return {
+            "category": "None",
+            "category_code": "none",
+            "badge_color": "emerald",
+            "controlling_width_mm": 0.0,
+            "controlling_metric": metric,
+            "is_calibrated": True,
+            "description": "Sound concrete surface. No crack defect detected in segmentation mask.",
+            "threshold_range": "0.0 mm",
+            "requires_engineer_review": True,
+            "warning": None,
+        }
+
+    if width_mm is None or width_mm <= 0:
+        return {
+            "category": "Uncalibrated",
+            "category_code": "uncalibrated",
+            "badge_color": "zinc",
+            "controlling_width_mm": None,
+            "controlling_metric": metric,
+            "is_calibrated": False,
+            "description": "Optical scale not calibrated. Millimetre-based crack width classification requires optical reference calibration.",
+            "threshold_range": "N/A (uncalibrated)",
+            "requires_engineer_review": True,
+            "warning": "Uncalibrated: Millimetre measurements and crack-width severity classification are unavailable without verified optical scale calibration.",
+        }
+
+    w = float(width_mm)
+    if w < 1.0:
+        cat = "Hairline"
+        code = "hairline"
+        color = "sky"
+        desc = "Hairline fissure (width < 1.0 mm). Surface crazing or micro-shrinkage; routine monitoring recommended."
+        thresh = "< 1.0 mm"
+    elif w < 3.0:
+        cat = "Minor"
+        code = "minor"
+        color = "emerald"
+        desc = "Minor crack (1.0 mm <= width < 3.0 mm). Low structural impact; preventative sealing recommended."
+        thresh = "1.0 mm to < 3.0 mm"
+    elif w <= 5.0:
+        cat = "Moderate"
+        code = "moderate"
+        color = "amber"
+        desc = "Moderate crack (3.0 mm <= width <= 5.0 mm). Notable structural concern; repair recommended."
+        thresh = "3.0 mm to 5.0 mm"
+    else:
+        cat = "Severe"
+        code = "severe"
+        color = "rose"
+        desc = "Severe crack (width > 5.0 mm). Critical structural opening; immediate structural engineering remediation required."
+        thresh = "> 5.0 mm"
+
+    return {
+        "category": cat,
+        "category_code": code,
+        "badge_color": color,
+        "controlling_width_mm": round(w, 2),
+        "controlling_metric": metric,
+        "is_calibrated": True,
+        "description": desc,
+        "threshold_range": thresh,
+        "requires_engineer_review": True,
+        "warning": None,
+    }
+
+
 def extract_crack_geometry(
     original_image: Union[str, Path, np.ndarray],
     binary_mask: Union[str, Path, np.ndarray],
@@ -161,6 +258,7 @@ def extract_crack_geometry(
     surface_mask: Optional[Union[str, Path, np.ndarray]] = None,
     calibration: Optional[Dict[str, Any]] = None,
     mm_per_pixel: Optional[float] = None,
+    width_metric: str = "maximum",
     min_region_area_px: int = 10,
     generate_visualization: bool = True,
     visualization_save_path: Optional[str] = None
@@ -348,16 +446,29 @@ def extract_crack_geometry(
             "branch_points": branch_points,
         }
 
+        chosen_width_metric = width_metric if width_metric in ("average", "maximum") else "maximum"
         if is_calibrated and scale_factor:
+            crack_len_mm = round(length_px * scale_factor, 2)
+            crack_avg_w_mm = round(avg_w_px * scale_factor, 2)
+            crack_med_w_mm = round(med_w_px * scale_factor, 2)
+            crack_max_w_mm = round(max_w_px * scale_factor, 2)
+            crack_area_mm2 = round(area_val * (scale_factor ** 2), 2)
+            crack_perim_mm = round(perimeter_px * scale_factor, 2)
+            controlling_w = crack_max_w_mm if chosen_width_metric == "maximum" else crack_avg_w_mm
+            crack_sev = classify_crack_severity(controlling_w, metric=chosen_width_metric, has_cracks=True)
+
             crack_data.update({
-                "area_mm2": round(area_val * (scale_factor ** 2), 2),
-                "length_mm": round(length_px * scale_factor, 2),
-                "avg_width_mm": round(avg_w_px * scale_factor, 2),
-                "median_width_mm": round(med_w_px * scale_factor, 2),
-                "max_width_mm": round(max_w_px * scale_factor, 2),
-                "perimeter_mm": round(perimeter_px * scale_factor, 2),
+                "area_mm2": crack_area_mm2,
+                "length_mm": crack_len_mm,
+                "avg_width_mm": crack_avg_w_mm,
+                "median_width_mm": crack_med_w_mm,
+                "max_width_mm": crack_max_w_mm,
+                "perimeter_mm": crack_perim_mm,
+                "severity": crack_sev,
+                "severity_category": crack_sev["category"],
             })
         else:
+            uncalibrated_sev = classify_crack_severity(None, metric=chosen_width_metric, has_cracks=True)
             crack_data.update({
                 "area_mm2": None,
                 "length_mm": None,
@@ -365,6 +476,8 @@ def extract_crack_geometry(
                 "median_width_mm": None,
                 "max_width_mm": None,
                 "perimeter_mm": None,
+                "severity": uncalibrated_sev,
+                "severity_category": uncalibrated_sev["category"],
             })
 
         cracks.append(crack_data)
@@ -373,6 +486,7 @@ def extract_crack_geometry(
     total_crack_length_px = round(total_crack_length_px, 2)
     avg_crack_width_px = round(float(np.mean(all_widths_px)), 2) if all_widths_px else 0.0
     max_crack_width_px = round(float(np.max([c["max_width_px"] for c in cracks])), 2) if cracks else 0.0
+    chosen_width_metric = width_metric if width_metric in ("average", "maximum") else "maximum"
 
     summary: Dict[str, Any] = {
         "total_crack_area_px": total_crack_area_px,
@@ -390,17 +504,35 @@ def extract_crack_geometry(
         "unit": "mm" if is_calibrated else "px",
         "image_width": actual_w,
         "image_height": actual_h,
+        "controlling_metric": chosen_width_metric,
     }
 
     if is_calibrated and scale_factor:
+        tot_area_mm2 = round(total_crack_area_px * (scale_factor ** 2), 2)
+        tot_len_mm = round(total_crack_length_px * scale_factor, 2)
+        avg_w_mm = round(avg_crack_width_px * scale_factor, 2)
+        max_w_mm = round(max_crack_width_px * scale_factor, 2)
+        controlling_w_mm = max_w_mm if chosen_width_metric == "maximum" else avg_w_mm
+
         summary.update({
-            "total_crack_area_mm2": round(total_crack_area_px * (scale_factor ** 2), 2),
+            "total_crack_area_mm2": tot_area_mm2,
             "inspected_surface_area_mm2": round(inspected_surface_area_px * (scale_factor ** 2), 2),
             "unaffected_surface_area_mm2": round(unaffected_surface_area_px * (scale_factor ** 2), 2),
-            "total_crack_length_mm": round(total_crack_length_px * scale_factor, 2),
-            "average_crack_width_mm": round(avg_crack_width_px * scale_factor, 2),
-            "maximum_crack_width_mm": round(max_crack_width_px * scale_factor, 2),
+            "total_crack_length_mm": tot_len_mm,
+            "average_crack_width_mm": avg_w_mm,
+            "maximum_crack_width_mm": max_w_mm,
         })
+        severity_assessment = classify_crack_severity(
+            width_mm=controlling_w_mm,
+            metric=chosen_width_metric,
+            has_cracks=len(cracks) > 0
+        )
+        severity_assessment["category_by_max_width"] = classify_crack_severity(
+            max_w_mm, metric="maximum", has_cracks=len(cracks) > 0
+        )["category"]
+        severity_assessment["category_by_avg_width"] = classify_crack_severity(
+            avg_w_mm, metric="average", has_cracks=len(cracks) > 0
+        )["category"]
     else:
         summary.update({
             "total_crack_area_mm2": None,
@@ -410,6 +542,23 @@ def extract_crack_geometry(
             "average_crack_width_mm": None,
             "maximum_crack_width_mm": None,
         })
+        severity_assessment = classify_crack_severity(
+            width_mm=None,
+            metric=chosen_width_metric,
+            has_cracks=len(cracks) > 0
+        )
+        severity_assessment["category_by_max_width"] = "Uncalibrated" if len(cracks) > 0 else "None"
+        severity_assessment["category_by_avg_width"] = "Uncalibrated" if len(cracks) > 0 else "None"
+
+    severity_assessment["controlling_width_px"] = max_crack_width_px if chosen_width_metric == "maximum" else avg_crack_width_px
+    severity_assessment["engineer_approval_status"] = "pending_review"
+    severity_assessment["engineer_review_disclaimer"] = "Automated vision assessment. Decision support only. Certified civil engineer review required before report issuance."
+    severity_assessment["optical_distortion_warning"] = "Measurements assume perpendicular optical alignment. Oblique angles may skew planar calibration."
+
+    summary["severity_assessment"] = severity_assessment
+    summary["crack_severity_category"] = severity_assessment["category"]
+    summary["crack_severity_code"] = severity_assessment["category_code"]
+    summary["width_metric_controlling"] = chosen_width_metric
 
     # 8. Dedicated Geometry Visualization Generation
     visualization_path = None
@@ -550,22 +699,35 @@ def generate_geometry_visualization(
 
     cov_pct = summary.get("crack_coverage_pct", 0.0)
     cr_cnt = summary.get("crack_count", 0)
-    tot_len = summary.get("total_crack_length_px", 0.0)
-    avg_w = summary.get("average_crack_width_px", 0.0)
+    tot_len_px = summary.get("total_crack_length_px", 0.0)
+    avg_w_px = summary.get("average_crack_width_px", 0.0)
+    max_w_px = summary.get("maximum_crack_width_px", 0.0)
     is_cal = summary.get("is_calibrated", False)
+    scale_val = summary.get("mm_per_pixel")
+    sev_cat = summary.get("crack_severity_category", "Uncalibrated")
 
-    hud_title = "INFRASCAN GEOMETRY EXTRACTION"
-    cv2.putText(hud, hud_title, (14, 18), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (180, 180, 200), 1, cv2.LINE_AA)
+    hud_title = "INFRASCAN CRACK MEASUREMENT & SEVERITY ASSESSMENT (ASTM/AASHTO)"
+    cv2.putText(hud, hud_title, (14, 17), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (180, 180, 200), 1, cv2.LINE_AA)
 
-    cal_label = f"Calibrated ({summary.get('mm_per_pixel')} mm/px)" if is_cal else "Image-based (px)"
-    hud_metrics = (
-        f"Coverage: {cov_pct:.2f}% | "
-        f"Cracks: {cr_cnt} | "
-        f"Total Length: {tot_len:,.1f} px | "
-        f"Mean Width: {avg_w:.1f} px | "
-        f"Scale: {cal_label}"
-    )
-    cv2.putText(hud, hud_metrics, (14, 38), cv2.FONT_HERSHEY_SIMPLEX, 0.50, (255, 255, 255), 1, cv2.LINE_AA)
+    if is_cal and scale_val:
+        tot_len_mm = summary.get("total_crack_length_mm", 0.0)
+        max_w_mm = summary.get("maximum_crack_width_mm", 0.0)
+        hud_metrics = (
+            f"Coverage: {cov_pct:.2f}% | "
+            f"Cracks: {cr_cnt} | "
+            f"Max Width: {max_w_mm:.2f} mm [{sev_cat}] | "
+            f"Length: {tot_len_mm:.1f} mm | "
+            f"Scale: {scale_val:.4f} mm/px"
+        )
+    else:
+        hud_metrics = (
+            f"Coverage: {cov_pct:.2f}% | "
+            f"Cracks: {cr_cnt} | "
+            f"Max Width: {max_w_px:.1f} px | "
+            f"Length: {tot_len_px:,.1f} px | "
+            f"Scale: UNCALIBRATED (Optical Calibration Required)"
+        )
+    cv2.putText(hud, hud_metrics, (14, 37), cv2.FONT_HERSHEY_SIMPLEX, 0.46, (255, 255, 255), 1, cv2.LINE_AA)
 
     final_image = np.vstack([hud, canvas])
     cv2.imwrite(save_path, final_image, [int(cv2.IMWRITE_JPEG_QUALITY), 92])

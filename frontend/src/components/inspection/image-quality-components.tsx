@@ -634,18 +634,18 @@ export function ImageCompare({
         {viewMode === "rfdetr" && (
           <>
             <img src={rfdetrUrl || processedUrl || originalUrl} alt="RF-DETR Defect Detection" className="w-full h-full object-contain" />
-            <div className="absolute top-3 left-3 px-2 py-0.5 rounded bg-black/80 border border-border font-mono text-[10px] text-foreground pointer-events-none flex items-center gap-1.5">
-              <Cpu className="size-3 text-primary" />
-              RF-DETR Medium (rdd2022-rfdetr-medium)
+            <div className="absolute top-3 left-3 px-2.5 py-1 rounded-md bg-black/80 backdrop-blur-xs border border-white/20 font-mono text-[10px] text-white pointer-events-none flex items-center gap-1.5 shadow-md">
+              <Cpu className="size-3 text-blue-400" />
+              <span>RF-DETR Medium (rdd2022-rfdetr-medium)</span>
             </div>
             {rfdetrDetection && (
-              <div className="absolute top-3 right-3 px-2 py-0.5 rounded bg-black/80 border border-border font-mono text-[10px] text-foreground pointer-events-none">
+              <div className="absolute top-3 right-3 px-2.5 py-1 rounded-md bg-black/80 backdrop-blur-xs border border-white/20 font-mono text-[10px] text-white pointer-events-none shadow-md">
                 {rfdetrDetection.num_detections > 0 ? (
-                  <span className="text-rose-400">
+                  <span className="text-white font-semibold">
                     {rfdetrDetection.num_detections} defect(s) · {rfdetrDetection.primary_label || "Crack"}
                   </span>
                 ) : (
-                  <span className="text-muted-foreground">
+                  <span className="text-zinc-400">
                     0 defect bboxes &rarr; U-Net Fallback
                   </span>
                 )}
@@ -657,13 +657,14 @@ export function ImageCompare({
         {viewMode === "unet" && (
           <>
             <img src={unetUrl || processedUrl || originalUrl} alt="UNet Crack Segmentation" className="w-full h-full object-contain" />
-            <div className="absolute top-3 left-3 px-2 py-0.5 rounded bg-black/80 border border-border font-mono text-[10px] text-foreground pointer-events-none flex items-center gap-1.5">
-              <Sparkles className="size-3 text-primary" />
-              UNet (best_model.pth) {modelFallback ? "· Fallback Active" : "CrackSeg9k"}
+            <div className="absolute top-3 left-3 px-2.5 py-1 rounded-md bg-black/80 backdrop-blur-xs border border-white/20 font-mono text-[10px] text-white pointer-events-none flex items-center gap-1.5 shadow-md">
+              <Sparkles className="size-3 text-blue-400" />
+              <span>UNet (best_model.pth) {modelFallback ? "· Fallback Active" : "CrackSeg9k"}</span>
             </div>
             {unetMetrics.crack_area_pct !== undefined && (
-              <div className="absolute top-3 right-3 px-2 py-0.5 rounded bg-black/80 border border-border font-mono text-[10px] text-rose-400 pointer-events-none">
-                {unetMetrics.crack_area_pct}% Area · {unetMetrics.crack_pixels?.toLocaleString()} px
+              <div className="absolute top-3 right-3 px-2.5 py-1 rounded-md bg-black/80 backdrop-blur-xs border border-white/20 font-mono text-[10px] text-white pointer-events-none shadow-md">
+                <span className="font-semibold text-white">{unetMetrics.crack_area_pct}% Area</span>
+                <span className="text-zinc-400"> · {unetMetrics.crack_pixels?.toLocaleString()} px</span>
               </div>
             )}
           </>
@@ -672,7 +673,7 @@ export function ImageCompare({
         {viewMode === "mask" && (
           <>
             <img src={unetMaskUrl || unetUrl || processedUrl || originalUrl} alt="Binary Crack Mask" className="w-full h-full object-contain bg-zinc-950" />
-            <div className="absolute top-3 left-3 px-2 py-0.5 rounded bg-black/90 border border-border font-mono text-[10px] text-foreground pointer-events-none">
+            <div className="absolute top-3 left-3 px-2.5 py-1 rounded-md bg-black/85 backdrop-blur-xs border border-white/20 font-mono text-[10px] text-white pointer-events-none shadow-md">
               Binary Pixel Segmentation Mask (384×384)
             </div>
           </>
@@ -711,10 +712,10 @@ export function ImageCompare({
             </div>
 
             {/* Badges on viewer */}
-            <div className="absolute top-3 left-3 px-2 py-0.5 rounded bg-black/80 border border-border font-mono text-[10px] text-muted-foreground pointer-events-none">
+            <div className="absolute top-3 left-3 px-2.5 py-1 rounded-md bg-black/80 backdrop-blur-xs border border-white/20 font-mono text-[10px] text-zinc-200 pointer-events-none shadow-md">
               Original
             </div>
-            <div className="absolute top-3 right-3 px-2 py-0.5 rounded bg-black/80 border border-border font-mono text-[10px] text-foreground pointer-events-none">
+            <div className="absolute top-3 right-3 px-2.5 py-1 rounded-md bg-black/80 backdrop-blur-xs border border-white/20 font-mono text-[10px] text-white pointer-events-none shadow-md">
               {compareTarget === "rfdetr" ? "RF-DETR" : (compareTarget === "unet" ? "UNet Segmentation" : "Processed")}
             </div>
           </>
@@ -1401,7 +1402,7 @@ export function ImageDetailsDrawer({
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-bold text-foreground truncate">{photo.name || photo.id}</span>
                   {isCrackDetected && (
-                    <span className="px-1.5 py-0.2 rounded-full bg-rose-500/10 border border-rose-500/30 text-[10px] font-bold text-rose-400">
+                    <span className="px-1.5 py-0.2 rounded-full bg-primary/10 border border-primary/30 text-[10px] font-bold text-primary">
                       Crack Identified
                     </span>
                   )}
@@ -1996,17 +1997,34 @@ export function ImageDetailsDrawer({
                   )}
                 </div>
                 {photo.calibration ? (
-                  <p className="font-mono text-foreground">
-                    Scale saved: <strong>{photo.calibration.mm_per_pixel || photo.calibration.mm_per_px} mm per pixel</strong>
-                  </p>
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <p className="font-mono text-foreground text-xs">
+                        Scale saved: <strong>{photo.calibration.mm_per_pixel || photo.calibration.mm_per_px} mm/px</strong>
+                      </p>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => onCalibrate?.(photo.id)}
+                        className="h-6 text-[10px] text-primary"
+                      >
+                        Recalibrate
+                      </Button>
+                    </div>
+                    {photo.calibration.width_metric && (
+                      <span className="text-[10px] text-muted-foreground block font-mono">
+                        Controlling metric: {photo.calibration.width_metric} width
+                      </span>
+                    )}
+                  </div>
                 ) : (
                   <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground">Not calibrated. Measurements will be in pixels.</span>
+                    <span className="text-muted-foreground text-[11px]">Not calibrated. Measurements will be in pixels only.</span>
                     <Button
                       size="sm"
                       variant="outline"
                       onClick={() => onCalibrate?.(photo.id)}
-                      className="h-7 text-xs"
+                      className="h-7 text-xs border-primary/40 text-primary hover:bg-primary/10"
                     >
                       Calibrate scale
                     </Button>
@@ -2064,6 +2082,7 @@ export function ImageDetailsDrawer({
               <CrackGeometrySection
                 photo={photo}
                 details={details}
+                inspectionId={photo?.inspection_id || photo?.inspectionId}
                 onCalibrate={onCalibrate}
               />
             </TabsContent>
@@ -2332,12 +2351,12 @@ export function ImageTransformModal({
                 Rot: {rotation}°
               </span>
               {(flipH || flipV) && (
-                <span className="px-2 py-0.5 rounded bg-black/80 font-mono text-[10px] text-foreground">
+                <span className="px-2 py-0.5 rounded bg-black/80 font-mono text-[10px] text-zinc-200">
                   Flip: {flipH ? "H" : ""}{flipV ? "V" : ""}
                 </span>
               )}
               {cropPreset !== "none" && (
-                <span className="px-2 py-0.5 rounded bg-black/80 font-mono text-[10px] text-foreground">
+                <span className="px-2 py-0.5 rounded bg-black/80 font-mono text-[10px] text-zinc-200">
                   Crop: {cropPreset === "free" ? `${freeCrop.width}%×${freeCrop.height}%` : cropPreset}
                 </span>
               )}
@@ -2798,7 +2817,7 @@ export function ImageQualityCard({
               </span>
             )}
             {isFallback && crackAreaPct !== undefined && crackAreaPct > 0 && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-muted/80 text-rose-400 border border-border shadow-xs">
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-muted/80 text-foreground border border-border shadow-xs">
                 <Sparkles className="size-2.5 text-primary" />
                 UNet Fallback: {crackAreaPct}%
               </span>
@@ -2807,8 +2826,8 @@ export function ImageQualityCard({
 
           {/* Bottom GPS caption bar with solid background */}
           {photo.gps && (
-            <div className="absolute bottom-0 left-0 right-0 px-2 py-1 bg-black/85 text-[10px] text-foreground font-mono font-semibold flex items-center gap-1 border-t border-black/40">
-              <MapPin className="size-2.5 text-muted-foreground shrink-0" />
+            <div className="absolute bottom-0 left-0 right-0 px-2 py-1 bg-black/85 text-[10px] text-white font-mono font-medium flex items-center gap-1 border-t border-white/10">
+              <MapPin className="size-2.5 text-blue-400 shrink-0" />
               <span>{photo.gps.lat.toFixed(5)}, {photo.gps.lng.toFixed(5)}</span>
             </div>
           )}

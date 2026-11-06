@@ -11,7 +11,6 @@ import {
   Play,
   TriangleAlert,
   Upload,
-  Ruler,
   CheckCheck,
   Loader2,
   Smartphone,
@@ -42,6 +41,7 @@ import {
   ImageDetailsDrawer,
   ImageTransformModal,
 } from "@/components/inspection/image-quality-components";
+import { OpticalCalibrationModal } from "@/components/inspection/optical-calibration-modal";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -180,10 +180,6 @@ export function InspectionDetailPage() {
   const [viewMode, setViewMode] = useState<Record<string, "orig" | "proc" | "rfdetr" | "unet">>({});
   const [preprocessingImgId, setPreprocessingImgId] = useState<string | null>(null);
   const [calibratingImageId, setCalibratingImageId] = useState<string | null>(null);
-  const [mmPerPixel, setMmPerPixel] = useState("0.25");
-  const [refLineLength, setRefLineLength] = useState("100");
-  const [pixelLength, setPixelLength] = useState("400");
-  const [calibrationMethod, setCalibrationMethod] = useState("mm_per_pixel");
 
   // Advanced Photo Modal States
   const [zoomPhoto, setZoomPhoto] = useState<any | null>(null);
@@ -414,42 +410,6 @@ export function InspectionDetailPage() {
       fetchData();
     } catch (err: any) {
       toast.error(err.message || "Failed to submit for review. Ensure at least one accepted image exists.");
-    }
-  };
-
-  const handleCalibrate = async () => {
-    if (!calibratingImageId || !id) return;
-    try {
-      if (calibrationMethod === "mm_per_pixel") {
-        const val = parseFloat(mmPerPixel);
-        if (isNaN(val) || val <= 0) {
-          toast.error("Enter a valid mm/px value > 0");
-          return;
-        }
-        await api.calibrateImage(id, calibratingImageId, {
-          method: "mm_per_pixel",
-          mm_per_pixel: val,
-        });
-      } else {
-        const refMm = parseFloat(refLineLength);
-        const px = parseFloat(pixelLength);
-        if (isNaN(refMm) || refMm <= 0 || isNaN(px) || px <= 0) {
-          toast.error("Enter valid reference length and pixel length");
-          return;
-        }
-        await api.calibrateImage(id, calibratingImageId, {
-          method: "manual_line",
-          reference_line_length_mm: refMm,
-          pixel_length: px,
-        });
-      }
-      toast.success("Scale calibration saved", {
-        description: "Measurements on this frame will be reported in physical mm.",
-      });
-      setCalibratingImageId(null);
-      fetchData();
-    } catch (err: any) {
-      toast.error(err.message || "Failed to save calibration.");
     }
   };
 
@@ -1422,86 +1382,20 @@ export function InspectionDetailPage() {
 
           <ComplianceNote className="mt-4" />
 
-          {/* Scale Calibration Dialog */}
-          <Dialog open={!!calibratingImageId} onOpenChange={(open) => !open && setCalibratingImageId(null)}>
-            <DialogContent className="sm:max-w-md">
-              <DialogHeader>
-                <DialogTitle>Physical Scale Calibration</DialogTitle>
-                <DialogDescription>
-                  Calibrate pixel-to-millimetre scale for physical crack width and length measurements.
-                </DialogDescription>
-              </DialogHeader>
-              <div className="grid gap-4 py-2">
-                <div className="grid gap-1.5">
-                  <Label>Calibration method</Label>
-                  <Select value={calibrationMethod} onValueChange={setCalibrationMethod}>
-                    <SelectTrigger className="rounded-lg">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="mm_per_pixel">Direct millimetres per pixel (mm/px)</SelectItem>
-                      <SelectItem value="manual_line">Reference gauge / card length</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {calibrationMethod === "mm_per_pixel" ? (
-                  <div className="grid gap-1.5">
-                    <Label htmlFor="mm-per-px">Millimetres per pixel (mm/px)</Label>
-                    <Input
-                      id="mm-per-px"
-                      type="number"
-                      step="0.01"
-                      min="0.001"
-                      value={mmPerPixel}
-                      onChange={(e) => setMmPerPixel(e.target.value)}
-                      placeholder="e.g. 0.25"
-                      className="rounded-lg font-mono"
-                    />
-                    <p className="text-[11px] text-muted-foreground">Standard 1m standoff default: ~0.25 mm/px</p>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="grid gap-1.5">
-                      <Label htmlFor="ref-mm">Real length (mm)</Label>
-                      <Input
-                        id="ref-mm"
-                        type="number"
-                        step="1"
-                        min="1"
-                        value={refLineLength}
-                        onChange={(e) => setRefLineLength(e.target.value)}
-                        placeholder="e.g. 100"
-                        className="rounded-lg font-mono"
-                      />
-                    </div>
-                    <div className="grid gap-1.5">
-                      <Label htmlFor="ref-px">Length in image (px)</Label>
-                      <Input
-                        id="ref-px"
-                        type="number"
-                        step="1"
-                        min="1"
-                        value={pixelLength}
-                        onChange={(e) => setPixelLength(e.target.value)}
-                        placeholder="e.g. 400"
-                        className="rounded-lg font-mono"
-                      />
-                    </div>
-                  </div>
-                )}
-              </div>
-              <DialogFooter>
-                <Button variant="outline" onClick={() => setCalibratingImageId(null)}>
-                  Cancel
-                </Button>
-                <Button onClick={handleCalibrate}>
-                  <Ruler className="size-4" />
-                  Save calibration
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
+          {/* Optical Scale Calibration Modal */}
+          <OpticalCalibrationModal
+            open={!!calibratingImageId}
+            onOpenChange={(open) => !open && setCalibratingImageId(null)}
+            photo={
+              dbImages.find((img: any) => img.id === calibratingImageId) ||
+              (drawerPhoto?.id === calibratingImageId ? drawerPhoto : { id: calibratingImageId })
+            }
+            inspectionId={id}
+            onCalibrated={() => {
+              fetchData();
+              setCalibratingImageId(null);
+            }}
+          />
 
           <Dialog open={escalateOpen} onOpenChange={setEscalateOpen}>
             <DialogContent className="sm:max-w-md">

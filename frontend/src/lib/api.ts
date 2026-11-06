@@ -2526,27 +2526,31 @@ export const apiService = {
       headers: authHeaders(),
       credentials: "include",
     });
+    const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      const err: any = new Error("Failed to load crack geometry");
+      const err: any = new Error(data.detail?.message || data.detail || "Failed to load crack geometry");
+      err.response = data;
       err.status = res.status;
       throw err;
     }
-    return res.json();
+    return data;
   },
 
-  async calculateImageGeometry(imageId: string, payload?: { force_recompute?: boolean; mm_per_pixel?: number; min_region_area_px?: number }): Promise<any> {
+  async calculateImageGeometry(imageId: string, payload?: { force_recompute?: boolean; mm_per_pixel?: number; min_region_area_px?: number; width_metric?: "maximum" | "average" }): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/images/${imageId}/geometry`, {
       method: "POST",
-      headers: authHeaders(),
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       credentials: "include",
       body: JSON.stringify(payload || {}),
     });
+    const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      const err: any = new Error("Failed to calculate crack geometry");
+      const err: any = new Error(data.detail?.message || data.detail || "Failed to calculate crack geometry");
+      err.response = data;
       err.status = res.status;
       throw err;
     }
-    return res.json();
+    return data;
   },
 
   async retryImageProcessing(imageId: string): Promise<any> {
@@ -2815,8 +2819,23 @@ export const apiService = {
     return data;
   },
 
-  async calibrateImage(inspectionId: string, imageId: string, payload: { method: string; mm_per_pixel?: number; reference_line_length_mm?: number; pixel_length?: number }): Promise<any> {
-    const res = await fetch(`${API_BASE_URL}/inspections/${inspectionId}/images/${imageId}/calibrate`, {
+  async calibrateImage(
+    inspectionId: string | undefined | null,
+    imageId: string,
+    payload: {
+      method: string;
+      mm_per_pixel?: number;
+      reference_line_length_mm?: number;
+      pixel_length?: number;
+      reference_p1?: number[];
+      reference_p2?: number[];
+      width_metric?: "maximum" | "average";
+    }
+  ): Promise<any> {
+    const url = inspectionId
+      ? `${API_BASE_URL}/inspections/${inspectionId}/images/${imageId}/calibrate`
+      : `${API_BASE_URL}/images/${imageId}/calibration`;
+    const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       credentials: "include",
@@ -2825,6 +2844,22 @@ export const apiService = {
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.detail?.message || err.detail || "Failed to calibrate image scale");
+    }
+    return res.json();
+  },
+
+  async deleteImageCalibration(imageId: string, inspectionId?: string | null): Promise<any> {
+    const url = inspectionId
+      ? `${API_BASE_URL}/inspections/${inspectionId}/images/${imageId}/calibrate`
+      : `${API_BASE_URL}/images/${imageId}/calibration`;
+    const res = await fetch(url, {
+      method: "DELETE",
+      headers: authHeaders(),
+      credentials: "include",
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail?.message || err.detail || "Failed to reset image calibration");
     }
     return res.json();
   },

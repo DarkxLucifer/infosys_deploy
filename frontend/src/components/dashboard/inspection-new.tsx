@@ -13,7 +13,6 @@ import {
   X,
   AlertCircle,
   UserCheck,
-  Ruler,
   RefreshCw,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -45,6 +44,7 @@ import {
   BatchSummaryCard,
   ImageTransformModal,
 } from "@/components/inspection/image-quality-components";
+import { OpticalCalibrationModal } from "@/components/inspection/optical-calibration-modal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -293,8 +293,6 @@ export function InspectionNewPage() {
   const replaceFileInputRef = useRef<HTMLInputElement>(null);
   const [replaceTargetId, setReplaceTargetId] = useState<string | null>(null);
   const [calibratingPhotoId, setCalibratingPhotoId] = useState<string | null>(null);
-  const [calibMm, setCalibMm] = useState<number>(50);
-  const [calibPx, setCalibPx] = useState<number>(100);
   const [limits, setLimits] = useState<any>(null);
 
   // Role-based inspector assignment
@@ -895,26 +893,6 @@ export function InspectionNewPage() {
   const handleCalibrate = useCallback((id: string) => {
     setCalibratingPhotoId(id);
   }, []);
-
-  const handleSaveCalibration = useCallback(async () => {
-    if (!calibratingPhotoId || !createdInspectionId) return;
-    try {
-      const res = await api.calibrateImage(createdInspectionId, calibratingPhotoId, {
-        method: "reference_line",
-        reference_line_length_mm: calibMm,
-        pixel_length: calibPx,
-      });
-      setPhotos((prev) =>
-        prev.map((p) =>
-          p.id === calibratingPhotoId ? { ...p, calibration: res.calibration } : p
-        )
-      );
-      toast.success(`Scale calibrated: ${res.calibration.mm_per_pixel} mm/px`);
-      setCalibratingPhotoId(null);
-    } catch (err: any) {
-      toast.error(err.message || "Failed to save calibration");
-    }
-  }, [calibratingPhotoId, createdInspectionId, calibMm, calibPx]);
 
   const handleRemovePhoto = useCallback(
     async (id: string) => {
@@ -1588,61 +1566,27 @@ export function InspectionNewPage() {
         onChange={handleReplaceFileChange}
       />
 
-      {/* Scale Calibration Dialog */}
-      <Dialog open={Boolean(calibratingPhotoId)} onOpenChange={(v) => !v && setCalibratingPhotoId(null)}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="text-sm font-bold flex items-center gap-2">
-              <Ruler className="size-4 text-primary" />
-              Optical Scale Calibration
-            </DialogTitle>
-            <DialogDescription className="text-xs">
-              Calibrate physical units (mm per pixel) using a known reference ruler or marker in this image.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4 py-2 text-xs">
-            <div className="space-y-1.5">
-              <Label htmlFor="calib-mm" className="text-xs">Known Physical Length (mm)</Label>
-              <Input
-                id="calib-mm"
-                type="number"
-                value={calibMm}
-                onChange={(e) => setCalibMm(Number(e.target.value))}
-                className="rounded-lg text-xs"
-                min={1}
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <Label htmlFor="calib-px" className="text-xs">Measured Pixel Length (px)</Label>
-              <Input
-                id="calib-px"
-                type="number"
-                value={calibPx}
-                onChange={(e) => setCalibPx(Number(e.target.value))}
-                className="rounded-lg text-xs"
-                min={1}
-              />
-            </div>
-
-            {calibPx > 0 && (
-              <div className="p-3 rounded-lg bg-muted/60 border border-border text-[11px] font-mono">
-                Computed Scale: <strong className="text-primary">{(calibMm / calibPx).toFixed(5)} mm / pixel</strong>
-              </div>
-            )}
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" size="sm" onClick={() => setCalibratingPhotoId(null)} className="text-xs">
-              Cancel
-            </Button>
-            <Button size="sm" onClick={handleSaveCalibration} className="text-xs font-semibold">
-              Save Calibration
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Optical Scale Calibration Modal */}
+      <OpticalCalibrationModal
+        open={Boolean(calibratingPhotoId)}
+        onOpenChange={(v) => !v && setCalibratingPhotoId(null)}
+        photo={photos.find((p) => p.id === calibratingPhotoId)}
+        inspectionId={createdInspectionId}
+        onCalibrated={(res) => {
+          setPhotos((prev) =>
+            prev.map((p) =>
+              p.id === calibratingPhotoId
+                ? {
+                    ...p,
+                    calibration: res.calibration,
+                    crack_geometry: res.crack_geometry,
+                  }
+                : p
+            )
+          );
+          setCalibratingPhotoId(null);
+        }}
+      />
 
       {/* Interactive Image Transform Modal (Crop, Rotate, Orientation) */}
       <ImageTransformModal
