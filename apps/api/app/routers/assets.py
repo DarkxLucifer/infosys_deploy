@@ -258,6 +258,129 @@ def list_assets(
         "pageSize": page_size
     }
 
+@router.get("/map-summary")
+def get_assets_map_summary(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Returns geospatial mapping summary for all infrastructure assets in the user's organization.
+    Computes latest inspection details, certified damage severity, defect types, and review statuses.
+    """
+    assets = db.query(Asset).filter(
+        Asset.organization_id == current_user.organization_id,
+        Asset.is_active == True,
+        Asset.latitude.isnot(None),
+        Asset.longitude.isnot(None)
+    ).all()
+
+    sev_rank = {
+        "no_visible_damage": 0,
+        "minor": 1,
+        "moderate": 2,
+        "severe": 3,
+        "critical": 4
+    }
+
+    sev_colors = {
+        "no_visible_damage": "#22c55e",
+        "minor": "#eab308",
+        "moderate": "#f97316",
+        "severe": "#ef4444",
+        "critical": "#991b1b"
+    }
+
+    severity_labels = {
+        "no_visible_damage": "No Visible Damage",
+        "minor": "Minor Damage",
+        "moderate": "Moderate Damage",
+        "severe": "Severe Damage",
+        "critical": "Critical / Urgent Review"
+    }
+
+    items = []
+    for a in assets:
+        latest_insp = db.query(Inspection).filter(
+            Inspection.asset_id == a.id,
+            Inspection.organization_id == current_user.organization_id
+        ).order_by(desc(Inspection.inspection_date), desc(Inspection.created_at)).first()
+
+        latest_info = None
+        damage_info = {
+            "severity": "no_visible_damage",
+            "severityLabel": "No Visible Damage",
+            "color": "#22c55e",
+            "primaryDamage": "Sound Surface",
+            "defectCount": 0,
+            "requiresUrgentReview": False
+        }
+
+        if latest_insp:
+            dets = db.query(Detection).filter(Detection.inspection_id == latest_insp.id).all()
+            detected_max_sev = "no_visible_damage"
+            primary_defect = "Sound Surface"
+            if dets:
+                for d in dets:
+                    if sev_rank.get(d.severity, 0) >= sev_rank.get(detected_max_sev, 0):
+                        detected_max_sev = d.severity or "no_visible_damage"
+                        primary_defect = (d.defect_type or "defect").replace("_", " ").title()
+
+            if latest_insp.notes and "[Certified Severity]:" in latest_insp.notes:
+                for line in latest_insp.notes.splitlines():
+                    if "[Certified Severity]:" in line:
+                        certified_val = line.split(":", 1)[1].strip().lower()
+                        if certified_val in sev_rank:
+                            detected_max_sev = certified_val
+
+            inspector_user = db.query(User).filter(User.id == latest_insp.inspector_id).first() if latest_insp.inspector_id else None
+
+            if latest_insp.status in ("reviewed", "reported", "closed"):
+                review_status = "Certified & Signed Off"
+            elif latest_insp.status == "in_review":
+                review_status = "Under Civil Review"
+            elif latest_insp.status == "pending_review":
+                review_status = "Pending Engineering Review"
+            else:
+                review_status = "Walkdown In Progress"
+
+            latest_info = {
+                "id": latest_insp.id,
+                "status": latest_insp.status,
+                "reviewStatus": review_status,
+                "inspectionDate": latest_insp.inspection_date.isoformat() if latest_insp.inspection_date else None,
+                "inspectorName": inspector_user.name if inspector_user else (a.assigned_inspector.name if a.assigned_inspector else "Field Inspector"),
+                "inspectorEmail": inspector_user.email if inspector_user else (a.assigned_inspector.email if a.assigned_inspector else None)
+            }
+
+            damage_info = {
+                "severity": detected_max_sev,
+                "severityLabel": severity_labels.get(detected_max_sev, detected_max_sev.capitalize()),
+                "color": sev_colors.get(detected_max_sev, "#22c55e"),
+                "primaryDamage": primary_defect,
+                "defectCount": len(dets),
+                "requiresUrgentReview": detected_max_sev in ("critical", "severe")
+            }
+
+        items.append({
+            "id": a.id,
+            "name": a.name,
+            "assetType": a.asset_type,
+            "address": a.address,
+            "latitude": a.latitude,
+            "longitude": a.longitude,
+            "constructionYear": a.construction_year,
+            "material": a.material,
+            "department": a.department,
+            "importance": a.importance,
+            "latestInspection": latest_info,
+            "damage": damage_info
+        })
+
+    return {
+        "items": items,
+        "total": len(items)
+    }
+
 @router.get("/{asset_id}")
 def get_asset_detail(
     asset_id: str,

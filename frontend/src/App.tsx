@@ -48,6 +48,7 @@ import { AssetsPage } from "@/components/dashboard/assets";
 import { AssetDetailPage } from "@/components/dashboard/asset-detail";
 import { InspectionsPage } from "@/components/dashboard/inspections";
 import { InspectionDetailPage } from "@/components/dashboard/inspection-detail";
+import { DamageMapPage } from "@/pages/damage-map";
 import { InspectionNewPage } from "@/components/dashboard/inspection-new";
 import { AnalysisDetailPage } from "@/components/dashboard/analysis-detail";
 import { MaintenancePage } from "@/components/dashboard/maintenance";
@@ -249,6 +250,7 @@ export default function App() {
             <Route path="inspections/new" element={<InspectionNewPage />} />
             <Route path="inspections/:id" element={<InspectionDetailPage />} />
             <Route path="notifications" element={<NotificationsCenter />} />
+            <Route path="map" element={<DamageMapPage />} />
             <Route path="profile" element={<ProfilePage />} />
 
             {/* Direct role shortcuts */}
@@ -280,6 +282,7 @@ export default function App() {
             <Route path="inspections/new" element={<InspectionNewPage />} />
             <Route path="inspections/:id" element={<InspectionDetailPage />} />
             <Route path="notifications" element={<NotificationsCenter />} />
+            <Route path="map" element={<DamageMapPage />} />
             <Route path="profile" element={<ProfilePage />} />
             <Route path="inspector" element={<InspectorDashboard />} />
             <Route path="engineer" element={<CivilEngineerDashboard />} />

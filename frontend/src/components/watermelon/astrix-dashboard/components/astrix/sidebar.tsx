@@ -70,6 +70,7 @@ export function DashboardSidebar() {
     navItems.push(
       { name: "Inspections", href: "/app/inspections", icon: ClipboardList },
       { name: "Assets", href: "/app/assets", icon: Building },
+      ...(FEATURES.damageMap ? [{ name: "Damage Map", href: "/app/map", icon: MapPin }] : []),
       { name: "Notifications", href: "/app/notifications", icon: Bell },
     );
   } else if (currentRole === "engineer") {
@@ -77,6 +78,7 @@ export function DashboardSidebar() {
       { name: "Review Queue", href: "/app/review", icon: CheckSquare },
       { name: "Inspections", href: "/app/inspections", icon: ClipboardList },
       { name: "Assets", href: "/app/assets", icon: Building },
+      ...(FEATURES.damageMap ? [{ name: "Damage Map", href: "/app/map", icon: MapPin }] : []),
       ...(FEATURES.reportsRoute ? [{ name: "Reports", href: "/app/reports", icon: FileText }] : []),
       { name: "Notifications", href: "/app/notifications", icon: Bell },
     );
@@ -84,6 +86,7 @@ export function DashboardSidebar() {
     navItems.push(
       ...(FEATURES.maintenanceRoute ? [{ name: "Maintenance", href: "/app/maintenance", icon: Wrench }] : []),
       { name: "Assets", href: "/app/assets", icon: Building },
+      ...(FEATURES.damageMap ? [{ name: "Damage Map", href: "/app/map", icon: MapPin }] : []),
       { name: "Notifications", href: "/app/notifications", icon: Bell },
     );
   } else if (currentRole === "manager") {
@@ -102,6 +105,7 @@ export function DashboardSidebar() {
       ...(FEATURES.adminAuditRoute ? [{ name: "Audit log", href: "/app/admin/audit", icon: Activity }] : []),
       ...(FEATURES.adminHealthRoute ? [{ name: "Platform health", href: "/app/admin/health", icon: HeartPulse }] : []),
       { name: "Assets", href: "/app/assets", icon: Building },
+      ...(FEATURES.damageMap ? [{ name: "Damage Map", href: "/app/map", icon: MapPin }] : []),
       { name: "Notifications", href: "/app/notifications", icon: Bell },
     );
   }

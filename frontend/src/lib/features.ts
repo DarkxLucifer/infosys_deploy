@@ -39,7 +39,7 @@ export const FEATURES: FeatureFlags = {
   notifications: true,
   profile: true,
 
-  damageMap: false,
+  damageMap: true,
   maintenanceRoute: false,
   reportsRoute: false,
   adminUsersRoute: false,

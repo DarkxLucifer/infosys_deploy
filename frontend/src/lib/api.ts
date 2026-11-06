@@ -2016,6 +2016,15 @@ export const apiService = {
     return data.items || data;
   },
 
+  async getAssetsMapSummary(): Promise<{ items: any[]; total: number }> {
+    const res = await fetch(`${API_BASE_URL}/assets/map-summary`, {
+      headers: authHeaders(),
+      credentials: "include",
+    });
+    if (!res.ok) return { items: [], total: 0 };
+    return res.json();
+  },
+
   async getAsset(id: string): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/assets/${id}`, {
       headers: authHeaders(),
