@@ -27,6 +27,7 @@ import {
   Sliders,
   Sparkles,
   Cpu,
+  ScanSearch,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -177,7 +178,7 @@ export function InspectionDetailPage() {
   const [uploadSource, setUploadSource] = useState("smartphone");
   const [isUploading, setIsUploading] = useState(false);
   const [cameraModalOpen, setCameraModalOpen] = useState(false);
-  const [viewMode, setViewMode] = useState<Record<string, "orig" | "proc" | "rfdetr" | "unet">>({});
+  const [viewMode, setViewMode] = useState<Record<string, "orig" | "proc" | "rfdetr" | "yolo" | "unet">>({});
   const [preprocessingImgId, setPreprocessingImgId] = useState<string | null>(null);
   const [calibratingImageId, setCalibratingImageId] = useState<string | null>(null);
 
@@ -1086,7 +1087,7 @@ export function InspectionDetailPage() {
                       const modelFallback = Boolean(img.modelFallback || img.model_fallback || (hasCrack && !hasRfdetr));
                       const unetSeg = qr.unet_segmentation || img.unetSegmentation;
                       const hasUnet = Boolean(img.hasUnet || unetSeg || hasCrack);
-                      const defaultMode = (hasRfdetr && !modelFallback) ? "rfdetr" : (hasCrack ? "unet" : "orig");
+                      const defaultMode: "orig" | "proc" | "rfdetr" | "yolo" | "unet" = (hasRfdetr && !modelFallback) ? "rfdetr" : (hasCrack ? "unet" : "orig");
                       const mode = viewMode[img.id] || defaultMode;
                       const tok = getAuthToken();
                       const tokQuery = tok ? `?token=${encodeURIComponent(tok)}` : "";
@@ -1094,9 +1095,10 @@ export function InspectionDetailPage() {
                       const origUrl = `/api/v1/inspections/${id}/images/${img.id}/file${tokQuery}${vTag}`;
                       const procUrl = `/api/v1/inspections/${id}/images/${img.id}/processed${tokQuery}${vTag}`;
                       const rfdetrUrl = `/api/v1/inspections/${id}/images/${img.id}/file?variant=rfdetr${tok ? `&token=${encodeURIComponent(tok)}` : ""}${vTag}`;
+                      const yoloUrl = `/api/v1/inspections/${id}/images/${img.id}/file?variant=yolo${tok ? `&token=${encodeURIComponent(tok)}` : ""}${vTag}`;
                       const unetUrl = `/api/v1/inspections/${id}/images/${img.id}/file?variant=unet${tok ? `&token=${encodeURIComponent(tok)}` : ""}${vTag}`;
                       const enhancedUrl = `/api/v1/inspections/${id}/images/${img.id}/file?variant=enhanced${tok ? `&token=${encodeURIComponent(tok)}` : ""}${vTag}`;
-                      const imgSrc = mode === "rfdetr" ? (rfdetrUrl || unetUrl || procUrl) : mode === "unet" ? (unetUrl || procUrl) : mode === "proc" ? enhancedUrl : origUrl;
+                      const imgSrc = mode === "rfdetr" ? (rfdetrUrl || procUrl) : mode === "yolo" ? (yoloUrl || rfdetrUrl || procUrl) : mode === "unet" ? (unetUrl || procUrl) : mode === "proc" ? enhancedUrl : origUrl;
 
                       const blurCheck = Array.isArray(qr.checks) ? qr.checks.find((c: any) => c.key === "blur" || c.key === "blur_variance") : null;
                       const manual = qr.manual_review || img.manualReview;
@@ -1143,6 +1145,18 @@ export function InspectionDetailPage() {
                                   RF-DETR
                                 </button>
                               )}
+                              {(img.hasYolo || hasCrack) && (
+                                <button
+                                  type="button"
+                                  onClick={() => setViewMode((prev) => ({ ...prev, [img.id]: "yolo" }))}
+                                  className={`px-2 py-0.5 rounded font-medium transition-all flex items-center gap-1 ${
+                                    mode === "yolo" ? "bg-card text-foreground font-semibold shadow-xs" : "text-white/70 hover:text-white"
+                                  }`}
+                                >
+                                  <ScanSearch className="size-2.5 text-amber-400" />
+                                  YOLO
+                                </button>
+                              )}
                               {hasUnet && (
                                 <button
                                   type="button"
@@ -1151,7 +1165,7 @@ export function InspectionDetailPage() {
                                     mode === "unet" ? "bg-card text-foreground font-semibold shadow-xs" : "text-white/70 hover:text-white"
                                   }`}
                                 >
-                                  <Sparkles className="size-2.5 text-primary" />
+                                  <Sparkles className="size-2.5 text-cyan-400" />
                                   {modelFallback ? "UNet (Fallback)" : "UNet"}
                                 </button>
                               )}

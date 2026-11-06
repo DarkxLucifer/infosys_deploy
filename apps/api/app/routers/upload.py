@@ -310,133 +310,93 @@ def run_and_persist_ai_classification(
             unet_result = None
             yolo_result = None
 
-            # Stage 2: If classified as Crack (prob >= 80% or has_crack):
-            if has_crack or p_crack >= 0.80:
-                proc_target = image.processed_path if (image.processed_path and os.path.exists(image.processed_path)) else target_path
+            # Stage 2: Always run localized detection and pixel segmentation for concrete inspection
+            proc_target = image.processed_path if (image.processed_path and os.path.exists(image.processed_path)) else target_path
 
-                # Stage 2A: Run rdd2022-rfdetr-medium FIRST!
+            # Stage 2A: Run RF-DETR Medium Defect Detector (RDD2022)
+            try:
+                from app.services.rfdetr_detector import get_rfdetr_detector
+                rfdetr_detector = get_rfdetr_detector()
+                rfdetr_ann_path = os.path.join(RFDETR_DIR, f"{image.id}.jpg")
+                rfdetr_thumb_path = os.path.join(THUMBNAIL_DIR, f"{image.id}_rfdetr.jpg")
+                rfdetr_result = rfdetr_detector.detect(
+                    image_input=proc_target,
+                    threshold=0.20,
+                    save_annotated_path=rfdetr_ann_path,
+                    save_thumbnail_path=rfdetr_thumb_path,
+                    resnet_confidence=p_crack
+                )
+                qr["rfdetr_detection"] = rfdetr_result
+                pred["rfdetr_detection"] = rfdetr_result
+            except Exception as rfdetr_exc:
+                logger.warning("RF-DETR crack detection failed for image %s: %s", image.id, rfdetr_exc)
+
+            # Stage 2B: Run YOLOv8 Crack Detector
+            try:
+                from app.services.yolo_detector import get_yolo_detector
+                yolo_detector = get_yolo_detector()
+                yolo_ann_path = os.path.join(YOLO_DIR, f"{image.id}.jpg")
+                yolo_result = yolo_detector.detect(
+                    image_input=proc_target,
+                    conf=0.10,
+                    imgsz=768,
+                    save_annotated_path=yolo_ann_path
+                )
+                qr["yolo_detection"] = yolo_result
+                pred["yolo_detection"] = yolo_result
+            except Exception as yolo_exc:
+                logger.warning("YOLO crack detection failed for image %s: %s", image.id, yolo_exc)
+
+            # Stage 2C: Run U-Net Pixel-Level Crack Segmentation (CrackSeg9k)
+            try:
+                from app.services.unet_segmentor import get_unet_segmentor
+                segmentor = get_unet_segmentor()
+                unet_ann_path = os.path.join(UNET_DIR, f"{image.id}.jpg")
+                unet_mask_path = os.path.join(UNET_DIR, f"{image.id}_mask.png")
+                mm_scale = None
+                if image.calibration and isinstance(image.calibration, dict):
+                    mm_scale = image.calibration.get("mm_per_pixel")
+                unet_result = segmentor.segment(
+                    image_input=proc_target,
+                    threshold=0.5,
+                    save_overlay_path=unet_ann_path,
+                    save_mask_path=unet_mask_path,
+                    mm_per_pixel=mm_scale
+                )
+                qr["unet_segmentation"] = unet_result
+                pred["unet_segmentation"] = unet_result
+
+                # Stage 2D: Crack Geometry Extraction (Area, Coverage %, Centerline, EDT Width, PCA Orientation)
                 try:
-                    from app.services.rfdetr_detector import get_rfdetr_detector
-                    rfdetr_detector = get_rfdetr_detector()
-                    rfdetr_ann_path = os.path.join(RFDETR_DIR, f"{image.id}.jpg")
-                    rfdetr_thumb_path = os.path.join(THUMBNAIL_DIR, f"{image.id}_rfdetr.jpg")
-                    rfdetr_result = rfdetr_detector.detect(
-                        image_input=proc_target,
-                        threshold=0.20,
-                        save_annotated_path=rfdetr_ann_path,
-                        save_thumbnail_path=rfdetr_thumb_path,
-                        resnet_confidence=p_crack
+                    from app.services.crack_geometry import extract_crack_geometry
+                    geo_ann_path = os.path.join(GEOMETRY_DIR, f"{image.id}.jpg")
+                    orig_target = image.original_path if (image.original_path and os.path.exists(image.original_path)) else proc_target
+                    geo_result = extract_crack_geometry(
+                        original_image=orig_target,
+                        binary_mask=unet_mask_path,
+                        orig_w=image.width,
+                        orig_h=image.height,
+                        calibration=image.calibration if isinstance(image.calibration, dict) else None,
+                        mm_per_pixel=mm_scale,
+                        generate_visualization=True,
+                        visualization_save_path=geo_ann_path
                     )
-                    qr["rfdetr_detection"] = rfdetr_result
-                    pred["rfdetr_detection"] = rfdetr_result
-                except Exception as rfdetr_exc:
-                    logger.warning("RF-DETR crack detection failed for image %s: %s", image.id, rfdetr_exc)
+                    qr["crack_geometry"] = geo_result
+                    pred["crack_geometry"] = geo_result
+                except Exception as geo_exc:
+                    logger.warning("Crack geometry extraction failed for image %s: %s", image.id, geo_exc)
+            except Exception as unet_exc:
+                logger.warning("UNet crack segmentation failed for image %s: %s", image.id, unet_exc)
 
-                rfdetr_has_defects = bool(rfdetr_result and rfdetr_result.get("has_defect"))
-
-                # Stage 2B: If rdd2022-rfdetr-medium can't find anything on crack classified image, THEN use best_model.pth (UNet)
-                if not rfdetr_has_defects:
-                    logger.info("RF-DETR detected 0 defects for crack-classified image %s -> Falling back to UNet (best_model.pth)", image.id)
-                    qr["active_stage2_model"] = "unet_fallback"
-                    pred["active_stage2_model"] = "unet_fallback"
-                    pred["model_fallback"] = True
-                    pred["fallback_reason"] = "RF-DETR (rdd2022-rfdetr-medium) found 0 defect bounding boxes. Fallback to U-Net (best_model.pth) pixel segmentation activated."
-
-                    try:
-                        from app.services.unet_segmentor import get_unet_segmentor
-                        segmentor = get_unet_segmentor()
-                        unet_ann_path = os.path.join(UNET_DIR, f"{image.id}.jpg")
-                        unet_mask_path = os.path.join(UNET_DIR, f"{image.id}_mask.png")
-                        mm_scale = None
-                        if image.calibration and isinstance(image.calibration, dict):
-                            mm_scale = image.calibration.get("mm_per_pixel")
-                        unet_result = segmentor.segment(
-                            image_input=proc_target,
-                            threshold=0.5,
-                            save_overlay_path=unet_ann_path,
-                            save_mask_path=unet_mask_path,
-                            mm_per_pixel=mm_scale
-                        )
-                        qr["unet_segmentation"] = unet_result
-                        pred["unet_segmentation"] = unet_result
-
-                        # Stage 2C: Crack Geometry Extraction (Area, Coverage %, Centerline, EDT Width, PCA Orientation)
-                        try:
-                            from app.services.crack_geometry import extract_crack_geometry
-                            geo_ann_path = os.path.join(GEOMETRY_DIR, f"{image.id}.jpg")
-                            orig_target = image.original_path if (image.original_path and os.path.exists(image.original_path)) else proc_target
-                            geo_result = extract_crack_geometry(
-                                original_image=orig_target,
-                                binary_mask=unet_mask_path,
-                                orig_w=image.width,
-                                orig_h=image.height,
-                                calibration=image.calibration if isinstance(image.calibration, dict) else None,
-                                mm_per_pixel=mm_scale,
-                                generate_visualization=True,
-                                visualization_save_path=geo_ann_path
-                            )
-                            qr["crack_geometry"] = geo_result
-                            pred["crack_geometry"] = geo_result
-                        except Exception as geo_exc:
-                            logger.warning("Crack geometry extraction failed for image %s: %s", image.id, geo_exc)
-                    except Exception as unet_exc:
-                        logger.warning("UNet crack segmentation failed for image %s: %s", image.id, unet_exc)
-                else:
-                    logger.info("RF-DETR detected %d defect regions on image %s -> Using RF-DETR", rfdetr_result.get("num_detections", 0), image.id)
-                    qr["active_stage2_model"] = "rfdetr"
-                    pred["active_stage2_model"] = "rfdetr"
-                    pred["model_fallback"] = False
-                    pred["status_message"] = rfdetr_result.get("status_message")
-
-                    # Also run UNet in the background so user can inspect pixel masks/geometry tab if desired
-                    try:
-                        from app.services.unet_segmentor import get_unet_segmentor
-                        segmentor = get_unet_segmentor()
-                        unet_ann_path = os.path.join(UNET_DIR, f"{image.id}.jpg")
-                        unet_mask_path = os.path.join(UNET_DIR, f"{image.id}_mask.png")
-                        mm_scale = None
-                        if image.calibration and isinstance(image.calibration, dict):
-                            mm_scale = image.calibration.get("mm_per_pixel")
-                        unet_result = segmentor.segment(
-                            image_input=proc_target,
-                            threshold=0.5,
-                            save_overlay_path=unet_ann_path,
-                            save_mask_path=unet_mask_path,
-                            mm_per_pixel=mm_scale
-                        )
-                        qr["unet_segmentation"] = unet_result
-                        pred["unet_segmentation"] = unet_result
-
-                        from app.services.crack_geometry import extract_crack_geometry
-                        geo_ann_path = os.path.join(GEOMETRY_DIR, f"{image.id}.jpg")
-                        orig_target = image.original_path if (image.original_path and os.path.exists(image.original_path)) else proc_target
-                        geo_result = extract_crack_geometry(
-                            original_image=orig_target,
-                            binary_mask=unet_mask_path,
-                            orig_w=image.width,
-                            orig_h=image.height,
-                            calibration=image.calibration if isinstance(image.calibration, dict) else None,
-                            mm_per_pixel=mm_scale,
-                            generate_visualization=True,
-                            visualization_save_path=geo_ann_path
-                        )
-                        qr["crack_geometry"] = geo_result
-                        pred["crack_geometry"] = geo_result
-                    except Exception:
-                        pass
+            rfdetr_has_defects = bool(rfdetr_result and rfdetr_result.get("has_defect"))
+            if not rfdetr_has_defects:
+                qr["active_stage2_model"] = "unet_fallback"
+                pred["active_stage2_model"] = "unet_fallback"
+                pred["model_fallback"] = True
             else:
-                for p in [
-                    os.path.join(RFDETR_DIR, f"{image.id}.jpg"),
-                    os.path.join(UNET_DIR, f"{image.id}.jpg"),
-                    os.path.join(UNET_DIR, f"{image.id}_mask.png"),
-                    os.path.join(GEOMETRY_DIR, f"{image.id}.jpg"),
-                    os.path.join(YOLO_DIR, f"{image.id}.jpg"),
-                ]:
-                    if os.path.exists(p):
-                        try:
-                            os.remove(p)
-                        except Exception:
-                            pass
+                qr["active_stage2_model"] = "rfdetr"
+                pred["active_stage2_model"] = "rfdetr"
+                pred["model_fallback"] = False
 
             image.quality_report = qr
 
@@ -1616,8 +1576,8 @@ def get_image_file_variant(
     if variant in ("rfdetr", "rdd2022"):
         if has_rfdetr:
             target_path = rfdetr_file
-        elif has_unet:
-            target_path = unet_file
+        elif has_yolo:
+            target_path = yolo_file
         elif image.processed_path and os.path.exists(image.processed_path):
             target_path = image.processed_path
         else:
@@ -1626,19 +1586,32 @@ def get_image_file_variant(
     elif variant in ("yolo",):
         if has_yolo:
             target_path = yolo_file
-        elif has_rfdetr:
-            target_path = rfdetr_file
-        elif has_unet:
-            target_path = unet_file
+        elif proc_target and os.path.exists(proc_target):
+            try:
+                from app.services.yolo_detector import get_yolo_detector
+                detector = get_yolo_detector()
+                detector.detect(
+                    image_input=proc_target,
+                    conf=0.10,
+                    imgsz=768,
+                    save_annotated_path=yolo_file
+                )
+                if os.path.exists(yolo_file):
+                    target_path = yolo_file
+                elif has_rfdetr:
+                    target_path = rfdetr_file
+                else:
+                    target_path = proc_target
+            except Exception as yolo_err:
+                logger.warning("On-demand YOLO generation failed in get_image_file_variant: %s", yolo_err)
+                target_path = rfdetr_file if has_rfdetr else proc_target
         else:
-            target_path = image.original_path
+            target_path = rfdetr_file if has_rfdetr else image.original_path
 
     elif variant in ("annotated", "ai"):
-        if has_rfdetr and not model_fallback:
-            target_path = rfdetr_file
-        elif has_unet:
+        if has_unet:
             target_path = unet_file
-        elif has_rfdetr:
+        elif has_rfdetr and not model_fallback:
             target_path = rfdetr_file
         elif has_yolo:
             target_path = yolo_file
@@ -1650,20 +1623,49 @@ def get_image_file_variant(
     elif variant in ("unet", "segmentation", "unet_overlay"):
         if has_unet:
             target_path = unet_file
-        elif has_rfdetr:
-            target_path = rfdetr_file
-        elif has_yolo:
-            target_path = yolo_file
-        elif image.processed_path and os.path.exists(image.processed_path):
-            target_path = image.processed_path
+        elif proc_target and os.path.exists(proc_target):
+            try:
+                from app.services.unet_segmentor import get_unet_segmentor
+                segmentor = get_unet_segmentor()
+                mm_scale = image.calibration.get("mm_per_pixel") if (image.calibration and isinstance(image.calibration, dict)) else None
+                segmentor.segment(
+                    image_input=proc_target,
+                    threshold=0.5,
+                    save_overlay_path=unet_file,
+                    save_mask_path=unet_mask,
+                    mm_per_pixel=mm_scale
+                )
+                if os.path.exists(unet_file):
+                    target_path = unet_file
+                else:
+                    target_path = proc_target
+            except Exception as unet_err:
+                logger.warning("On-demand UNet generation failed in variant=unet: %s", unet_err)
+                target_path = proc_target
         else:
-            target_path = image.original_path
+            target_path = proc_target if (proc_target and os.path.exists(proc_target)) else image.original_path
 
     elif variant in ("mask", "unet_mask"):
         if os.path.exists(unet_mask):
             target_path = unet_mask
-        elif has_unet:
-            target_path = unet_file
+        elif proc_target and os.path.exists(proc_target):
+            try:
+                from app.services.unet_segmentor import get_unet_segmentor
+                segmentor = get_unet_segmentor()
+                mm_scale = image.calibration.get("mm_per_pixel") if (image.calibration and isinstance(image.calibration, dict)) else None
+                segmentor.segment(
+                    image_input=proc_target,
+                    threshold=0.5,
+                    save_overlay_path=unet_file,
+                    save_mask_path=unet_mask,
+                    mm_per_pixel=mm_scale
+                )
+                if os.path.exists(unet_mask):
+                    target_path = unet_mask
+                else:
+                    target_path = proc_target
+            except Exception:
+                target_path = proc_target
         else:
             target_path = image.original_path
 

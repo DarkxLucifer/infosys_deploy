@@ -210,9 +210,9 @@ export function AnalysisDetailPage() {
             img.unetUrl ||
             `/api/v1/images/${img.id}/file?variant=unet`;
           const yoloUrl =
-            img.rfdetrUrl ||
             img.yoloUrl ||
-            `/api/v1/images/${img.id}/file?variant=rfdetr`;
+            img.rfdetrUrl ||
+            `/api/v1/images/${img.id}/file?variant=yolo`;
           const maskUrl =
             img.unetMaskUrl ||
             `/api/v1/images/${img.id}/file?variant=mask`;
@@ -462,7 +462,7 @@ export function AnalysisDetailPage() {
     if (variant === "yolo") {
       return (
         frame.yoloUrl ||
-        `/api/v1/images/${frame.id}/file?variant=rfdetr`
+        `/api/v1/images/${frame.id}/file?variant=yolo`
       );
     }
     if (variant === "mask") {
@@ -483,7 +483,7 @@ export function AnalysisDetailPage() {
       seed: 1001,
       url: `/api/v1/images/${id}/file?variant=unet`,
       unetUrl: `/api/v1/images/${id}/file?variant=unet`,
-      yoloUrl: `/api/v1/images/${id}/file?variant=rfdetr`,
+      yoloUrl: `/api/v1/images/${id}/file?variant=yolo`,
       maskUrl: `/api/v1/images/${id}/file?variant=mask`,
     },
   ];

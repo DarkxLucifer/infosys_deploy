@@ -96,8 +96,8 @@ async def lifespan(app: FastAPI):
 
     # Preload YOLO crack detector at startup
     try:
-        from app.services.yolo_detector import YoloCrackDetector
-        yolo = YoloCrackDetector()
+        from app.services.yolo_detector import get_yolo_detector
+        yolo = get_yolo_detector()
         logger.info("YOLO Crack Detector initialized at startup: loaded=%s, device=%s", yolo.is_loaded, getattr(yolo.model, 'device', 'cpu'))
     except Exception as e:
         logger.warning("YOLO initialization skipped in lifespan: %s", e)

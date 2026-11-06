@@ -92,12 +92,14 @@ class UNetCrackSegmentor:
 
         candidate_paths = [
             model_path,
-            os.path.join(os.path.dirname(__file__), "..", "..", "storage", "models", "infrascan_unet_crackseg9k_best.pth"),
-            r"C:\Users\yashr\Downloads\best_model.pth",
+            Path(r"d:\project\aiml prime\project\infosys\storage\models\infrascan_unet_crackseg9k_best.pth"),
+            Path(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "storage", "models", "infrascan_unet_crackseg9k_best.pth")),
+            Path(os.path.join(os.getcwd(), "storage", "models", "infrascan_unet_crackseg9k_best.pth")),
+            Path(r"C:\Users\yashr\Downloads\best_model.pth"),
         ]
 
         for p in candidate_paths:
-            if p and os.path.exists(p):
+            if p and Path(p).exists():
                 self.model_path = Path(p)
                 break
 
@@ -178,7 +180,7 @@ class UNetCrackSegmentor:
                     logits = self.model(tensor_input)
             else:
                 logits = self.model(tensor_input)
-            prob_384 = torch.sigmoid(logits).squeeze().cpu().numpy()
+            prob_384 = torch.sigmoid(logits).squeeze().float().cpu().numpy()
 
         # Resize probability map back to original dimensions
         prob_orig = cv2.resize(prob_384, (orig_w, orig_h), interpolation=cv2.INTER_LINEAR)

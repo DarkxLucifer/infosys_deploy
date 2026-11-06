@@ -14,7 +14,8 @@ import {
   Check,
   Loader2,
   Info,
-  Sparkles
+  Sparkles,
+  ScanSearch,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -47,7 +48,7 @@ export function PhotoZoomModal({
     (photo?.aiClassification?.crack_probability ?? 0) >= 0.80
   );
   const [zoom, setZoom] = useState(1);
-  const [viewMode, setViewMode] = useState<"orig" | "proc" | "unet">(hasCrack ? "unet" : "orig");
+  const [viewMode, setViewMode] = useState<"orig" | "proc" | "yolo" | "unet">(hasCrack ? "unet" : "orig");
 
   useEffect(() => {
     if (open) {
@@ -62,8 +63,9 @@ export function PhotoZoomModal({
   const tokQuery = tok ? `?token=${encodeURIComponent(tok)}` : "";
   const origSrc = `/api/v1/inspections/${inspectionId}/images/${photo.id}/file${tokQuery}`;
   const procSrc = `/api/v1/inspections/${inspectionId}/images/${photo.id}/processed${tokQuery}`;
+  const yoloSrc = `/api/v1/inspections/${inspectionId}/images/${photo.id}/file?variant=yolo${tok ? `&token=${encodeURIComponent(tok)}` : ""}`;
   const unetSrc = `/api/v1/inspections/${inspectionId}/images/${photo.id}/file?variant=unet${tok ? `&token=${encodeURIComponent(tok)}` : ""}`;
-  const currentSrc = viewMode === "unet" ? unetSrc : viewMode === "proc" ? procSrc : origSrc;
+  const currentSrc = viewMode === "unet" ? unetSrc : viewMode === "yolo" ? yoloSrc : viewMode === "proc" ? procSrc : origSrc;
 
   const handleZoomIn = () => setZoom((prev) => Math.min(prev + 0.25, 3));
   const handleZoomOut = () => setZoom((prev) => Math.max(prev - 0.25, 0.5));
@@ -105,12 +107,22 @@ export function PhotoZoomModal({
               </button>
               <button
                 type="button"
+                onClick={() => setViewMode("yolo")}
+                className={`px-2.5 py-1 rounded font-medium transition-all flex items-center gap-1 ${
+                  viewMode === "yolo" ? "bg-primary text-primary-foreground font-semibold shadow-xs" : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <ScanSearch className="size-3 text-amber-400" />
+                YOLO
+              </button>
+              <button
+                type="button"
                 onClick={() => setViewMode("unet")}
                 className={`px-2.5 py-1 rounded font-medium transition-all flex items-center gap-1 ${
                   viewMode === "unet" ? "bg-primary text-primary-foreground font-semibold shadow-xs" : "text-muted-foreground hover:text-foreground"
                 }`}
               >
-                <Sparkles className="size-3 text-primary" />
+                <Sparkles className="size-3 text-cyan-400" />
                 UNet Segment
               </button>
             </div>
