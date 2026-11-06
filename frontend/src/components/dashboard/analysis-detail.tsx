@@ -47,7 +47,7 @@ import {
   inspectionMethodLabels,
   useAppStore,
 } from "@/store/app";
-import type { Finding, Severity } from "@/store/app";
+import type { Finding, Severity, FindingReview } from "@/store/app";
 import {
   ComplianceNote,
   EmptyState,
@@ -362,22 +362,12 @@ export function AnalysisDetailPage() {
     );
   }
 
-  const decided = inspection.findings.filter((f) => f.review !== "pending").length;
-  const pending = inspection.findings.length - decided;
-
   // Real backend actions
   const handleConfirmFinding = async (findingId: string) => {
     try {
       await api.verifyGeometry(findingId);
-      toast.success("Finding verified & confirmed", {
-        description: "Geometry certified for sign-off audit trail.",
-      });
-      loadBackendData();
     } catch {
       reviewFinding(inspection.id, findingId, "confirmed");
-      toast.success("Finding confirmed", {
-        description: "Validated as real damage in current session.",
-      });
     }
   };
 
@@ -406,16 +396,11 @@ export function AnalysisDetailPage() {
     }
   };
 
-  const handleDeleteFinding = async (findingId: string, classCode: string = "Finding") => {
+  const handleDeleteFinding = async (findingId: string) => {
     try {
       await api.deleteDetection(findingId);
-      toast.success("Finding discarded", {
-        description: `${classCode} removed from survey findings.`,
-      });
-      loadBackendData();
     } catch {
       deleteFinding(inspection.id, findingId);
-      toast.success("Finding removed");
     }
   };
 
@@ -503,6 +488,18 @@ export function AnalysisDetailPage() {
     },
   ];
 
+  const totalPhotosCount = imagesList.length;
+  const decidedPhotosCount = imagesList.filter((frame) => {
+    const ffs = inspection.findings.filter(
+      (f) =>
+        f.frameId === frame.id ||
+        (f as any).imageId === frame.id ||
+        (f as any).image_id === frame.id
+    );
+    return ffs.length === 0 || ffs.every((f) => f.review !== "pending");
+  }).length;
+  const pendingPhotosCount = totalPhotosCount - decidedPhotosCount;
+
   return (
     <PageShell wide>
       <PageHeader
@@ -566,20 +563,20 @@ export function AnalysisDetailPage() {
                 Review decisions
               </div>
               <div className="mt-0.5 text-sm font-bold tabular-nums">
-                {decided} of {inspection.findings.length} finding
-                {inspection.findings.length === 1 ? "" : "s"} decided
-                {pending > 0 ? ` · ${pending} pending review` : " · All verified"}
+                {decidedPhotosCount} of {totalPhotosCount} photo
+                {totalPhotosCount === 1 ? "" : "s"} decided
+                {pendingPhotosCount > 0 ? ` · ${pendingPhotosCount} pending review` : " · All verified"}
               </div>
             </div>
-            {inspection.findings.length > 0 ? (
+            {totalPhotosCount > 0 ? (
               <span className="text-xs font-semibold text-primary font-mono">
-                {Math.round((decided / inspection.findings.length) * 100)}% validated
+                {Math.round((decidedPhotosCount / totalPhotosCount) * 100)}% validated
               </span>
             ) : null}
           </div>
           <Progress
             className="mt-3 h-2 rounded-full bg-muted"
-            value={inspection.findings.length === 0 ? 100 : (decided / inspection.findings.length) * 100}
+            value={totalPhotosCount === 0 ? 100 : (decidedPhotosCount / totalPhotosCount) * 100}
           />
         </div>
 
@@ -801,198 +798,268 @@ export function AnalysisDetailPage() {
                     Findings & Decisions for Photo {index + 1}
                   </div>
 
-                  {frameFindings.length > 0 ? (
-                    <div className="space-y-3">
-                      {frameFindings.map((finding) => {
-                        const isConfirmed = finding.review === "confirmed";
-                        const isFlagged = finding.review === "flagged";
-
-                        return (
-                          <div
-                            key={finding.id}
-                            className={cn(
-                              "rounded-xl border bg-background p-4 shadow-2xs space-y-3 transition-colors",
-                              isConfirmed
-                                ? "border-emerald-500/40"
-                                : isFlagged
-                                ? "border-rose-500/40"
-                                : "border-border hover:border-primary/40"
-                            )}
-                          >
-                            {/* Header: Class Code, Defect Name, Severity, Review Status */}
-                            <div className="flex flex-wrap items-center justify-between gap-2">
-                              <div className="flex items-center gap-2">
-                                <span className="font-mono text-xs font-bold text-primary px-1.5 py-0.5 rounded bg-primary/10 border border-primary/20">
-                                  {finding.classCode}
-                                </span>
-                                <span className="text-xs font-bold text-foreground">
-                                  {(damageClasses as any)[finding.classCode]?.label ||
-                                    (finding as any).defectType ||
-                                    "Crack Defect"}
-                                </span>
+                  {(() => {
+                    if (frameFindings.length === 0) {
+                      return (
+                        /* Sound Surface Decision Block if no findings on this photo */
+                        <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4 space-y-3">
+                          <div className="flex items-center gap-2">
+                            <CheckCircle2 className="size-5 text-emerald-500 shrink-0" />
+                            <div>
+                              <div className="text-xs font-bold text-foreground">Sound Concrete Surface</div>
+                              <div className="text-[11px] text-muted-foreground">
+                                No crack defects detected above the 80% confidence gate.
                               </div>
-                              <div className="flex items-center gap-1.5">
-                                <SeverityBadge severity={finding.severity} />
-                                <FindingReviewBadge review={finding.review} />
-                              </div>
-                            </div>
-
-                            {/* 4 Metric Tiles */}
-                            <div className="grid grid-cols-4 gap-1.5 text-center">
-                              <MeasureTile
-                                label="CONF."
-                                value={`${Math.round(finding.confidence * 100)}%`}
-                              />
-                              <MeasureTile
-                                label="CLASS"
-                                value={
-                                  (finding as any).predictedClass ||
-                                  ((finding as any).defectType === "crack" ? "Cracked" : "Defect")
-                                }
-                              />
-                              <MeasureTile
-                                label="SOURCE"
-                                value={(finding as any).source === "ai_model" ? "ResNet-18" : "Manual"}
-                              />
-                              <MeasureTile
-                                label="GATE"
-                                value={`${(((finding as any).threshold || 0.8) * 100).toFixed(0)}%`}
-                              />
-                            </div>
-
-                            {/* Crack Measurements & AASHTO / ASTM Severity */}
-                            {finding.measurements && (
-                              <div className="p-2.5 rounded-lg bg-secondary/40 border border-border/60 text-xs space-y-1">
-                                <div className="flex items-center justify-between text-muted-foreground text-[11px]">
-                                  <span>Peak Crack Width:</span>
-                                  <strong className="text-foreground font-mono">
-                                    {finding.measurements.widthMm > 0
-                                      ? `${finding.measurements.widthMm} mm`
-                                      : `${finding.measurements.widthPx} px`}
-                                  </strong>
-                                </div>
-                                <div className="flex items-center justify-between text-muted-foreground text-[11px]">
-                                  <span>Total Crack Length:</span>
-                                  <span className="font-mono text-foreground">
-                                    {finding.measurements.lengthPx} px
-                                  </span>
-                                </div>
-                                {damageTier?.severity_tier && (
-                                  <div className="mt-1 pt-1 border-t border-border/40 flex items-center justify-between">
-                                    <span className="text-[10px] uppercase font-bold text-muted-foreground">Standard Tier:</span>
-                                    <span className="text-[11px] font-bold text-primary uppercase">
-                                      {damageTier.severity_tier}
-                                    </span>
-                                  </div>
-                                )}
-                              </div>
-                            )}
-
-                            {/* Notes / Explanation */}
-                            {finding.note ? (
-                              <p className="rounded-lg bg-muted/60 px-2.5 py-1.5 text-[11px] text-muted-foreground leading-relaxed">
-                                {finding.note}
-                                {finding.reviewedBy ? ` — by ${finding.reviewedBy}` : ""}
-                              </p>
-                            ) : null}
-
-                            {/* Decision Actions: Confirm, Flag, Work Order, Discard */}
-                            <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-border/50">
-                              {!isConfirmed && (
-                                <Button
-                                  size="sm"
-                                  onClick={() => handleConfirmFinding(finding.id)}
-                                  className="h-8 rounded-lg text-xs font-semibold gap-1 bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs"
-                                >
-                                  <CircleCheck className="size-3.5" />
-                                  Confirm
-                                </Button>
-                              )}
-
-                              {!isFlagged && (
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => handleOpenFlagModal(finding.id, finding.note)}
-                                  className="h-8 rounded-lg text-xs font-semibold gap-1 border-amber-500/30 text-amber-500 hover:bg-amber-500/10"
-                                >
-                                  <Flag className="size-3.5" />
-                                  Flag
-                                </Button>
-                              )}
-
-                              {isConfirmed && (
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => {
-                                    setOrderFinding(finding);
-                                    setOrderOpen(true);
-                                  }}
-                                  className="h-8 rounded-lg text-xs font-semibold gap-1"
-                                >
-                                  <Wrench className="size-3.5 text-primary" />
-                                  Work order
-                                </Button>
-                              )}
-
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => handleDeleteFinding(finding.id, finding.classCode)}
-                                className="ml-auto h-8 rounded-lg text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                              >
-                                <Trash2 className="size-3.5" />
-                                Discard
-                              </Button>
                             </div>
                           </div>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    /* Sound Surface Decision Block if no findings on this photo */
-                    <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4 space-y-3">
-                      <div className="flex items-center gap-2">
-                        <CheckCircle2 className="size-5 text-emerald-500 shrink-0" />
-                        <div>
-                          <div className="text-xs font-bold text-foreground">Sound Concrete Surface</div>
-                          <div className="text-[11px] text-muted-foreground">
-                            No crack defects detected above the 80% confidence gate.
+
+                          <div className="text-[11px] text-muted-foreground leading-relaxed bg-background/60 p-2.5 rounded-lg border border-border/50">
+                            ResNet-18 classified this photo as uncracked. U-Net segmentation confirms zero continuous defect regions.
+                          </div>
+
+                          <div className="flex items-center gap-2 pt-1">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                toast.success(`Photo ${index + 1} verified as sound concrete surface.`);
+                              }}
+                              className="h-8 rounded-lg text-xs font-semibold gap-1.5 border-emerald-500/40 text-emerald-500 hover:bg-emerald-500/10"
+                            >
+                              <CircleCheck className="size-3.5" />
+                              Confirm Sound Surface
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => {
+                                handleOpenFlagModal(`photo-${frame.id}`, "Flagged false negative — manual inspection suggested.");
+                              }}
+                              className="h-8 rounded-lg text-xs text-muted-foreground hover:text-foreground"
+                            >
+                              <Flag className="size-3.5" />
+                              Flag Missed Defect
+                            </Button>
                           </div>
                         </div>
-                      </div>
+                      );
+                    }
 
-                      <div className="text-[11px] text-muted-foreground leading-relaxed bg-background/60 p-2.5 rounded-lg border border-border/50">
-                        ResNet-18 classified this photo as uncracked. U-Net segmentation confirms zero continuous defect regions.
-                      </div>
+                    // Consolidated EXACTLY ONE decision block for this photo
+                    const primaryFinding = frameFindings[0];
+                    const allFrameFindingIds = frameFindings.map((f) => f.id);
 
-                      <div className="flex items-center gap-2 pt-1">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => {
-                            toast.success(`Photo ${index + 1} verified as sound concrete surface.`);
-                          }}
-                          className="h-8 rounded-lg text-xs font-semibold gap-1.5 border-emerald-500/40 text-emerald-500 hover:bg-emerald-500/10"
-                        >
-                          <CircleCheck className="size-3.5" />
-                          Confirm Sound Surface
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => {
-                            handleOpenFlagModal(`photo-${frame.id}`, "Flagged false negative — manual inspection suggested.");
-                          }}
-                          className="h-8 rounded-lg text-xs text-muted-foreground hover:text-foreground"
-                        >
-                          <Flag className="size-3.5" />
-                          Flag Missed Defect
-                        </Button>
+                    // Unified review status: if any flagged -> flagged, if all confirmed -> confirmed, else pending
+                    const isAnyFlagged = frameFindings.some((f) => f.review === "flagged");
+                    const isAllConfirmed = frameFindings.every((f) => f.review === "confirmed");
+                    const unifiedReviewStatus: FindingReview = isAnyFlagged
+                      ? "flagged"
+                      : isAllConfirmed
+                      ? "confirmed"
+                      : "pending";
+
+                    // Controlling severity across all findings for this photo
+                    const sevWeight: Record<string, number> = {
+                      no_visible_damage: 0,
+                      low: 1,
+                      minor: 1,
+                      medium: 2,
+                      moderate: 2,
+                      high: 3,
+                      severe: 3,
+                      critical: 4,
+                    };
+                    let topSev = primaryFinding.severity;
+                    frameFindings.forEach((f) => {
+                      if ((sevWeight[f.severity] || 0) > (sevWeight[topSev] || 0)) {
+                        topSev = f.severity;
+                      }
+                    });
+
+                    // Highest confidence
+                    const maxConf = Math.max(...frameFindings.map((f) => f.confidence || 0));
+
+                    // Defect label & Class Code
+                    const defectLabel =
+                      (damageClasses as any)[primaryFinding.classCode]?.label ||
+                      (primaryFinding as any).defectType ||
+                      "Crack Defect";
+
+                    // Combined Notes
+                    const combinedNotes =
+                      frameFindings
+                        .map((f) => f.note?.trim())
+                        .filter(Boolean)
+                        .filter((val, idx, arr) => arr.indexOf(val) === idx)
+                        .join(" ") || primaryFinding.note;
+
+                    // Combined Measurements
+                    const meas = primaryFinding.measurements || {
+                      widthMm: geom?.summary?.max_width_mm || 0,
+                      widthPx: geom?.summary?.max_width_px || 0,
+                      lengthPx: geom?.summary?.total_crack_length_px || 0,
+                      areaPx: geom?.summary?.total_crack_area_px || 0,
+                    };
+
+                    const handleConfirmAllForFrame = async () => {
+                      for (const fId of allFrameFindingIds) {
+                        await handleConfirmFinding(fId);
+                      }
+                      toast.success(`Photo ${index + 1} verified & confirmed`, {
+                        description: "Geometry certified for sign-off audit trail.",
+                      });
+                      loadBackendData();
+                    };
+
+                    const handleDiscardAllForFrame = async () => {
+                      for (const fId of allFrameFindingIds) {
+                        await handleDeleteFinding(fId);
+                      }
+                      toast.success(`Photo ${index + 1} findings discarded`, {
+                        description: "Removed from survey findings.",
+                      });
+                      loadBackendData();
+                    };
+
+                    return (
+                      <div
+                        className={cn(
+                          "rounded-xl border bg-background p-4 shadow-2xs space-y-3 transition-colors",
+                          isAllConfirmed
+                            ? "border-emerald-500/40"
+                            : isAnyFlagged
+                            ? "border-rose-500/40"
+                            : "border-border hover:border-primary/40"
+                        )}
+                      >
+                        {/* Header: Class Code, Defect Name, Severity, Review Status */}
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono text-xs font-bold text-primary px-1.5 py-0.5 rounded bg-primary/10 border border-primary/20">
+                              {primaryFinding.classCode}
+                            </span>
+                            <span className="text-xs font-bold text-foreground">
+                              {defectLabel}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <SeverityBadge severity={topSev} />
+                            <FindingReviewBadge review={unifiedReviewStatus} />
+                          </div>
+                        </div>
+
+                        {/* 4 Metric Tiles */}
+                        <div className="grid grid-cols-4 gap-1.5 text-center">
+                          <MeasureTile
+                            label="CONF."
+                            value={`${Math.round(maxConf * 100)}%`}
+                          />
+                          <MeasureTile
+                            label="CLASS"
+                            value={
+                              (primaryFinding as any).predictedClass ||
+                              ((primaryFinding as any).defectType === "crack" ? "Cracked" : "Defect")
+                            }
+                          />
+                          <MeasureTile
+                            label="SOURCE"
+                            value="ResNet + U-Net"
+                          />
+                          <MeasureTile
+                            label="GATE"
+                            value={`${(((primaryFinding as any).threshold || 0.8) * 100).toFixed(0)}%`}
+                          />
+                        </div>
+
+                        {/* Crack Measurements & AASHTO / ASTM Severity */}
+                        {meas && (
+                          <div className="p-2.5 rounded-lg bg-secondary/40 border border-border/60 text-xs space-y-1">
+                            <div className="flex items-center justify-between text-muted-foreground text-[11px]">
+                              <span>Peak Crack Width:</span>
+                              <strong className="text-foreground font-mono">
+                                {meas.widthMm > 0
+                                  ? `${meas.widthMm} mm`
+                                  : `${meas.widthPx} px`}
+                              </strong>
+                            </div>
+                            <div className="flex items-center justify-between text-muted-foreground text-[11px]">
+                              <span>Total Crack Length:</span>
+                              <span className="font-mono text-foreground">
+                                {meas.lengthPx} px
+                              </span>
+                            </div>
+                            {damageTier?.severity_tier && (
+                              <div className="mt-1 pt-1 border-t border-border/40 flex items-center justify-between">
+                                <span className="text-[10px] uppercase font-bold text-muted-foreground">Standard Tier:</span>
+                                <span className="text-[11px] font-bold text-primary uppercase">
+                                  {damageTier.severity_tier}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Notes / Multi-Model AI Summary */}
+                        {combinedNotes ? (
+                          <p className="rounded-lg bg-muted/60 px-2.5 py-1.5 text-[11px] text-muted-foreground leading-relaxed">
+                            {combinedNotes}
+                            {primaryFinding.reviewedBy ? ` — by ${primaryFinding.reviewedBy}` : ""}
+                          </p>
+                        ) : null}
+
+                        {/* Decision Actions: Confirm, Flag, Work Order, Discard */}
+                        <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-border/50">
+                          {!isAllConfirmed && (
+                            <Button
+                              size="sm"
+                              onClick={handleConfirmAllForFrame}
+                              className="h-8 rounded-lg text-xs font-semibold gap-1 bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs"
+                            >
+                              <CircleCheck className="size-3.5" />
+                              Confirm
+                            </Button>
+                          )}
+
+                          {!isAnyFlagged && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleOpenFlagModal(primaryFinding.id, primaryFinding.note)}
+                              className="h-8 rounded-lg text-xs font-semibold gap-1 border-amber-500/30 text-amber-500 hover:bg-amber-500/10"
+                            >
+                              <Flag className="size-3.5" />
+                              Flag
+                            </Button>
+                          )}
+
+                          {isAllConfirmed && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                setOrderFinding(primaryFinding);
+                                setOrderOpen(true);
+                              }}
+                              className="h-8 rounded-lg text-xs font-semibold gap-1"
+                            >
+                              <Wrench className="size-3.5 text-primary" />
+                              Work order
+                            </Button>
+                          )}
+
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={handleDiscardAllForFrame}
+                            className="ml-auto h-8 rounded-lg text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                          >
+                            <Trash2 className="size-3.5" />
+                            Discard
+                          </Button>
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    );
+                  })()}
                 </div>
               </div>
             </div>

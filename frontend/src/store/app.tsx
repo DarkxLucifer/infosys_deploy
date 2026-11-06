@@ -336,18 +336,6 @@ const seedAssets: Asset[] = [
   },
 ];
 
-type SeedFrameSpec = { label: string; at: string; seed: number };
-
-function frame(spec: SeedFrameSpec, method: InspectionMethod): Frame {
-  return {
-    id: `FR-${spec.seed}`,
-    label: spec.label,
-    capturedAt: spec.at,
-    method,
-    seed: spec.seed,
-  };
-}
-
 function finding(
   id: string,
   inspectionId: string,
@@ -383,95 +371,11 @@ function finding(
   };
 }
 
-const seedInspections: Inspection[] = [
-  {
-    id: "INSP-2026-001",
-    assetId: "BR-101",
-    title: "Pier 4-6 Visual and Crack Survey",
-    method: "walkdown",
-    inspector: "Alex Rivers",
-    startedAt: "2026-10-22T10:00:00",
-    completedAt: "2026-10-22T10:45:00",
-    status: "awaiting-review",
-    progress: 100,
-    modelVersion,
-    frames: [
-      frame({ label: "Pier 4 Cap Beam - East Face", at: "10:05", seed: 1011 }, "walkdown"),
-    ],
-    findings: [
-      finding(
-        "det-br101-01",
-        "INSP-2026-001",
-        "FR-1011",
-        "D00",
-        0.92,
-        "medium",
-        { x: 38, y: 35, w: 25, h: 42 },
-        { lengthPx: 240, widthPx: 6, widthMm: 1.8, mmPerPx: 0.3 },
-        "pending",
-        { note: "Longitudinal flexural crack along pier 4 cap beam. Width 1.8mm exceeds 1.5mm threshold." },
-      ),
-    ],
-    notes: "Visual and high-resolution optical survey of riverside viaduct pier caps. Noticeable flexural cracking on pier 4.",
-  },
-  {
-    id: "INSP-2026-002",
-    assetId: "TU-204",
-    title: "Bore 2 Annual Structural Integrity Scan",
-    method: "drone",
-    inspector: "Alex Rivers",
-    startedAt: "2026-10-20T14:30:00",
-    completedAt: "2026-10-20T15:15:00",
-    status: "reviewed",
-    progress: 100,
-    modelVersion,
-    frames: [
-      frame({ label: "Ring 142 Crown Joint", at: "14:35", seed: 2041 }, "drone"),
-    ],
-    findings: [
-      finding(
-        "det-tu204-01",
-        "INSP-2026-002",
-        "FR-2041",
-        "D10",
-        0.88,
-        "low",
-        { x: 45, y: 30, w: 18, h: 36 },
-        { lengthPx: 145, widthPx: 3, widthMm: 0.9, mmPerPx: 0.3 },
-        "confirmed",
-        { reviewedBy: "Dr. Meera Kulkarni", note: "Hairline transverse shrinkage joint, within safety margin." },
-      ),
-    ],
-    notes: "Annual autonomous drone LiDAR and optical pass through Bore 2. Precast liners in satisfactory condition.",
-  },
-];
+const seedInspections: Inspection[] = [];
 
-const seedWorkOrders: WorkOrder[] = [
-  {
-    id: "WO-2026-001",
-    title: "Riverside Viaduct Pier 4 crack injection and epoxy sealing",
-    assetId: "BR-101",
-    priority: "high",
-    status: "in-progress",
-    dueDate: "2026-10-30",
-    assignee: "Marcus Vance",
-    source: "Engineer Review · INSP-2026-001",
-    findingRef: "det-br101-01",
-    createdAt: "2026-10-22T11:00:00",
-  },
-];
+const seedWorkOrders: WorkOrder[] = [];
 
-const seedReports: GeneratedReport[] = [
-  {
-    id: "RPT-2026-001",
-    title: "Hudson Tunnel Bore 2 Certified Integrity Audit",
-    kind: "integrity",
-    format: "pdf",
-    inspectionId: "INSP-2026-002",
-    createdAt: "2026-10-21T09:00:00",
-    status: "ready",
-  },
-];
+const seedReports: GeneratedReport[] = [];
 
 const seedModels: ModelCard[] = [
   {
@@ -487,22 +391,7 @@ const seedModels: ModelCard[] = [
   },
 ];
 
-const seedNotifications: AppNotification[] = [
-  {
-    id: "n-1",
-    title: "Analysis ready for review",
-    description: "INSP-2026-001 · Pier 4 crack awaiting engineer validation on Riverside Viaduct.",
-    time: "15 min ago",
-    tone: "critical",
-  },
-  {
-    id: "n-2",
-    title: "Inspection certified",
-    description: "INSP-2026-002 · Bore 2 Annual Scan certified by Civil Engineer.",
-    time: "2 days ago",
-    tone: "info",
-  },
-];
+const seedNotifications: AppNotification[] = [];
 
 const seedSettings: Settings = {
   orgName: "Metro Infrastructure Authority",
@@ -515,7 +404,7 @@ const seedSettings: Settings = {
 /* Helpers                                                             */
 /* ------------------------------------------------------------------ */
 
-export const STORAGE_KEY = "infrascan-state-v4";
+export const STORAGE_KEY = "infrascan-state-v5";
 
 function hashString(value: string): number {
   let hash = 2166136261;

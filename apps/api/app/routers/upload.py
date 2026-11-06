@@ -440,75 +440,26 @@ def run_and_persist_ai_classification(
 
             image.quality_report = qr
 
-            # Clean prior AI detections for this image
-            db.query(Detection).filter(
+            # Clean prior AI detections & associated measurements for this image
+            old_det_ids = [d[0] for d in db.query(Detection.id).filter(
                 Detection.image_id == image.id,
                 Detection.source == "ai_model"
-            ).delete()
+            ).all()]
+            if old_det_ids:
+                db.query(Measurement).filter(Measurement.detection_id.in_(old_det_ids)).delete(synchronize_session=False)
+                db.query(Detection).filter(Detection.id.in_(old_det_ids)).delete(synchronize_session=False)
 
             insp_id = inspection_id or image.inspection_id
             if insp_id:
-                severity = "severe" if p_crack >= 0.95 else ("moderate" if p_crack >= 0.70 else "minor")
+                # 1. Compute Crack Geometry & Multi-Factor Damage Severity Assessment
+                geo_data = qr.get("crack_geometry") if isinstance(qr, dict) else None
+                geo_sum = geo_data.get("summary", {}) if (geo_data and geo_data.get("success")) else {}
+                sev_info = geo_sum.get("severity_assessment", {})
+                dmg_assessment = None
+                geo_sev = None
 
-                # Persist RF-DETR detection record if defect detected
-                if rfdetr_result and rfdetr_result.get("has_defect"):
-                    rfdetr_det = Detection(
-                        inspection_id=insp_id,
-                        image_id=image.id,
-                        source="ai_model",
-                        defect_type="rfdetr_crack_detection",
-                        geometry={
-                            "type": "rfdetr_bbox_detection",
-                            "model": "dronefreak/rdd2022-rfdetr-medium",
-                            "num_detections": rfdetr_result.get("num_detections"),
-                            "primary_defect": rfdetr_result.get("primary_defect"),
-                            "primary_label": rfdetr_result.get("primary_label"),
-                            "detections": rfdetr_result.get("detections", []),
-                            "latency_ms": rfdetr_result.get("latency_ms"),
-                        },
-                        severity=severity,
-                        created_by=user_id,
-                        confidence=rfdetr_result.get("confidence", p_crack),
-                        model_id="rdd2022-rfdetr-medium",
-                        notes=f"RF-DETR: {rfdetr_result.get('num_detections')} defect regions detected ({rfdetr_result.get('primary_label')})."
-                    )
-                    db.add(rfdetr_det)
-
-                # Persist UNet segmentation record if crack detected
-                if unet_result and unet_result.get("has_crack"):
-                    unet_det = Detection(
-                        inspection_id=insp_id,
-                        image_id=image.id,
-                        source="ai_model",
-                        defect_type="crack_segmentation",
-                        geometry={
-                            "type": "unet_pixel_mask",
-                            "crack_area_pct": unet_result.get("crack_area_pct"),
-                            "crack_pixels": unet_result.get("crack_pixels"),
-                            "max_width_px": unet_result.get("max_width_px"),
-                            "max_width_mm": unet_result.get("max_width_mm"),
-                            "total_length_px": unet_result.get("total_length_px"),
-                            "total_length_mm": unet_result.get("total_length_mm"),
-                            "mean_crack_confidence": unet_result.get("mean_crack_confidence"),
-                            "validation_dice": unet_result.get("validation_dice", 0.7514),
-                            "model": "InfraScan UNet (CrackSeg9k)",
-                            "stage": "stage_2b_pixel_segmentation"
-                        },
-                        severity=severity,
-                        created_by=user_id,
-                        confidence=unet_result.get("mean_crack_confidence", p_crack),
-                        model_id="InfraScan UNet (CrackSeg9k, 384px)",
-                        notes=f"UNet: {unet_result.get('crack_area_pct')}% crack surface area ({unet_result.get('crack_pixels'):,} px), max thickness {unet_result.get('max_width_px')}px."
-                    )
-                    db.add(unet_det)
-
-                # Persist crack geometry extraction detection record & damage assessment
-                if qr.get("crack_geometry") and qr["crack_geometry"].get("success"):
+                if geo_sum:
                     from app.services.damage_assessment import assess_photo_damage_severity
-                    geo_data = qr["crack_geometry"]
-                    geo_sum = geo_data.get("summary", {})
-                    sev_info = geo_sum.get("severity_assessment", {})
-
                     photo_metrics = {
                         "has_cracks": geo_sum.get("crack_count", 0) > 0,
                         "crack_count": geo_sum.get("crack_count", 0),
@@ -535,85 +486,110 @@ def run_and_persist_ai_classification(
                     geo_sum["damage_assessment"] = dmg_assessment
                     qr["damage_assessment"] = dmg_assessment
                     pred["damage_assessment"] = dmg_assessment
-                    geo_sev = dmg_assessment["severity_code"]
+                    geo_sev = dmg_assessment.get("severity_code")
 
-                    geo_det = Detection(
-                        inspection_id=insp_id,
-                        image_id=image.id,
-                        source="ai_model",
-                        defect_type="crack_geometry",
-                        geometry={
-                            "type": "crack_geometry_extraction",
-                            "version": geo_data.get("version", "1.0.0"),
-                            "total_crack_area_px": geo_sum.get("total_crack_area_px"),
-                            "total_crack_area_mm2": geo_sum.get("total_crack_area_mm2"),
-                            "inspected_surface_area_px": geo_sum.get("inspected_surface_area_px"),
-                            "unaffected_surface_area_px": geo_sum.get("unaffected_surface_area_px"),
-                            "crack_coverage_pct": geo_sum.get("crack_coverage_pct"),
-                            "crack_count": geo_sum.get("crack_count"),
-                            "total_crack_length_px": geo_sum.get("total_crack_length_px"),
-                            "total_crack_length_mm": geo_sum.get("total_crack_length_mm"),
-                            "average_crack_width_px": geo_sum.get("average_crack_width_px"),
-                            "average_crack_width_mm": geo_sum.get("average_crack_width_mm"),
-                            "maximum_crack_width_px": geo_sum.get("maximum_crack_width_px"),
-                            "maximum_crack_width_mm": geo_sum.get("maximum_crack_width_mm"),
-                            "is_calibrated": geo_sum.get("is_calibrated"),
-                            "mm_per_pixel": geo_sum.get("mm_per_pixel"),
-                            "controlling_metric": geo_sum.get("controlling_metric"),
-                            "severity_assessment": sev_info,
-                            "damage_assessment": dmg_assessment,
-                            "cracks": geo_data.get("cracks", [])
-                        },
-                        severity=geo_sev,
-                        created_by=user_id,
-                        confidence=unet_result.get("mean_crack_confidence", p_crack) if unet_result else p_crack,
-                        model_id="InfraScan Crack Geometry v1.0",
-                        notes=f"Crack Measurement: {geo_sum.get('crack_coverage_pct')}% coverage, {geo_sum.get('crack_count')} regions. Max width: {geo_sum.get('maximum_crack_width_mm')} mm [{sev_info.get('category')}]. Damage: {dmg_assessment.get('severity')}." if geo_sum.get("is_calibrated") else f"Crack Measurement (uncalibrated): {geo_sum.get('crack_coverage_pct')}% coverage, {geo_sum.get('crack_count')} regions. Max width: {geo_sum.get('maximum_crack_width_px')} px. Damage: {dmg_assessment.get('severity')}."
-                    )
-                    db.add(geo_det)
-                    db.flush()
+                # 2. Determine Primary Defect Type & Controlling Severity
+                rf_has_def = bool(rfdetr_result and rfdetr_result.get("has_defect"))
+                unet_has_crk = bool(unet_result and unet_result.get("has_crack"))
+                is_damaged = has_crack or rf_has_def or unet_has_crk
 
-                    # Persist Measurement model row
-                    is_cal = bool(geo_sum.get("is_calibrated"))
-                    meas = Measurement(
-                        detection_id=geo_det.id,
-                        length=float(geo_sum.get("total_crack_length_mm") if is_cal and geo_sum.get("total_crack_length_mm") is not None else geo_sum.get("total_crack_length_px", 0.0)),
-                        avg_width=float(geo_sum.get("average_crack_width_mm") if is_cal and geo_sum.get("average_crack_width_mm") is not None else geo_sum.get("average_crack_width_px", 0.0)),
-                        max_width=float(geo_sum.get("maximum_crack_width_mm") if is_cal and geo_sum.get("maximum_crack_width_mm") is not None else geo_sum.get("maximum_crack_width_px", 0.0)),
-                        area=float(geo_sum.get("total_crack_area_mm2") if is_cal and geo_sum.get("total_crack_area_mm2") is not None else geo_sum.get("total_crack_area_px", 0.0)),
-                        unit="mm" if is_cal else "px",
-                        calibrated=is_cal,
-                        density=float(geo_sum.get("crack_coverage_pct", 0.0))
-                    )
-                    db.add(meas)
+                if rf_has_def and rfdetr_result.get("primary_defect"):
+                    primary_defect = rfdetr_result.get("primary_defect")
+                elif is_damaged:
+                    primary_defect = "crack"
+                else:
+                    primary_defect = "uncracked"
 
-                # Persist overall classification detection record
-                det = Detection(
+                if geo_sev:
+                    final_severity = geo_sev
+                elif is_damaged:
+                    final_severity = "severe" if p_crack >= 0.95 else ("moderate" if p_crack >= 0.70 else "minor")
+                else:
+                    final_severity = "no_visible_damage"
+
+                # 3. Best Confidence Across Pipelines
+                best_conf = float(max(
+                    p_crack if has_crack else pred.get("uncracked_probability", 0.89),
+                    rfdetr_result.get("confidence", 0.0) if rfdetr_result else 0.0,
+                    unet_result.get("mean_crack_confidence", 0.0) if unet_result else 0.0
+                ))
+
+                # 4. Synthesize Combined Human-Readable Findings Note
+                if is_damaged:
+                    notes_parts = []
+                    if rf_has_def and rfdetr_result.get("num_detections"):
+                        notes_parts.append(f"RF-DETR: {rfdetr_result.get('num_detections')} defect regions detected ({rfdetr_result.get('primary_label')}).")
+                    if unet_has_crk:
+                        notes_parts.append(f"UNet: {unet_result.get('crack_area_pct')}% crack surface area ({unet_result.get('crack_pixels'):,} px), max thickness {unet_result.get('max_width_px')}px.")
+                    if dmg_assessment and dmg_assessment.get("severity"):
+                        notes_parts.append(f"Damage: {dmg_assessment['severity']}.")
+                    unified_note = " ".join(notes_parts) if notes_parts else f"AI Pipeline: Defect detected ({best_conf:.1%} confidence)."
+                else:
+                    unified_note = f"ResNet-18: Sound concrete / Uncracked ({pred.get('uncracked_probability', 1.0 - p_crack):.1%} confidence)."
+
+                # 5. Persist EXACTLY ONE Unified Detection Record per Image
+                unified_det = Detection(
                     inspection_id=insp_id,
                     image_id=image.id,
                     source="ai_model",
-                    defect_type="crack" if has_crack else "uncracked",
+                    defect_type=primary_defect,
                     geometry={
-                        "type": "image_classification",
+                        "type": "unified_crack_detection",
+                        "model": "InfraScan AI Pipeline (ResNet-18 + RF-DETR + UNet)",
                         "predicted_class": pred.get("predicted_class", "Uncertain"),
                         "probabilities": {
                             "uncracked": pred.get("uncracked_probability", 0.0),
                             "cracked": p_crack
                         },
                         "threshold": pred.get("threshold", 0.80),
-                        "model": pred.get("model_name", "InfraScan Model v1.0 (ResNet18)"),
-                        "version": pred.get("model_version", "1.0"),
-                        "engine": pred.get("engine", "onnxruntime"),
-                        "yolo_defect_count": yolo_result.get("detections_count", 0) if yolo_result else 0,
-                        "unet_crack_area_pct": unet_result.get("crack_area_pct", 0) if unet_result else 0
+                        "rfdetr": {
+                            "has_defect": rf_has_def,
+                            "num_detections": rfdetr_result.get("num_detections", 0) if rfdetr_result else 0,
+                            "primary_defect": rfdetr_result.get("primary_defect") if rfdetr_result else None,
+                            "primary_label": rfdetr_result.get("primary_label") if rfdetr_result else None,
+                            "detections": rfdetr_result.get("detections", []) if rfdetr_result else [],
+                        },
+                        "unet": {
+                            "has_crack": unet_has_crk,
+                            "crack_area_pct": unet_result.get("crack_area_pct", 0) if unet_result else 0,
+                            "crack_pixels": unet_result.get("crack_pixels", 0) if unet_result else 0,
+                            "max_width_px": unet_result.get("max_width_px", 0) if unet_result else 0,
+                            "max_width_mm": unet_result.get("max_width_mm") if unet_result else None,
+                            "total_length_px": unet_result.get("total_length_px", 0) if unet_result else 0,
+                            "total_length_mm": unet_result.get("total_length_mm") if unet_result else None,
+                            "mean_crack_confidence": unet_result.get("mean_crack_confidence") if unet_result else None,
+                        },
+                        "crack_geometry": geo_sum if geo_sum else None,
+                        "damage_assessment": dmg_assessment if dmg_assessment else None,
                     },
-                    severity=severity if has_crack else "info",
+                    severity=final_severity,
                     created_by=user_id,
-                    confidence=p_crack if has_crack else pred.get("uncracked_probability", 0.0),
-                    model_id=f"{pred.get('model_name', 'ResNet18')} ({pred.get('model_version', '1.0')})",
-                    notes=f"ResNet18: {pred.get('predicted_class', 'Classification')} ({p_crack:.1%} crack probability, threshold {pred.get('threshold', 0.80):.2f})."
+                    confidence=best_conf,
+                    model_id="InfraScan AI Pipeline (ResNet-18 + RF-DETR + UNet)",
+                    notes=unified_note
                 )
-                db.add(det)
+                db.add(unified_det)
+                db.flush()
+
+                # 6. Persist Associated Single Measurement Record
+                is_cal = bool(geo_sum.get("is_calibrated")) if geo_sum else False
+                length_val = float(geo_sum.get("total_crack_length_mm") if is_cal and geo_sum.get("total_crack_length_mm") is not None else (geo_sum.get("total_crack_length_px", 0.0) if geo_sum else (unet_result.get("total_length_px", 0.0) if unet_result else 0.0)))
+                avg_w_val = float(geo_sum.get("average_crack_width_mm") if is_cal and geo_sum.get("average_crack_width_mm") is not None else (geo_sum.get("average_crack_width_px", 0.0) if geo_sum else 0.0))
+                max_w_val = float(geo_sum.get("maximum_crack_width_mm") if is_cal and geo_sum.get("maximum_crack_width_mm") is not None else (geo_sum.get("maximum_crack_width_px", 0.0) if geo_sum else (unet_result.get("max_width_px", 0.0) if unet_result else 0.0)))
+                area_val = float(geo_sum.get("total_crack_area_mm2") if is_cal and geo_sum.get("total_crack_area_mm2") is not None else (geo_sum.get("total_crack_area_px", 0.0) if geo_sum else (unet_result.get("crack_pixels", 0.0) if unet_result else 0.0)))
+                density_val = float(geo_sum.get("crack_coverage_pct", 0.0) if geo_sum else (unet_result.get("crack_area_pct", 0.0) if unet_result else 0.0))
+
+                meas = Measurement(
+                    detection_id=unified_det.id,
+                    length=length_val,
+                    avg_width=avg_w_val,
+                    max_width=max_w_val,
+                    area=area_val,
+                    unit="mm" if is_cal else "px",
+                    calibrated=is_cal,
+                    density=density_val
+                )
+                db.add(meas)
 
             return pred
     except Exception as exc:
@@ -2066,12 +2042,6 @@ def execute_geometry_calculation(
     image.quality_report = qr
     flag_modified(image, "quality_report")
 
-    # Clean existing crack_geometry detection
-    db.query(Detection).filter(
-        Detection.image_id == image.id,
-        Detection.defect_type == "crack_geometry"
-    ).delete()
-
     insp_id = inspection_id or image.inspection_id
     if insp_id:
         from app.services.damage_assessment import assess_photo_damage_severity
@@ -2103,59 +2073,66 @@ def execute_geometry_calculation(
         qr["damage_assessment"] = dmg_assessment
         geo_sev = dmg_assessment["severity_code"]
 
-        geo_det = Detection(
-            inspection_id=insp_id,
-            image_id=image.id,
-            source="ai_model",
-            defect_type="crack_geometry",
-            geometry={
-                "type": "crack_geometry_extraction",
-                "version": geo_res.get("version", "1.0.0"),
-                "total_crack_area_px": geo_sum.get("total_crack_area_px"),
-                "total_crack_area_mm2": geo_sum.get("total_crack_area_mm2"),
-                "inspected_surface_area_px": geo_sum.get("inspected_surface_area_px"),
-                "unaffected_surface_area_px": geo_sum.get("unaffected_surface_area_px"),
-                "crack_coverage_pct": geo_sum.get("crack_coverage_pct"),
-                "crack_count": geo_sum.get("crack_count"),
-                "total_crack_length_px": geo_sum.get("total_crack_length_px"),
-                "total_crack_length_mm": geo_sum.get("total_crack_length_mm"),
-                "average_crack_width_px": geo_sum.get("average_crack_width_px"),
-                "average_crack_width_mm": geo_sum.get("average_crack_width_mm"),
-                "maximum_crack_width_px": geo_sum.get("maximum_crack_width_px"),
-                "maximum_crack_width_mm": geo_sum.get("maximum_crack_width_mm"),
-                "is_calibrated": geo_sum.get("is_calibrated"),
-                "mm_per_pixel": geo_sum.get("mm_per_pixel"),
-                "controlling_metric": geo_sum.get("controlling_metric"),
-                "severity_assessment": sev_info,
-                "damage_assessment": dmg_assessment,
-                "cracks": geo_res.get("cracks", [])
-            },
-            severity=geo_sev,
-            created_by=user_id,
-            confidence=0.95,
-            model_id="InfraScan Crack Geometry v1.0",
-            notes=(
-                f"Crack Measurement: {geo_sum.get('crack_coverage_pct')}% coverage, {geo_sum.get('crack_count')} regions. Max width: {geo_sum.get('maximum_crack_width_mm')} mm [{sev_info.get('category')}]. Damage: {dmg_assessment.get('severity')}."
-                if geo_sum.get("is_calibrated")
-                else f"Crack Measurement (uncalibrated): {geo_sum.get('crack_coverage_pct')}% coverage, {geo_sum.get('crack_count')} regions. Max width: {geo_sum.get('maximum_crack_width_px')} px. Damage: {dmg_assessment.get('severity')}."
-            )
+        note_str = (
+            f"Crack Measurement: {geo_sum.get('crack_coverage_pct')}% coverage, {geo_sum.get('crack_count')} regions. Max width: {geo_sum.get('maximum_crack_width_mm')} mm [{sev_info.get('category')}]. Damage: {dmg_assessment.get('severity')}."
+            if geo_sum.get("is_calibrated")
+            else f"Crack Measurement (uncalibrated): {geo_sum.get('crack_coverage_pct')}% coverage, {geo_sum.get('crack_count')} regions. Max width: {geo_sum.get('maximum_crack_width_px')} px. Damage: {dmg_assessment.get('severity')}."
         )
-        db.add(geo_det)
-        db.flush()
 
-        # Link Measurement model row
+        existing_det = db.query(Detection).filter(
+            Detection.image_id == image.id,
+            Detection.source == "ai_model"
+        ).first()
+
+        if existing_det:
+            # Update the single unified detection
+            existing_det.severity = geo_sev
+            existing_det.notes = note_str
+            current_geom = dict(existing_det.geometry or {})
+            current_geom["crack_geometry"] = geo_sum
+            current_geom["damage_assessment"] = dmg_assessment
+            existing_det.geometry = current_geom
+            flag_modified(existing_det, "geometry")
+            target_det_id = existing_det.id
+        else:
+            # Clean existing crack_geometry detection
+            db.query(Detection).filter(
+                Detection.image_id == image.id,
+                Detection.defect_type == "crack_geometry"
+            ).delete()
+            geo_det = Detection(
+                inspection_id=insp_id,
+                image_id=image.id,
+                source="ai_model",
+                defect_type="crack",
+                geometry={
+                    "type": "unified_crack_detection",
+                    "crack_geometry": geo_sum,
+                    "damage_assessment": dmg_assessment,
+                },
+                severity=geo_sev,
+                created_by=user_id,
+                confidence=0.95,
+                model_id="InfraScan Crack Geometry v1.0",
+                notes=note_str
+            )
+            db.add(geo_det)
+            db.flush()
+            target_det_id = geo_det.id
+
+        # Update or create Measurement
         is_cal = bool(geo_sum.get("is_calibrated"))
-        meas = Measurement(
-            detection_id=geo_det.id,
-            length=float(geo_sum.get("total_crack_length_mm") if is_cal and geo_sum.get("total_crack_length_mm") is not None else geo_sum.get("total_crack_length_px", 0.0)),
-            avg_width=float(geo_sum.get("average_crack_width_mm") if is_cal and geo_sum.get("average_crack_width_mm") is not None else geo_sum.get("average_crack_width_px", 0.0)),
-            max_width=float(geo_sum.get("maximum_crack_width_mm") if is_cal and geo_sum.get("maximum_crack_width_mm") is not None else geo_sum.get("maximum_crack_width_px", 0.0)),
-            area=float(geo_sum.get("total_crack_area_mm2") if is_cal and geo_sum.get("total_crack_area_mm2") is not None else geo_sum.get("total_crack_area_px", 0.0)),
-            unit="mm" if is_cal else "px",
-            calibrated=is_cal,
-            density=float(geo_sum.get("crack_coverage_pct", 0.0))
-        )
-        db.add(meas)
+        meas = db.query(Measurement).filter(Measurement.detection_id == target_det_id).first()
+        if not meas:
+            meas = Measurement(detection_id=target_det_id)
+            db.add(meas)
+        meas.length = float(geo_sum.get("total_crack_length_mm") if is_cal and geo_sum.get("total_crack_length_mm") is not None else geo_sum.get("total_crack_length_px", 0.0))
+        meas.avg_width = float(geo_sum.get("average_crack_width_mm") if is_cal and geo_sum.get("average_crack_width_mm") is not None else geo_sum.get("average_crack_width_px", 0.0))
+        meas.max_width = float(geo_sum.get("maximum_crack_width_mm") if is_cal and geo_sum.get("maximum_crack_width_mm") is not None else geo_sum.get("maximum_crack_width_px", 0.0))
+        meas.area = float(geo_sum.get("total_crack_area_mm2") if is_cal and geo_sum.get("total_crack_area_mm2") is not None else geo_sum.get("total_crack_area_px", 0.0))
+        meas.unit = "mm" if is_cal else "px"
+        meas.calibrated = is_cal
+        meas.density = float(geo_sum.get("crack_coverage_pct", 0.0))
 
     db.commit()
     return geo_res

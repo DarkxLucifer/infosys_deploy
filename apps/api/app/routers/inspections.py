@@ -827,7 +827,7 @@ def sign_off_inspection(
 
     unverified = [
         d for d in detections
-        if d.geometry and isinstance(d.geometry, dict) and d.geometry.get("type") not in ("image_classification", "crack_geometry_extraction", None) and not d.verified_by
+        if d.geometry and isinstance(d.geometry, dict) and d.geometry.get("type") not in ("image_classification", "crack_geometry_extraction", "unified_crack_detection", None) and not d.verified_by
     ]
     if unverified:
         raise HTTPException(
