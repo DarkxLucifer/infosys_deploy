@@ -66,6 +66,48 @@ def get_pipeline_counts(
         "last_refreshed_at": datetime.now(timezone.utc).isoformat()
     }
 
+def compute_inspection_highest_severity(db: Session, inspection_id: str) -> str:
+    """
+    Computes genuine highest damage severity for an inspection from its detections
+    and image damage assessments. No mock or hardcoded severity.
+    """
+    from app.models.all_models import Detection, InspectionImage
+    sevs = [r[0].lower() for r in db.query(Detection.severity).filter(
+        Detection.inspection_id == inspection_id,
+        Detection.severity.isnot(None)
+    ).all() if r[0]]
+
+    if not sevs:
+        images = db.query(InspectionImage).filter(
+            InspectionImage.inspection_id == inspection_id,
+            InspectionImage.is_deleted == False
+        ).all()
+        for img in images:
+            if img.quality_report and isinstance(img.quality_report, dict):
+                dmg = img.quality_report.get("damage_assessment") or {}
+                if dmg and dmg.get("severity_code"):
+                    sevs.append(dmg["severity_code"].lower())
+                geo = img.quality_report.get("crack_geometry") or {}
+                sev_cat = geo.get("summary", {}).get("crack_severity_code")
+                if sev_cat:
+                    sevs.append(sev_cat.lower())
+
+    order = {
+        "critical": 4,
+        "severe": 3,
+        "moderate": 2,
+        "minor": 1,
+        "hairline": 1,
+        "none": 0,
+        "no_visible_damage": 0
+    }
+    if not sevs:
+        return "minor"
+    highest = max(sevs, key=lambda s: order.get(s, 0))
+    if highest in ["none", "no_visible_damage"]:
+        return "minor"
+    return highest if highest in order else "moderate"
+
 def get_recent_ai_classifications(db: Session, org_id: str, limit: int = 8) -> List[dict]:
     """Retrieves recent photographs that have genuine AI classification results."""
     from app.models.all_models import Detection
@@ -224,7 +266,7 @@ def get_role_dashboard_metrics(
                 "next_due_date": (i.inspection_date.replace(year=i.inspection_date.year + 1)).strftime("%Y-%m-%d") if i.inspection_date else now.strftime("%Y-%m-%d"),
                 "images_uploaded_count": img_count,
                 "findings_count": det_count,
-                "highest_proposed_severity": "moderate",
+                "highest_proposed_severity": compute_inspection_highest_severity(db, i.id),
                 "lowest_confidence": 0.9,
                 "days_to_due": 30
             })
@@ -245,7 +287,7 @@ def get_role_dashboard_metrics(
                 "assetName": asset.name if asset else "Asset",
                 "reviewerName": "Civil Engineering Team",
                 "daysWaiting": max(1, days_waiting),
-                "highestProposedSeverity": "moderate"
+                "highestProposedSeverity": compute_inspection_highest_severity(db, p.id)
             })
 
         return {
@@ -336,8 +378,12 @@ def get_role_dashboard_metrics(
         # Severity distribution
         severity_dist = {"critical": 0, "severe": 0, "moderate": 0, "minor": 0, "no_visible_damage": 0}
         for row in db.query(Detection.severity, func.count(Detection.id)).group_by(Detection.severity).all():
-            if row[0] in severity_dist:
-                severity_dist[row[0]] = row[1]
+            if row[0]:
+                k = row[0].lower()
+                if k in ("hairline", "minor"):
+                    severity_dist["minor"] += row[1]
+                elif k in severity_dist:
+                    severity_dist[k] += row[1]
 
         verified_count = db.query(Detection).filter(Detection.verified_by.isnot(None)).count()
         total_detections = db.query(Detection).count()
@@ -370,7 +416,7 @@ def get_role_dashboard_metrics(
                 "imagesCount": img_count,
                 "inspectorName": inspector.name if inspector else "Field Inspector",
                 "findingsCount": det_count,
-                "highestProposedSeverity": "moderate",
+                "highestProposedSeverity": compute_inspection_highest_severity(db, ri.id),
                 "lowestConfidence": 0.88,
                 "ageDays": max(1, age_days)
             })
@@ -549,10 +595,14 @@ def get_role_dashboard_metrics(
             Inspection.status.in_(["reviewed", "reported", "closed"])
         ).all()]
 
+        all_org_inspection_ids = [r[0] for r in db.query(Inspection.id).filter(
+            Inspection.organization_id == org_id
+        ).all()]
+
         damaged_asset_ids = set()
-        if reviewed_inspection_ids:
+        if all_org_inspection_ids:
             damaged_insps = db.query(Detection.inspection_id).filter(
-                Detection.inspection_id.in_(reviewed_inspection_ids),
+                Detection.inspection_id.in_(all_org_inspection_ids),
                 Detection.severity.in_(["moderate", "severe", "critical"])
             ).distinct().all()
             if damaged_insps:

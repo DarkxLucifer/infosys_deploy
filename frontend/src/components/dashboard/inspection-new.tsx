@@ -42,6 +42,7 @@ import { ComplianceNote, PageHeader, PageShell } from "./page-shell";
 import {
   ImageQualityCard,
   BatchSummaryCard,
+  SessionDamageAssessmentCard,
   ImageTransformModal,
 } from "@/components/inspection/image-quality-components";
 import { OpticalCalibrationModal } from "@/components/inspection/optical-calibration-modal";
@@ -1403,6 +1404,9 @@ export function InspectionNewPage() {
 
               {/* Batch quality & preprocessing summary */}
               <BatchSummaryCard photos={photos} />
+
+              {/* Session Damage Severity Assessment (AASHTO / ASTM & PDF §10) */}
+              <SessionDamageAssessmentCard photos={photos} inspectionId={createdInspectionId || undefined} />
 
               {/* Quality guide (dynamic from server limits) */}
               <div className="rounded-2xl border-2 border-foreground/30 bg-card p-5 space-y-3 shadow-xs">

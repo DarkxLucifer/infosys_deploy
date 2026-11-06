@@ -192,6 +192,7 @@ export function InspectorDashboard() {
                 <th className="py-2.5 px-4 font-semibold">Asset Code & Name</th>
                 <th className="py-2.5 px-4 font-semibold">Type</th>
                 <th className="py-2.5 px-4 font-semibold">Inspection Date</th>
+                <th className="py-2.5 px-4 font-semibold">Damage Severity</th>
                 <th className="py-2.5 px-4 font-semibold">Status</th>
                 <th className="py-2.5 px-4 font-semibold">Images Uploaded</th>
                 <th className="py-2.5 px-4 font-semibold">Due Date</th>
@@ -201,7 +202,7 @@ export function InspectorDashboard() {
             <tbody className="divide-y divide-border">
               {paginatedInspections.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-10 text-center text-muted-foreground">
+                  <td colSpan={8} className="py-10 text-center text-muted-foreground">
                     <div className="flex flex-col items-center justify-center gap-2">
                       <Camera className="size-8 text-muted-foreground/60 stroke-[1.5]" />
                       <p className="text-xs font-medium">No assigned inspections found for this period.</p>
@@ -228,6 +229,11 @@ export function InspectorDashboard() {
                       {insp.asset_type}
                     </td>
                     <td className="py-2.5 px-4 font-mono">{insp.date}</td>
+                    <td className="py-2.5 px-4">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-mono uppercase font-bold border border-foreground/30 bg-background text-foreground">
+                        {insp.highest_proposed_severity || "Minor"}
+                      </span>
+                    </td>
                     <td className="py-2.5 px-4">
                       <span
                         className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold ${

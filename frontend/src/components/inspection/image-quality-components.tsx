@@ -2990,3 +2990,320 @@ export function BatchSummaryCard({ photos }: { photos: any[] }) {
     </div>
   );
 }
+
+// ─── Session Damage Severity Assessment Card (AASHTO / ASTM & PDF §10) ────────
+
+export function SessionDamageAssessmentCard({
+  photos,
+  inspectionId: _inspectionId,
+}: {
+  photos: any[];
+  inspectionId?: string;
+}) {
+  const total = photos.length;
+
+  // Evaluate batch metrics
+  let sumCrackArea = 0;
+  let sumSurfaceArea = 0;
+  let calibratedCount = 0;
+  let uncalibratedCount = 0;
+  let analyzedCount = 0;
+
+  const distribution = {
+    critical: 0,
+    severe: 0,
+    moderate: 0,
+    minor: 0,
+    none: 0,
+  };
+
+  const severityOrder: Record<string, number> = {
+    none: 0,
+    minor: 1,
+    moderate: 2,
+    severe: 3,
+    critical: 4,
+  };
+
+  let worstLevel = 0;
+  let worstCode = "none";
+  let controllingFactor = "Sound surface";
+  let controllingValue = "No defects detected";
+  let controllingPhotoName = "";
+
+  photos.forEach((photo, idx) => {
+    const geo = photo.crackGeometry || photo.crack_geometry || photo.quality_report?.crack_geometry || photo.qualityReport?.crack_geometry;
+    const summary = geo?.summary || {};
+    const calib = photo.calibration || {};
+
+    const isCalibrated = Boolean(calib.is_calibrated || summary.is_calibrated);
+    const scale = Number(calib.scale_factor_mm_per_pixel || calib.mm_per_pixel || summary.calibration_mm_per_pixel || summary.mm_per_pixel || 0);
+
+    const crackCount = Number(summary.crack_count || 0);
+    const crackArea = Number(summary.total_crack_area_pixels || summary.crack_area_px || 0);
+    const surfaceArea = Number(summary.total_surface_area_pixels || summary.inspected_surface_area_px || (photo.width && photo.height ? photo.width * photo.height : 0));
+
+    let density = Number(summary.crack_coverage_pct || summary.crack_density_pct || 0);
+    if (density <= 0 && surfaceArea > 0 && crackArea > 0) {
+      density = (crackArea / surfaceArea) * 100;
+    }
+
+    const peakWidthPx = Number(summary.maximum_crack_width_px || 0);
+    const peakWidthMm = summary.maximum_crack_width_mm != null ? Number(summary.maximum_crack_width_mm) : (isCalibrated && scale > 0 ? peakWidthPx * scale : null);
+    const branches = Number(summary.total_branch_count || 0);
+    const defectType = String(photo.activeStage2Model || photo.defect_type || "").toLowerCase();
+
+    const minDim = photo.width && photo.height ? Math.min(photo.width, photo.height) : null;
+    const relThickness = minDim && minDim > 0 ? peakWidthPx / minDim : null;
+
+    const hasCracks = crackCount > 0 || crackArea > 0 || summary.has_cracks;
+
+    if (geo || photo.quality_status || photo.status === "valid" || photo.processing_status === "complete") {
+      analyzedCount++;
+    }
+
+    if (isCalibrated && scale > 0) {
+      calibratedCount++;
+    } else {
+      uncalibratedCount++;
+    }
+
+    sumCrackArea += crackArea;
+    sumSurfaceArea += surfaceArea;
+
+    let photoCode = "none";
+    let pFactor = "Zero cracks";
+    let pVal = "0.0% coverage";
+
+    if (defectType.includes("rebar") || defectType.includes("exposed_reinforcement")) {
+      photoCode = "critical";
+      pFactor = "Exposed Rebar";
+      pVal = "Critical Defect";
+    } else if (!hasCracks || crackArea <= 0) {
+      photoCode = "none";
+      pFactor = "Sound Surface";
+      pVal = "0.0% coverage";
+    } else if (isCalibrated && peakWidthMm != null) {
+      // Mode A: Calibrated
+      if (peakWidthMm > 8.0) {
+        photoCode = "critical";
+        pFactor = "Peak Width";
+        pVal = `${peakWidthMm.toFixed(2)} mm (> 8.0 mm)`;
+      } else if (density > 9.0) {
+        photoCode = "critical";
+        pFactor = "Crack Density";
+        pVal = `${density.toFixed(2)}% (> 9.0%)`;
+      } else if (branches > 50) {
+        photoCode = "critical";
+        pFactor = "Alligator Fatigue";
+        pVal = `${branches} branches`;
+      } else if (peakWidthMm > 5.0) {
+        photoCode = "severe";
+        pFactor = "Peak Width";
+        pVal = `${peakWidthMm.toFixed(2)} mm (5.0 - 8.0 mm)`;
+      } else if (density > 5.0) {
+        photoCode = "severe";
+        pFactor = "Crack Density";
+        pVal = `${density.toFixed(2)}% (5.0 - 9.0%)`;
+      } else if (branches > 10) {
+        photoCode = "severe";
+        pFactor = "Fatigue Branches";
+        pVal = `${branches} branches`;
+      } else if (peakWidthMm >= 3.0) {
+        photoCode = "moderate";
+        pFactor = "Peak Width";
+        pVal = `${peakWidthMm.toFixed(2)} mm (3.0 - 5.0 mm)`;
+      } else if (density >= 2.0) {
+        photoCode = "moderate";
+        pFactor = "Crack Density";
+        pVal = `${density.toFixed(2)}% (2.0 - 5.0%)`;
+      } else {
+        photoCode = "minor";
+        pFactor = "Minor Width";
+        pVal = `${peakWidthMm.toFixed(2)} mm (< 3.0 mm)`;
+      }
+    } else {
+      // Mode B: Uncalibrated (PDF §10)
+      if (density > 9.0) {
+        photoCode = "critical";
+        pFactor = "Crack Density";
+        pVal = `${density.toFixed(2)}% (> 9.0%)`;
+      } else if (relThickness != null && relThickness >= 0.090) {
+        photoCode = "critical";
+        pFactor = "Relative Width";
+        pVal = `${(relThickness * 100).toFixed(1)}% frame`;
+      } else if (branches > 50) {
+        photoCode = "critical";
+        pFactor = "Alligator Network";
+        pVal = `${branches} branches`;
+      } else if (density >= 2.5) {
+        photoCode = "severe";
+        pFactor = "Crack Density";
+        pVal = `${density.toFixed(2)}% (2.5 - 9.0%)`;
+      } else if (relThickness != null && relThickness >= 0.045) {
+        photoCode = "severe";
+        pFactor = "Relative Width";
+        pVal = `${(relThickness * 100).toFixed(1)}% frame`;
+      } else if (branches > 10) {
+        photoCode = "severe";
+        pFactor = "Interconnected Branches";
+        pVal = `${branches} branches`;
+      } else if (density >= 0.5) {
+        photoCode = "moderate";
+        pFactor = "Crack Density";
+        pVal = `${density.toFixed(2)}% (0.5 - 2.5%)`;
+      } else if (relThickness != null && relThickness >= 0.015) {
+        photoCode = "moderate";
+        pFactor = "Relative Width";
+        pVal = `${(relThickness * 100).toFixed(1)}% frame`;
+      } else {
+        photoCode = "minor";
+        pFactor = "Superficial Fissure";
+        pVal = `${density.toFixed(2)}% (< 0.5%)`;
+      }
+    }
+
+    if (photoCode in distribution) {
+      distribution[photoCode as keyof typeof distribution]++;
+    } else {
+      distribution.none++;
+    }
+
+    const lvl = severityOrder[photoCode] || 0;
+    if (lvl > worstLevel) {
+      worstLevel = lvl;
+      worstCode = photoCode;
+      controllingFactor = pFactor;
+      controllingValue = pVal;
+      controllingPhotoName = photo.name || `Photo #${idx + 1}`;
+    }
+  });
+
+  const aggregateDensity = sumSurfaceArea > 0 && sumCrackArea > 0
+    ? ((sumCrackArea / sumSurfaceArea) * 100).toFixed(2)
+    : "0.00";
+
+  const severityTitles: Record<string, string> = {
+    none: "No Visible Damage",
+    minor: "Minor Damage",
+    moderate: "Moderate Damage",
+    severe: "Severe Damage",
+    critical: "Critical / Requires Urgent Review",
+  };
+
+  const priorityLabels: Record<string, string> = {
+    critical: "Urgent Engineering Review",
+    severe: "High Priority (14-30 Days)",
+    moderate: "Medium Priority (60-90 Days)",
+    minor: "Low Priority (Monitor)",
+    none: "Routine Monitoring",
+  };
+
+  const isCalibratedBatch = calibratedCount > 0 && uncalibratedCount === 0;
+  const isMixedBatch = calibratedCount > 0 && uncalibratedCount > 0;
+  const basisLabel = isCalibratedBatch
+    ? "Calibrated Physical Scale (mm)"
+    : isMixedBatch
+    ? `Mixed Scale (${calibratedCount} Calibrated / ${uncalibratedCount} Density)`
+    : "Crack Density & Morphology (PDF §10)";
+
+  return (
+    <div className="rounded-2xl border border-border bg-card p-4 space-y-3 shadow-xs">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-bold text-foreground tracking-tight">Damage Severity Assessment</h3>
+          <p className="text-[10px] text-muted-foreground font-mono">AASHTO / ASTM & PDF §10 Standards</p>
+        </div>
+        <Badge
+          variant="outline"
+          className="text-[10px] px-2 py-0.5 font-mono uppercase tracking-wider border-foreground/30 text-foreground bg-background"
+        >
+          {worstCode === "critical"
+            ? "CRITICAL"
+            : worstCode === "severe"
+            ? "SEVERE"
+            : worstCode === "moderate"
+            ? "MODERATE"
+            : worstCode === "minor"
+            ? "MINOR"
+            : "SOUND"}
+        </Badge>
+      </div>
+
+      {/* Main Overall Severity Display */}
+      <div className="p-3 rounded-xl bg-background border border-foreground/30 space-y-1.5 shadow-xs">
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Session Overall</span>
+          <span className="text-[10px] font-mono text-muted-foreground">{basisLabel}</span>
+        </div>
+        <div className="text-base font-extrabold text-foreground tracking-tight">
+          {severityTitles[worstCode] || "No Visible Damage"}
+        </div>
+        <div className="flex items-center gap-1.5 text-xs text-foreground/80 pt-0.5 border-t border-border/40">
+          <span className="font-semibold text-muted-foreground text-[11px]">Controlling Defect:</span>
+          <span className="font-mono text-foreground font-bold text-[11px]">
+            {controllingFactor} ({controllingValue})
+          </span>
+          {controllingPhotoName && (
+            <span className="text-[10px] text-muted-foreground truncate max-w-[110px]">
+              in {controllingPhotoName}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* 2x2 Metric Breakdown */}
+      <div className="grid grid-cols-2 gap-2 text-xs">
+        <div className="p-2.5 rounded-xl bg-background border border-foreground/30 shadow-xs">
+          <span className="text-[10px] text-muted-foreground font-bold block uppercase tracking-wider">
+            Batch Density
+          </span>
+          <span className="text-base font-bold text-foreground font-mono">{aggregateDensity}%</span>
+        </div>
+        <div className="p-2.5 rounded-xl bg-background border border-foreground/30 shadow-xs">
+          <span className="text-[10px] text-muted-foreground font-bold block uppercase tracking-wider">
+            Priority Action
+          </span>
+          <span className="text-xs font-bold text-foreground truncate block pt-0.5">
+            {priorityLabels[worstCode] || "Routine Monitoring"}
+          </span>
+        </div>
+        <div className="p-2.5 rounded-xl bg-background border border-foreground/30 shadow-xs">
+          <span className="text-[10px] text-muted-foreground font-bold block uppercase tracking-wider">
+            Evaluated Photos
+          </span>
+          <span className="text-base font-bold text-foreground font-mono">
+            {analyzedCount} / {total}
+          </span>
+        </div>
+        <div className="p-2.5 rounded-xl bg-background border border-foreground/30 shadow-xs">
+          <span className="text-[10px] text-muted-foreground font-bold block uppercase tracking-wider">
+            Calibration Mode
+          </span>
+          <span className="text-xs font-semibold text-foreground truncate block pt-0.5">
+            {calibratedCount > 0 ? `${calibratedCount} Calibrated` : "Uncalibrated (Density)"}
+          </span>
+        </div>
+      </div>
+
+      {/* Severity Count Summary */}
+      <div className="flex items-center justify-between text-[11px] font-mono px-2 py-1.5 rounded-lg bg-background border border-border text-foreground/80">
+        <span className="text-foreground font-bold">{distribution.critical} Critical</span>
+        <span className="text-muted-foreground">·</span>
+        <span className="text-foreground font-bold">{distribution.severe} Severe</span>
+        <span className="text-muted-foreground">·</span>
+        <span className="text-foreground font-bold">{distribution.moderate} Moderate</span>
+        <span className="text-muted-foreground">·</span>
+        <span className="text-foreground font-bold">{distribution.minor} Minor</span>
+      </div>
+
+      {/* Engineering Decision Support Disclaimer */}
+      <div className="p-2 rounded-lg bg-amber-500/5 border border-amber-500/30 text-[10px] text-muted-foreground flex items-start gap-1.5">
+        <AlertTriangle className="size-3.5 text-amber-500 shrink-0 mt-0.5" />
+        <span className="leading-tight">
+          Decision Support: Automated optical assessment does not certify structural safety. Final structural appraisal requires qualified civil engineer review.
+        </span>
+      </div>
+    </div>
+  );
+}

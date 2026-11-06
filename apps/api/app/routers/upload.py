@@ -502,14 +502,41 @@ def run_and_persist_ai_classification(
                     )
                     db.add(unet_det)
 
-                # Persist crack geometry extraction detection record
+                # Persist crack geometry extraction detection record & damage assessment
                 if qr.get("crack_geometry") and qr["crack_geometry"].get("success"):
+                    from app.services.damage_assessment import assess_photo_damage_severity
                     geo_data = qr["crack_geometry"]
                     geo_sum = geo_data.get("summary", {})
                     sev_info = geo_sum.get("severity_assessment", {})
-                    geo_sev = sev_info.get("category_code") if geo_sum.get("is_calibrated") else "uncalibrated"
-                    if geo_sum.get("crack_count", 0) == 0:
-                        geo_sev = "no_visible_damage"
+
+                    photo_metrics = {
+                        "has_cracks": geo_sum.get("crack_count", 0) > 0,
+                        "crack_count": geo_sum.get("crack_count", 0),
+                        "crack_area_px": geo_sum.get("total_crack_area_px", 0.0),
+                        "surface_area_px": geo_sum.get("inspected_surface_area_px", 0.0),
+                        "crack_density_pct": geo_sum.get("crack_coverage_pct", 0.0),
+                        "maximum_crack_width_px": geo_sum.get("maximum_crack_width_px", 0.0),
+                        "average_crack_width_px": geo_sum.get("average_crack_width_px", 0.0),
+                        "maximum_crack_width_mm": geo_sum.get("maximum_crack_width_mm"),
+                        "average_crack_width_mm": geo_sum.get("average_crack_width_mm"),
+                        "total_crack_length_px": geo_sum.get("total_crack_length_px", 0.0),
+                        "total_branch_count": geo_sum.get("total_branch_count", 0),
+                        "image_width": image.width,
+                        "image_height": image.height,
+                        "is_calibrated": geo_sum.get("is_calibrated"),
+                        "mm_per_pixel": geo_sum.get("mm_per_pixel")
+                    }
+                    defect_override = rfdetr_result.get("top_class") if (has_crack and rfdetr_result) else None
+                    dmg_assessment = assess_photo_damage_severity(
+                        photo_metrics,
+                        calibration=image.calibration if isinstance(image.calibration, dict) else None,
+                        defect_type=defect_override
+                    )
+                    geo_sum["damage_assessment"] = dmg_assessment
+                    qr["damage_assessment"] = dmg_assessment
+                    pred["damage_assessment"] = dmg_assessment
+                    geo_sev = dmg_assessment["severity_code"]
+
                     geo_det = Detection(
                         inspection_id=insp_id,
                         image_id=image.id,
@@ -534,13 +561,14 @@ def run_and_persist_ai_classification(
                             "mm_per_pixel": geo_sum.get("mm_per_pixel"),
                             "controlling_metric": geo_sum.get("controlling_metric"),
                             "severity_assessment": sev_info,
+                            "damage_assessment": dmg_assessment,
                             "cracks": geo_data.get("cracks", [])
                         },
                         severity=geo_sev,
                         created_by=user_id,
                         confidence=unet_result.get("mean_crack_confidence", p_crack) if unet_result else p_crack,
                         model_id="InfraScan Crack Geometry v1.0",
-                        notes=f"Crack Measurement: {geo_sum.get('crack_coverage_pct')}% coverage, {geo_sum.get('crack_count')} regions. Max width: {geo_sum.get('maximum_crack_width_mm')} mm [{sev_info.get('category')}]." if geo_sum.get("is_calibrated") else f"Crack Measurement (uncalibrated): {geo_sum.get('crack_coverage_pct')}% coverage, {geo_sum.get('crack_count')} regions. Max width: {geo_sum.get('maximum_crack_width_px')} px."
+                        notes=f"Crack Measurement: {geo_sum.get('crack_coverage_pct')}% coverage, {geo_sum.get('crack_count')} regions. Max width: {geo_sum.get('maximum_crack_width_mm')} mm [{sev_info.get('category')}]. Damage: {dmg_assessment.get('severity')}." if geo_sum.get("is_calibrated") else f"Crack Measurement (uncalibrated): {geo_sum.get('crack_coverage_pct')}% coverage, {geo_sum.get('crack_count')} regions. Max width: {geo_sum.get('maximum_crack_width_px')} px. Damage: {dmg_assessment.get('severity')}."
                     )
                     db.add(geo_det)
                     db.flush()
@@ -1234,10 +1262,17 @@ def list_inspection_images(
         item["has_geometry"] = bool(crack_geo)
         item["crackGeometry"] = crack_geo
         item["crack_geometry"] = crack_geo
+        img_qr = img.quality_report if (img.quality_report and isinstance(img.quality_report, dict)) else {}
+        dmg_assess = img_qr.get("damage_assessment") or (crack_geo.get("summary", {}).get("damage_assessment") if crack_geo else None)
+        item["damageAssessment"] = dmg_assess
+        item["damage_assessment"] = dmg_assess
         if crack_geo:
             item["geometryUrl"] = f"/api/v1/images/{img.id}/file?variant=geometry"
 
         items.append(item)
+
+    from app.services.damage_assessment import assess_batch_damage_severity
+    batch_damage = assess_batch_damage_severity(items)
 
     return {
         "inspectionId": inspection.id,
@@ -1247,6 +1282,8 @@ def list_inspection_images(
         "rejectedCount": sum(1 for img in images if img.quality_status == "rejected" or img.status == "rejected"),
         "processingCount": sum(1 for img in images if img.processing_status in ("queued", "running")),
         "completeCount": sum(1 for img in images if img.processing_status == "complete"),
+        "damageAssessment": batch_damage,
+        "damage_assessment": batch_damage,
         "items": items
     }
 
@@ -1469,6 +1506,8 @@ def get_image_details(
         "unetUrl": (f"/api/v1/images/{image.id}/file?variant=unet&v={v_tag}") if has_unet else None,
         "unetMaskUrl": (f"/api/v1/images/{image.id}/file?variant=mask&v={v_tag}") if has_unet else None,
         "geometryUrl": (f"/api/v1/images/{image.id}/file?variant=geometry&v={v_tag}") if has_geo else None,
+        "damageAssessment": qr.get("damage_assessment") or (crack_geo.get("summary", {}).get("damage_assessment") if crack_geo else None),
+        "damage_assessment": qr.get("damage_assessment") or (crack_geo.get("summary", {}).get("damage_assessment") if crack_geo else None),
         "createdAt": image.created_at.isoformat()
     }
 
@@ -2092,11 +2131,34 @@ def execute_geometry_calculation(
 
     insp_id = inspection_id or image.inspection_id
     if insp_id:
+        from app.services.damage_assessment import assess_photo_damage_severity
         geo_sum = geo_res.get("summary", {})
         sev_info = geo_sum.get("severity_assessment", {})
-        geo_sev = sev_info.get("category_code") if geo_sum.get("is_calibrated") else "uncalibrated"
-        if geo_sum.get("crack_count", 0) == 0:
-            geo_sev = "no_visible_damage"
+
+        photo_metrics = {
+            "has_cracks": geo_sum.get("crack_count", 0) > 0,
+            "crack_count": geo_sum.get("crack_count", 0),
+            "crack_area_px": geo_sum.get("total_crack_area_px", 0.0),
+            "surface_area_px": geo_sum.get("inspected_surface_area_px", 0.0),
+            "crack_density_pct": geo_sum.get("crack_coverage_pct", 0.0),
+            "maximum_crack_width_px": geo_sum.get("maximum_crack_width_px", 0.0),
+            "average_crack_width_px": geo_sum.get("average_crack_width_px", 0.0),
+            "maximum_crack_width_mm": geo_sum.get("maximum_crack_width_mm"),
+            "average_crack_width_mm": geo_sum.get("average_crack_width_mm"),
+            "total_crack_length_px": geo_sum.get("total_crack_length_px", 0.0),
+            "total_branch_count": geo_sum.get("total_branch_count", 0),
+            "image_width": image.width,
+            "image_height": image.height,
+            "is_calibrated": geo_sum.get("is_calibrated"),
+            "mm_per_pixel": geo_sum.get("mm_per_pixel")
+        }
+        dmg_assessment = assess_photo_damage_severity(
+            photo_metrics,
+            calibration=image.calibration if isinstance(image.calibration, dict) else None
+        )
+        geo_sum["damage_assessment"] = dmg_assessment
+        qr["damage_assessment"] = dmg_assessment
+        geo_sev = dmg_assessment["severity_code"]
 
         geo_det = Detection(
             inspection_id=insp_id,
@@ -2122,6 +2184,7 @@ def execute_geometry_calculation(
                 "mm_per_pixel": geo_sum.get("mm_per_pixel"),
                 "controlling_metric": geo_sum.get("controlling_metric"),
                 "severity_assessment": sev_info,
+                "damage_assessment": dmg_assessment,
                 "cracks": geo_res.get("cracks", [])
             },
             severity=geo_sev,
@@ -2129,9 +2192,9 @@ def execute_geometry_calculation(
             confidence=0.95,
             model_id="InfraScan Crack Geometry v1.0",
             notes=(
-                f"Crack Measurement: {geo_sum.get('crack_coverage_pct')}% coverage, {geo_sum.get('crack_count')} regions. Max width: {geo_sum.get('maximum_crack_width_mm')} mm [{sev_info.get('category')}]."
+                f"Crack Measurement: {geo_sum.get('crack_coverage_pct')}% coverage, {geo_sum.get('crack_count')} regions. Max width: {geo_sum.get('maximum_crack_width_mm')} mm [{sev_info.get('category')}]. Damage: {dmg_assessment.get('severity')}."
                 if geo_sum.get("is_calibrated")
-                else f"Crack Measurement (uncalibrated): {geo_sum.get('crack_coverage_pct')}% coverage, {geo_sum.get('crack_count')} regions. Max width: {geo_sum.get('maximum_crack_width_px')} px."
+                else f"Crack Measurement (uncalibrated): {geo_sum.get('crack_coverage_pct')}% coverage, {geo_sum.get('crack_count')} regions. Max width: {geo_sum.get('maximum_crack_width_px')} px. Damage: {dmg_assessment.get('severity')}."
             )
         )
         db.add(geo_det)
@@ -2610,6 +2673,8 @@ def calibrate_scale_endpoint(
         "crack_geometry": geo_res,
         "crackGeometry": geo_res,
         "severity_assessment": geo_res.get("summary", {}).get("severity_assessment") if geo_res else None,
+        "damage_assessment": geo_res.get("summary", {}).get("damage_assessment") if geo_res else None,
+        "damageAssessment": geo_res.get("summary", {}).get("damage_assessment") if geo_res else None,
     }
 
 
@@ -2666,6 +2731,9 @@ def delete_image_calibration_endpoint(
         "calibration": None,
         "crack_geometry": geo_res,
         "crackGeometry": geo_res,
+        "severity_assessment": geo_res.get("summary", {}).get("severity_assessment") if geo_res else None,
+        "damage_assessment": geo_res.get("summary", {}).get("damage_assessment") if geo_res else None,
+        "damageAssessment": geo_res.get("summary", {}).get("damage_assessment") if geo_res else None,
     }
 
 

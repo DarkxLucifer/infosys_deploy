@@ -307,6 +307,52 @@ def get_inspection_detail(
         "createdAt": inspection.created_at.isoformat()
     }
 
+
+@router.get("/{inspection_id}/damage-assessment")
+def get_inspection_damage_assessment_endpoint(
+    inspection_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Computes real-time multi-factor damage severity assessment across all uploaded images
+    in this inspection (calibrated or uncalibrated).
+    """
+    inspection = db.query(Inspection).filter(
+        Inspection.id == inspection_id,
+        Inspection.organization_id == current_user.organization_id
+    ).first()
+
+    if not inspection:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection not found")
+
+    images = db.query(InspectionImage).filter(
+        InspectionImage.inspection_id == inspection_id,
+        InspectionImage.is_deleted == False
+    ).order_by(InspectionImage.created_at.asc()).all()
+
+    photo_items = []
+    for img in images:
+        qr = img.quality_report or {}
+        crack_geo = qr.get("crack_geometry") if isinstance(qr, dict) else None
+        photo_items.append({
+            "id": img.id,
+            "name": img.original_filename or f"image_{img.id[:8]}",
+            "quality_report": qr,
+            "crack_geometry": crack_geo,
+            "crackGeometry": crack_geo,
+            "calibration": img.calibration,
+            "width": img.width,
+            "height": img.height,
+            "defect_type": img.active_stage2_model
+        })
+
+    from app.services.damage_assessment import assess_batch_damage_severity
+    batch_assessment = assess_batch_damage_severity(photo_items)
+    batch_assessment["inspectionId"] = inspection_id
+    batch_assessment["assetId"] = inspection.asset_id
+    return batch_assessment
+
 @router.patch("/{inspection_id}/status")
 def update_inspection_status(
     inspection_id: str,
@@ -744,7 +790,7 @@ def sign_off_inspection(
 
     unverified = [
         d for d in detections
-        if d.geometry and isinstance(d.geometry, dict) and d.geometry.get("type") not in ("image_classification", None) and not d.verified_by
+        if d.geometry and isinstance(d.geometry, dict) and d.geometry.get("type") not in ("image_classification", "crack_geometry_extraction", None) and not d.verified_by
     ]
     if unverified:
         raise HTTPException(

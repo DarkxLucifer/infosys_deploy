@@ -214,6 +214,7 @@ export function CivilEngineerDashboard() {
                 <th className="py-2.5 px-4 font-semibold">Asset</th>
                 <th className="py-2.5 px-4 font-semibold">Method & Inspector</th>
                 <th className="py-2.5 px-4 font-semibold">Photos</th>
+                <th className="py-2.5 px-4 font-semibold">Damage Severity</th>
                 <th className="py-2.5 px-4 font-semibold">Status</th>
                 <th className="py-2.5 px-4 font-semibold">Date</th>
                 <th className="py-2.5 px-4 font-semibold text-right">Action</th>
@@ -222,7 +223,7 @@ export function CivilEngineerDashboard() {
             <tbody className="divide-y divide-border">
               {reviewQueue.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-8 text-center text-muted-foreground">
+                  <td colSpan={7} className="py-8 text-center text-muted-foreground">
                     No active or pending inspections in review queue.
                   </td>
                 </tr>
@@ -246,6 +247,12 @@ export function CivilEngineerDashboard() {
                       ? "bg-success-soft text-success"
                       : "bg-secondary text-foreground";
 
+                  const sev = (item.highestProposedSeverity || "minor").toLowerCase();
+                  const sevLabel =
+                    sev === "critical" ? "Critical" :
+                    sev === "severe" ? "Severe" :
+                    sev === "moderate" ? "Moderate" : "Minor";
+
                   return (
                     <tr key={item.inspectionId} className="hover:bg-muted/40 transition-colors">
                       <td className="py-2.5 px-4">
@@ -264,6 +271,11 @@ export function CivilEngineerDashboard() {
                       </td>
                       <td className="py-2.5 px-4 font-mono font-medium">
                         {item.imagesCount !== undefined ? `${item.imagesCount} photo(s)` : `${item.findingsCount} finding(s)`}
+                      </td>
+                      <td className="py-2.5 px-4">
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-mono uppercase font-bold border border-foreground/30 bg-background text-foreground">
+                          {sevLabel}
+                        </span>
                       </td>
                       <td className="py-2.5 px-4">
                         <span className={`inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full ${statusColor}`}>
@@ -286,6 +298,39 @@ export function CivilEngineerDashboard() {
               )}
             </tbody>
           </table>
+        </div>
+      </div>
+
+      {/* Damage Severity Distribution Breakdown (AASHTO / ASTM & PDF §10) */}
+      <div className="p-5 rounded-xl border border-border bg-card shadow-xs space-y-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-sm font-bold text-foreground">Damage Severity Distribution</h2>
+            <p className="text-xs text-muted-foreground">Portfolio-wide crack opening & structural distress classification</p>
+          </div>
+          <span className="text-[11px] font-mono text-muted-foreground">AASHTO / ASTM C856 & PDF §10</span>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1">
+          <div className="p-3 rounded-xl bg-background border border-foreground/30 shadow-xs">
+            <span className="text-[10px] text-muted-foreground font-bold block uppercase tracking-wider">Critical</span>
+            <span className="text-xl font-bold font-mono text-foreground">{data.severityDistribution?.aiProposed?.critical || 0}</span>
+            <span className="text-[10px] text-muted-foreground block">&gt; 8.0 mm / &gt; 9% density</span>
+          </div>
+          <div className="p-3 rounded-xl bg-background border border-foreground/30 shadow-xs">
+            <span className="text-[10px] text-muted-foreground font-bold block uppercase tracking-wider">Severe</span>
+            <span className="text-xl font-bold font-mono text-foreground">{data.severityDistribution?.aiProposed?.severe || 0}</span>
+            <span className="text-[10px] text-muted-foreground block">5.0 - 8.0 mm / 5 - 9% density</span>
+          </div>
+          <div className="p-3 rounded-xl bg-background border border-foreground/30 shadow-xs">
+            <span className="text-[10px] text-muted-foreground font-bold block uppercase tracking-wider">Moderate</span>
+            <span className="text-xl font-bold font-mono text-foreground">{data.severityDistribution?.aiProposed?.moderate || 0}</span>
+            <span className="text-[10px] text-muted-foreground block">3.0 - 5.0 mm / 2 - 5% density</span>
+          </div>
+          <div className="p-3 rounded-xl bg-background border border-foreground/30 shadow-xs">
+            <span className="text-[10px] text-muted-foreground font-bold block uppercase tracking-wider">Minor</span>
+            <span className="text-xl font-bold font-mono text-foreground">{data.severityDistribution?.aiProposed?.minor || 0}</span>
+            <span className="text-[10px] text-muted-foreground block">&lt; 3.0 mm / &lt; 2% density</span>
+          </div>
         </div>
       </div>
 

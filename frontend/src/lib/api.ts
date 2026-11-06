@@ -2848,6 +2848,18 @@ export const apiService = {
     return res.json();
   },
 
+  async getInspectionDamageAssessment(inspectionId: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/inspections/${inspectionId}/damage-assessment`, {
+      headers: authHeaders(),
+      credentials: "include",
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail?.message || err.detail || "Failed to load inspection damage assessment");
+    }
+    return res.json();
+  },
+
   async deleteImageCalibration(imageId: string, inspectionId?: string | null): Promise<any> {
     const url = inspectionId
       ? `${API_BASE_URL}/inspections/${inspectionId}/images/${imageId}/calibrate`
