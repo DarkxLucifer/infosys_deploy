@@ -4,7 +4,7 @@ from app.config import settings
 
 connect_args = {}
 if settings.DATABASE_URL.startswith("sqlite"):
-    connect_args = {"check_same_thread": False, "timeout": 30}
+    connect_args = {"check_same_thread": False, "timeout": 60}
 
 engine = create_engine(
     settings.DATABASE_URL,
@@ -20,7 +20,10 @@ def set_sqlite_pragma(dbapi_connection, connection_record):
         try:
             cursor = dbapi_connection.cursor()
             cursor.execute("PRAGMA journal_mode=WAL")
-            cursor.execute("PRAGMA busy_timeout=30000")
+            cursor.execute("PRAGMA synchronous=NORMAL")
+            cursor.execute("PRAGMA busy_timeout=60000")
+            cursor.execute("PRAGMA cache_size=-64000")
+            cursor.execute("PRAGMA temp_store=MEMORY")
             cursor.close()
         except Exception:
             pass

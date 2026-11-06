@@ -501,6 +501,15 @@ def run_ai_analysis_for_inspection(inspection: Inspection, db: Session, user: Us
     cracks_found = 0
 
     for img in valid_images:
+        qr = img.quality_report or {}
+        # Reuse existing classification if already processed at upload time
+        if qr.get("ai_classification"):
+            pred = qr["ai_classification"]
+            if pred and pred.get("has_crack"):
+                cracks_found += 1
+            results.append({"imageId": img.id, "prediction": pred, "cached": True})
+            continue
+
         target_path = None
         candidates = [
             img.processed_path,

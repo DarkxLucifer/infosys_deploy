@@ -61,13 +61,29 @@ async def lifespan(app: FastAPI):
     finally:
         db.close()
 
-    # Load & Warm Up AI Model Service (InfraScan Model v1.0 - ResNet50)
+    # Load & Warm Up AI Model Service (InfraScan Model v1.0 - ResNet-18)
     try:
         from app.services.classifier import get_classifier
         clf = get_classifier()
         logger.info("InfraScan AI Model initialized: loaded=%s, engine=%s, version=%s", clf.is_loaded, clf.engine_type, clf.metadata.get("project_model_version"))
     except Exception as e:
         logger.error("Failed initializing classifier in lifespan: %s", e)
+
+    # Preload RF-DETR defect detector at startup
+    try:
+        from app.services.rfdetr_detector import get_rfdetr_detector
+        rfdetr = get_rfdetr_detector()
+        logger.info("RF-DETR Medium initialized at startup: loaded=%s", rfdetr is not None)
+    except Exception as e:
+        logger.warning("RF-DETR initialization skipped in lifespan: %s", e)
+
+    # Preload UNet crack segmentation model at startup
+    try:
+        from app.services.unet_segmentor import get_unet_segmentor
+        unet = get_unet_segmentor()
+        logger.info("UNet Crack Segmentor initialized at startup: loaded=%s", unet is not None)
+    except Exception as e:
+        logger.warning("UNet initialization skipped in lifespan: %s", e)
 
     yield
 

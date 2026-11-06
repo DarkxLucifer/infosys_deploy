@@ -1145,28 +1145,9 @@ def list_inspection_images(
         if not is_mgmt:
             item["qualityReport"] = img.quality_report
             item["quality_report"] = img.quality_report
-            if img.quality_report and isinstance(img.quality_report, dict) and "ai_classification" in img.quality_report:
-                item["aiClassification"] = img.quality_report["ai_classification"]
-                item["ai_classification"] = img.quality_report["ai_classification"]
-            else:
-                # Auto-run AI classification if missing from quality report
-                target_path = None
-                for candidate in [img.processed_path, img.original_path, os.path.join(UPLOAD_DIR, img.filename)]:
-                    if candidate and os.path.exists(candidate):
-                        target_path = candidate
-                        break
-                if target_path:
-                    pred = run_and_persist_ai_classification(
-                        image=img,
-                        target_path=target_path,
-                        db=db,
-                        user_id=current_user.id,
-                        inspection_id=inspection.id
-                    )
-                    if pred:
-                        db.commit()
-                        item["aiClassification"] = pred
-                        item["ai_classification"] = pred
+            if img.quality_report and isinstance(img.quality_report, dict):
+                item["aiClassification"] = img.quality_report.get("ai_classification")
+                item["ai_classification"] = img.quality_report.get("ai_classification")
 
             # Also check Detection table for ai_model detections
             ai_det = db.query(Detection).filter(
@@ -1541,27 +1522,9 @@ def get_image_details(
         response["qualityReport"] = image.quality_report
         response["quality_report"] = image.quality_report
 
-        if image.quality_report and isinstance(image.quality_report, dict) and "ai_classification" in image.quality_report:
-            response["aiClassification"] = image.quality_report["ai_classification"]
-            response["ai_classification"] = image.quality_report["ai_classification"]
-        else:
-            target_path = None
-            for candidate in [image.processed_path, image.original_path, os.path.join(UPLOAD_DIR, image.filename)]:
-                if candidate and os.path.exists(candidate):
-                    target_path = candidate
-                    break
-            if target_path:
-                pred = run_and_persist_ai_classification(
-                    image=image,
-                    target_path=target_path,
-                    db=db,
-                    user_id=current_user.id,
-                    inspection_id=image.inspection_id
-                )
-                if pred:
-                    db.commit()
-                    response["aiClassification"] = pred
-                    response["ai_classification"] = pred
+        if image.quality_report and isinstance(image.quality_report, dict):
+            response["aiClassification"] = image.quality_report.get("ai_classification")
+            response["ai_classification"] = image.quality_report.get("ai_classification")
 
         ai_det = db.query(Detection).filter(
             Detection.image_id == image.id,
@@ -1672,54 +1635,6 @@ def get_image_file_variant(
 
     proc_target = image.processed_path if (image.processed_path and os.path.exists(image.processed_path)) else image.original_path
 
-    # On-demand RF-DETR generation (primary model) for cracked images
-    if is_crack_defect and not has_rfdetr and not model_fallback and proc_target and os.path.exists(proc_target):
-        try:
-            from app.services.rfdetr_detector import get_rfdetr_detector
-            rfdetr_detector = get_rfdetr_detector()
-            rfdetr_res = rfdetr_detector.detect(
-                image_input=proc_target,
-                threshold=0.20,
-                save_annotated_path=rfdetr_file,
-                save_thumbnail_path=rfdetr_thumb,
-                resnet_confidence=p_crack
-            )
-            qr_updated = dict(image.quality_report or {})
-            qr_updated["rfdetr_detection"] = rfdetr_res
-            if rfdetr_res and rfdetr_res.get("has_defect"):
-                qr_updated["active_stage2_model"] = "rfdetr"
-                qr_updated["model_fallback"] = False
-                has_rfdetr = os.path.exists(rfdetr_file)
-            else:
-                qr_updated["active_stage2_model"] = "unet_fallback"
-                qr_updated["model_fallback"] = True
-                model_fallback = True
-            image.quality_report = qr_updated
-            db.commit()
-        except Exception as rfdetr_err:
-            logger.warning("On-demand RF-DETR generation error in get_image_file_variant for %s: %s", image.id, rfdetr_err)
-
-    # On-demand UNet generation for cracked images
-    if is_crack_defect and not has_unet and proc_target and os.path.exists(proc_target):
-        try:
-            from app.services.unet_segmentor import get_unet_segmentor
-            segmentor = get_unet_segmentor()
-            mm_scale = image.calibration.get("mm_per_pixel") if (image.calibration and isinstance(image.calibration, dict)) else None
-            unet_res = segmentor.segment(
-                image_input=proc_target,
-                threshold=0.5,
-                save_overlay_path=unet_file,
-                save_mask_path=unet_mask,
-                mm_per_pixel=mm_scale
-            )
-            qr_updated = dict(image.quality_report or {})
-            qr_updated["unet_segmentation"] = unet_res
-            image.quality_report = qr_updated
-            db.commit()
-            has_unet = os.path.exists(unet_file)
-        except Exception as unet_err:
-            logger.warning("On-demand UNet generation error in get_image_file_variant for %s: %s", image.id, unet_err)
-
     target_path = image.original_path
 
     if variant in ("rfdetr", "rdd2022"):
@@ -1727,6 +1642,8 @@ def get_image_file_variant(
             target_path = rfdetr_file
         elif has_unet:
             target_path = unet_file
+        elif image.processed_path and os.path.exists(image.processed_path):
+            target_path = image.processed_path
         else:
             target_path = image.original_path
 
