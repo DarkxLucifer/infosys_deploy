@@ -136,10 +136,12 @@ export function AssetDetailPage({ assetId }: { assetId: string }) {
               ? "awaiting-review"
               : d.status === "reviewed"
               ? "reviewed"
-              : "in-progress",
+              : d.status || "in-progress",
           startedAt: d.inspectionDate || d.createdAt,
           imageCount: d.imageCount ?? 0,
           findingsCount: d.findingsCount ?? 0,
+          topSeverity: d.topSeverity || (d.findingsCount > 0 ? "moderate" : "no_visible_damage"),
+          primaryDefect: d.primaryDefect || (d.findingsCount > 0 ? "Defect recorded" : "Sound concrete"),
           findings: [],
         });
       }
@@ -420,7 +422,42 @@ export function AssetDetailPage({ assetId }: { assetId: string }) {
                 <TableCell className="hidden text-xs text-muted-foreground lg:table-cell">
                   {fmtDateTime(inspection.startedAt)}
                 </TableCell>
-                <TableCell className="tabular-nums font-mono">{inspection.findingsCount ?? 0}</TableCell>
+                <TableCell>
+                  <div className="flex flex-col gap-0.5">
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-mono text-xs font-semibold tabular-nums text-foreground">
+                        {inspection.findingsCount ?? 0}
+                      </span>
+                      <span className="text-[11px] text-muted-foreground">
+                        {(inspection.findingsCount === 1 ? "defect" : "defects")}
+                      </span>
+                      {inspection.topSeverity && inspection.topSeverity !== "no_visible_damage" ? (
+                        <span
+                          className={`text-[10px] px-1.5 py-0.2 rounded font-mono uppercase font-semibold border ${
+                            inspection.topSeverity === "critical"
+                              ? "border-red-600 bg-red-950/20 text-red-500"
+                              : inspection.topSeverity === "severe"
+                              ? "border-rose-500 bg-rose-500/10 text-rose-500"
+                              : inspection.topSeverity === "moderate"
+                              ? "border-amber-500 bg-amber-500/10 text-amber-500"
+                              : "border-yellow-500 bg-yellow-500/10 text-yellow-500"
+                          }`}
+                        >
+                          {inspection.topSeverity}
+                        </span>
+                      ) : (
+                        <span className="text-[10px] px-1.5 py-0.2 rounded font-mono uppercase border border-emerald-500/30 bg-emerald-500/10 text-emerald-500">
+                          Sound
+                        </span>
+                      )}
+                    </div>
+                    {inspection.primaryDefect && (
+                      <span className="text-[11px] text-muted-foreground truncate max-w-44">
+                        {inspection.primaryDefect}
+                      </span>
+                    )}
+                  </div>
+                </TableCell>
                 <TableCell>
                   <InspectionStatusBadge status={inspection.status} />
                 </TableCell>

@@ -47,12 +47,13 @@ const kindOptions: { value: AssetKind; label: string }[] = [
   { value: "tunnel", label: "Tunnel" },
   { value: "retaining-wall", label: "Retaining wall" },
   { value: "building", label: "Structure deck" },
+  { value: "dam", label: "Spillway Dam" },
 ];
 
 type KindFilter = "all" | AssetKind;
 
 export function AssetsPage() {
-  const { state, registerAsset } = useAppStore();
+  const { registerAsset } = useAppStore();
   const { navigate } = useDashboardNavigation();
   const { user: authUser } = useAuth();
   const [liveAssets, setLiveAssets] = useState<any[]>([]);
@@ -85,34 +86,26 @@ export function AssetsPage() {
     fetchLiveAssets();
   }, []);
 
-  // Map live DB assets directly (no mock fallback injection)
+  // Map live DB assets directly
   const combinedAssets = useMemo(() => {
     return liveAssets.map((a: any) => ({
       id: a.id,
       name: a.name,
       kind: (a.asset_type || a.assetType || "bridge").toLowerCase() as AssetKind,
       material: a.material || "Reinforced concrete",
-      location: a.address || `GPS: ${a.latitude?.toFixed(4)}, ${a.longitude?.toFixed(4)}`,
+      location: a.address || (a.latitude ? `GPS: ${a.latitude?.toFixed(4)}, ${a.longitude?.toFixed(4)}` : "Site location"),
       builtYear: a.construction_year || a.constructionYear || 2018,
-      condition: (a.importance === "critical" ? "poor" : a.importance === "high" ? "fair" : "good") as AssetCondition,
-      lastInspection: a.created_at || new Date().toISOString(),
+      condition: (a.condition || (a.importance === "critical" ? "poor" : a.importance === "high" ? "fair" : "good")) as AssetCondition,
+      lastInspection: a.lastInspectionDate || a.createdAt || new Date().toISOString(),
+      findingsCount: a.findingsCount ?? 0,
+      inspectionsCount: a.inspectionsCount ?? 0,
+      topSeverity: a.topSeverity,
       assignedInspectorId: a.assignedInspectorId,
       assignedInspectorName: a.assignedInspectorName,
       assignedInspectorEmail: a.assignedInspectorEmail,
       spanLengthM: undefined,
     }));
   }, [liveAssets]);
-
-  const openFindingCount = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const inspection of state.inspections) {
-      const pending = inspection.findings.filter((f) => f.review === "pending").length;
-      if (pending > 0) {
-        counts.set(inspection.assetId, (counts.get(inspection.assetId) ?? 0) + pending);
-      }
-    }
-    return counts;
-  }, [state.inspections]);
 
   const rows = useMemo(() => {
     const text = query.trim().toLowerCase();
@@ -182,7 +175,7 @@ export function AssetsPage() {
         </Select>
         <span className="ml-auto text-xs text-muted-foreground flex items-center gap-1.5">
           {loading && <Loader2 className="size-3 animate-spin text-primary" />}
-          {rows.length} of {liveAssets.length > 0 ? liveAssets.length : state.assets.length} assets
+          {rows.length} of {combinedAssets.length} assets
         </span>
       </div>
 
@@ -207,7 +200,7 @@ export function AssetsPage() {
                 <TableHead className="hidden md:table-cell">Type</TableHead>
                 <TableHead className="hidden xl:table-cell">Material</TableHead>
                 <TableHead>Condition</TableHead>
-                <TableHead className="hidden lg:table-cell">Open findings</TableHead>
+                <TableHead className="hidden lg:table-cell">Findings</TableHead>
                 <TableHead className="hidden lg:table-cell">Assigned Inspector</TableHead>
                 <TableHead className="hidden lg:table-cell">Last inspection</TableHead>
                 <TableHead className="pr-5 text-right">Actions</TableHead>
@@ -236,8 +229,31 @@ export function AssetsPage() {
                   <TableCell>
                     <ConditionBadge condition={asset.condition} />
                   </TableCell>
-                  <TableCell className="hidden tabular-nums lg:table-cell">
-                    {openFindingCount.get(asset.id) ?? 0}
+                  <TableCell className="hidden lg:table-cell">
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-semibold font-mono text-xs tabular-nums text-foreground">
+                        {asset.findingsCount}
+                      </span>
+                      {asset.topSeverity && asset.topSeverity !== "no_visible_damage" ? (
+                        <span
+                          className={`text-[10px] px-1.5 py-0.5 rounded font-mono uppercase font-semibold border ${
+                            asset.topSeverity === "critical"
+                              ? "border-red-600 bg-red-950/20 text-red-500"
+                              : asset.topSeverity === "severe"
+                              ? "border-rose-500 bg-rose-500/10 text-rose-500"
+                              : asset.topSeverity === "moderate"
+                              ? "border-amber-500 bg-amber-500/10 text-amber-500"
+                              : "border-yellow-500 bg-yellow-500/10 text-yellow-500"
+                          }`}
+                        >
+                          {asset.topSeverity}
+                        </span>
+                      ) : (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded font-mono uppercase border border-emerald-500/30 bg-emerald-500/10 text-emerald-500">
+                          Sound
+                        </span>
+                      )}
+                    </div>
                   </TableCell>
                   <TableCell className="hidden text-xs lg:table-cell">
                     {asset.assignedInspectorName ? (

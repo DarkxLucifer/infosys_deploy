@@ -34,7 +34,8 @@ export type AssetKind =
   | "road"
   | "tunnel"
   | "retaining-wall"
-  | "building";
+  | "building"
+  | "dam";
 
 export type AssetCondition = "good" | "fair" | "poor";
 
@@ -209,6 +210,7 @@ export const assetKindLabels: Record<AssetKind, string> = {
   tunnel: "Tunnel",
   "retaining-wall": "Retaining wall",
   building: "Structure deck",
+  dam: "Reservoir Dam",
 };
 
 export const conditionLabels: Record<AssetCondition, string> = {

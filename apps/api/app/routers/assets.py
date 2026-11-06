@@ -232,6 +232,40 @@ def list_assets(
     for a in assets:
         insp_id = a.assigned_inspector_id or (a.inspections[0].inspector_id if a.inspections else None)
         insp_user = a.assigned_inspector or (a.inspections[0].inspector if a.inspections else None)
+
+        inspections = sorted(a.inspections, key=lambda i: (i.inspection_date or i.created_at), reverse=True) if a.inspections else []
+        latest_insp = inspections[0] if inspections else None
+
+        findings_count = db.query(Detection).join(Inspection).filter(
+            Inspection.asset_id == a.id,
+            Inspection.organization_id == current_user.organization_id
+        ).count()
+
+        top_sev = None
+        condition = "good"
+        if latest_insp:
+            dets = db.query(Detection).filter(Detection.inspection_id == latest_insp.id).all()
+            if dets:
+                for s in ["critical", "severe", "moderate", "minor", "no_visible_damage"]:
+                    if any(d.severity == s for d in dets):
+                        top_sev = s
+                        break
+            if latest_insp.notes and "[Certified Severity]:" in latest_insp.notes:
+                for line in latest_insp.notes.splitlines():
+                    if "[Certified Severity]:" in line:
+                        top_sev = line.split(":", 1)[1].strip().lower()
+
+            if top_sev in ("critical", "severe"):
+                condition = "poor"
+            elif top_sev == "moderate":
+                condition = "fair"
+            elif top_sev in ("minor", "no_visible_damage"):
+                condition = "good"
+        elif a.importance == "critical":
+            condition = "poor"
+        elif a.importance == "high":
+            condition = "fair"
+
         items.append({
             "id": a.id,
             "name": a.name,
@@ -248,7 +282,14 @@ def list_assets(
             "assignedInspectorId": insp_id,
             "assignedInspectorName": insp_user.name if insp_user else None,
             "assignedInspectorEmail": insp_user.email if insp_user else None,
-            "createdAt": a.created_at.isoformat() if a.created_at else None
+            "createdAt": a.created_at.isoformat() if a.created_at else None,
+            "inspectionsCount": len(inspections),
+            "findingsCount": findings_count,
+            "topSeverity": top_sev,
+            "condition": condition,
+            "lastInspectionDate": latest_insp.inspection_date.isoformat() if (latest_insp and latest_insp.inspection_date) else None,
+            "latestInspectionId": latest_insp.id if latest_insp else None,
+            "latestInspectionStatus": latest_insp.status if latest_insp else None
         })
 
     return {
@@ -409,6 +450,24 @@ def get_asset_detail(
         ).count()
         findings_count = db.query(Detection).filter(Detection.inspection_id == i.id).count()
         inspector = db.query(User).filter(User.id == i.inspector_id).first()
+
+        dets = db.query(Detection).filter(Detection.inspection_id == i.id).all()
+        top_sev = "no_visible_damage"
+        primary_defect = "Sound Surface" if not dets else (dets[0].defect_type or "defect").replace("_", " ").title()
+        if dets:
+            for s in ["critical", "severe", "moderate", "minor"]:
+                if any(d.severity == s for d in dets):
+                    top_sev = s
+                    for d in dets:
+                        if d.severity == s:
+                            primary_defect = (d.defect_type or "defect").replace("_", " ").title()
+                            break
+                    break
+        if i.notes and "[Certified Severity]:" in i.notes:
+            for line in i.notes.splitlines():
+                if "[Certified Severity]:" in line:
+                    top_sev = line.split(":", 1)[1].strip().lower()
+
         formatted_inspections.append({
             "id": i.id,
             "title": f"{asset.name} - {(i.method or 'walkdown').capitalize()} Survey",
@@ -420,6 +479,8 @@ def get_asset_detail(
             "inspectorName": inspector.name if inspector else "Field Inspector",
             "imageCount": img_count,
             "findingsCount": findings_count,
+            "topSeverity": top_sev,
+            "primaryDefect": primary_defect,
             "notes": i.notes
         })
 
