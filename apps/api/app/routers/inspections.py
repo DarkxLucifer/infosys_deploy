@@ -648,6 +648,7 @@ def submit_inspection_for_review(
         User.role.in_(["civil-engineer", "engineer"]),
         User.status == "active"
     ).all()
+    asset = db.query(Asset).filter(Asset.id == inspection.asset_id).first()
     has_cracks = analysis_summary.get("cracks_found", 0) > 0
     sub_level = "high" if has_cracks else "low"
     for eng in engineers:

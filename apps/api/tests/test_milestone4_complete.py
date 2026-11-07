@@ -267,3 +267,87 @@ def test_notifications_and_alerts_full_lifecycle():
     # Mark all read
     res_all = client.post("/api/v1/notifications/read-all", headers=headers_maint)
     assert res_all.status_code == 200
+
+
+def test_infrastructure_manager_can_confirm_image_warning():
+    """
+    Validates Section 3.1 & 7:
+    Infrastructure Manager can confirm image quality warnings (e.g. duplicate warning on asset)
+    via POST /api/v1/images/{image_id}/confirm-warning without being blocked by unreviewed imagery gate.
+    Maintenance role is rejected with 403 ACCESS_DENIED.
+    """
+    org_id, users, asset_id = setup_test_org_and_users("mgr_warn")
+    db = TestingSessionLocal()
+
+    # Create an unreviewed inspection
+    insp = Inspection(
+        id="INSP-M4-WARN-01",
+        organization_id=org_id,
+        asset_id=asset_id,
+        inspector_id=users["inspector"],
+        inspection_date=datetime.now(timezone.utc),
+        due_date=datetime.now(timezone.utc) + timedelta(days=7),
+        status="in_progress",
+        notes="Unreviewed inspection test for warning confirmation"
+    )
+    db.add(insp)
+
+    # Add an image with duplicate warning
+    img = InspectionImage(
+        id="IMG-M4-WARN-01",
+        organization_id=org_id,
+        inspection_id=insp.id,
+        uploader_id=users["inspector"],
+        filename="field_dup_photo.jpg",
+        original_path="dummy_nonexistent.jpg",
+        sha256="abcdef1234567890abcdef1234567890",
+        phash="0123456789abcdef",
+        width=1920,
+        height=1080,
+        file_size=204800,
+        status="warned",
+        quality_status="warning",
+        quality_report={
+            "overall": "warning",
+            "reason": "Identical copy previously recorded on this asset in inspection PREV-INSP-01.",
+            "checks": [
+                {
+                    "key": "duplicate",
+                    "label": "Duplicate Check",
+                    "status": "warn",
+                    "reason": "Identical copy previously recorded on this asset in inspection PREV-INSP-01."
+                }
+            ],
+            "metrics": {"sha256": "abcdef1234567890abcdef1234567890"}
+        }
+    )
+    db.add(img)
+    db.commit()
+    img_id = img.id
+    db.close()
+
+    token_maint = create_access_token({"sub": users["maintenance"], "org": org_id, "role": "maintenance"})
+    headers_maint = {"Authorization": f"Bearer {token_maint}"}
+
+    token_mgr = create_access_token({"sub": users["manager"], "org": org_id, "role": "manager"})
+    headers_mgr = {"Authorization": f"Bearer {token_mgr}"}
+
+    # 1. Maintenance role is rejected
+    res_maint_block = client.post(f"/api/v1/images/{img_id}/confirm-warning", headers=headers_maint)
+    assert res_maint_block.status_code == 403
+    assert res_maint_block.json()["detail"]["code"] == "ACCESS_DENIED"
+
+    # 2. Infrastructure Manager confirms the warning successfully
+    res_mgr_confirm = client.post(f"/api/v1/images/{img_id}/confirm-warning", headers=headers_mgr)
+    assert res_mgr_confirm.status_code == 200, f"Manager confirm failed: {res_mgr_confirm.text}"
+    conf_data = res_mgr_confirm.json()
+    assert conf_data["status"] == "accepted"
+    assert conf_data["warningConfirmed"] is True
+
+    # 3. Verify in database
+    db = TestingSessionLocal()
+    refreshed_img = db.query(InspectionImage).filter(InspectionImage.id == img_id).first()
+    assert refreshed_img.quality_status == "accepted"
+    assert refreshed_img.warning_confirmed_by == users["manager"]
+    assert refreshed_img.warning_confirmed_at is not None
+    db.close()

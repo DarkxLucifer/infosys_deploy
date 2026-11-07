@@ -126,6 +126,10 @@ def enforce_image_visibility(
             detail={"code": "ACCESS_DENIED", "message": "Cross-organization image access denied."}
         )
 
+    # If the user is the explicit uploader of this image, allow them visibility to inspect what they uploaded
+    if image.uploader_id and image.uploader_id == user.id:
+        return
+
     # Manager / Maintenance: strictly forbidden from quality reports or intermediate processed copies
     if user_role in ("manager", "maintenance"):
         if is_quality_or_processed:
@@ -147,7 +151,7 @@ def enforce_image_visibility(
             )
 
     # Inspector isolation: can only view own inspection images
-    if user_role == "inspector" and inspection and inspection.inspector_id != user.id:
+    if user_role == "inspector" and inspection and inspection.inspector_id != user.id and image.uploader_id != user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={"code": "ACCESS_DENIED", "message": "Inspectors can only access imagery from their assigned inspections."}
@@ -2222,14 +2226,18 @@ def execute_geometry_calculation(
 
 @router.post("/images/{image_id}/quality/confirm")
 @router.post("/images/{image_id}/confirm-warning")
+@router.post("/inspections/{inspection_id}/images/{image_id}/confirm-warning")
+@router.post("/inspections/{inspection_id}/images/{image_id}/quality/confirm")
 def confirm_warning_endpoint(
     image_id: str,
+    inspection_id: Optional[str] = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
     Section 3.1 & 7: Explicit 'Continue anyway' confirmation.
     Stores user ID and timestamp, transitions image to 'accepted', and triggers preprocessing.
+    Authorized for field inspectors, civil engineers, infrastructure managers, and administrators.
     """
     image = db.query(InspectionImage).filter(
         InspectionImage.id == image_id,
@@ -2240,12 +2248,59 @@ def confirm_warning_endpoint(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image not found")
 
     inspection = db.query(Inspection).filter(Inspection.id == image.inspection_id).first()
-    enforce_image_visibility(current_user, image, inspection)
+    user_role = (current_user.role or "").lower()
+    allowed_confirm_roles = {
+        "admin", "administrator",
+        "manager", "infrastructure-manager", "infrastructure_manager",
+        "engineer", "civil-engineer", "civil_engineer",
+        "inspector", "field-inspector", "field_inspector", "lead_inspector"
+    }
+    if user_role not in allowed_confirm_roles:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "ACCESS_DENIED",
+                "message": "Only inspectors, civil engineers, managers, and administrators can confirm image quality warnings."
+            }
+        )
+
+    if user_role in ("inspector", "field-inspector", "field_inspector", "lead_inspector"):
+        if inspection and inspection.inspector_id and inspection.inspector_id != current_user.id and image.uploader_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "code": "ACCESS_DENIED",
+                    "message": "Inspectors can only confirm warnings for their assigned inspections or uploaded imagery."
+                }
+            )
+
+    if inspection and inspection.status in ("reported", "closed"):
+        raise HTTPException(
+            status_code=status.HTTP_423_LOCKED,
+            detail={
+                "code": "IMAGE_SET_LOCKED",
+                "message": f"Inspection {inspection.id} is in status '{inspection.status}'. The image set is sealed and cannot be modified."
+            }
+        )
 
     image.quality_status = "accepted"
     image.status = "valid"
     image.warning_confirmed_by = current_user.id
     image.warning_confirmed_at = datetime.now(timezone.utc)
+
+    # Update quality report checks if warning existed
+    qr = dict(image.quality_report or {})
+    qr["overall"] = "accepted"
+    qr["warning_confirmed"] = True
+    qr["warning_confirmed_by"] = current_user.id
+    qr["warning_confirmed_at"] = image.warning_confirmed_at.isoformat()
+    if "checks" in qr and isinstance(qr["checks"], list):
+        for c in qr["checks"]:
+            if isinstance(c, dict) and c.get("status") == "warn":
+                c["confirmed"] = True
+                c["status"] = "pass"
+                c["reason"] = f"{c.get('reason', '')} (Confirmed by {current_user.name or current_user.email})".strip()
+    image.quality_report = qr
 
     # Start preprocessing after confirmation
     if os.path.exists(image.original_path):
@@ -2403,8 +2458,10 @@ def confirm_warning_endpoint(
 # ─── Preprocessing Retry Endpoint ─────────────────────────────────────────────
 
 @router.post("/images/{image_id}/processing/retry")
+@router.post("/inspections/{inspection_id}/images/{image_id}/processing/retry")
 def retry_processing_endpoint(
     image_id: str,
+    inspection_id: Optional[str] = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -2418,7 +2475,24 @@ def retry_processing_endpoint(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image not found")
 
     inspection = db.query(Inspection).filter(Inspection.id == image.inspection_id).first()
-    enforce_image_visibility(current_user, image, inspection)
+    user_role = (current_user.role or "").lower()
+    allowed_retry_roles = {
+        "admin", "administrator",
+        "manager", "infrastructure-manager", "infrastructure_manager",
+        "engineer", "civil-engineer", "civil_engineer",
+        "inspector", "field-inspector", "field_inspector", "lead_inspector"
+    }
+    if user_role not in allowed_retry_roles:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "ACCESS_DENIED", "message": "Only inspectors, civil engineers, managers, and administrators can retry preprocessing."}
+        )
+    if user_role in ("inspector", "field-inspector", "field_inspector", "lead_inspector"):
+        if inspection and inspection.inspector_id and inspection.inspector_id != current_user.id and image.uploader_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={"code": "ACCESS_DENIED", "message": "Inspectors can only retry preprocessing for their assigned inspections or uploaded imagery."}
+            )
 
     if not os.path.exists(image.original_path):
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Original image file missing from storage.")
