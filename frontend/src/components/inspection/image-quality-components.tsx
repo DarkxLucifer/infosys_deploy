@@ -1148,11 +1148,23 @@ export function ImageDetailsDrawer({
     if (photo.calibration !== undefined || photo.crack_geometry || photo.crackGeometry || photo.damage_assessment || photo.damageAssessment || photo.version) {
       setDetails((prev: any) => {
         if (!prev) return prev;
+        const calib = photo.calibration !== undefined ? photo.calibration : prev.calibration;
+        const geo = photo.crack_geometry || photo.crackGeometry || prev.crack_geometry || prev.crackGeometry;
         return {
           ...prev,
-          calibration: photo.calibration !== undefined ? photo.calibration : prev.calibration,
-          crack_geometry: photo.crack_geometry || photo.crackGeometry || prev.crack_geometry,
-          crackGeometry: photo.crackGeometry || photo.crack_geometry || prev.crackGeometry,
+          calibration: calib,
+          crack_geometry: geo,
+          crackGeometry: geo,
+          qualityReport: {
+            ...(prev.qualityReport || {}),
+            calibration: calib,
+            crack_geometry: geo,
+          },
+          quality_report: {
+            ...(prev.quality_report || {}),
+            calibration: calib,
+            crack_geometry: geo,
+          },
           damage_assessment: photo.damage_assessment || photo.damageAssessment || prev.damage_assessment,
           damageAssessment: photo.damageAssessment || photo.damage_assessment || prev.damageAssessment,
         };
@@ -2158,6 +2170,7 @@ export function ImageDetailsDrawer({
             {/* TAB 7: Crack Geometry Extraction (Surface Area, Coverage %, Centerlines & Widths) */}
             <TabsContent value="geometry" className="space-y-4">
               <CrackGeometrySection
+                key={`${photo?.id}-${photo?.calibration?.mm_per_pixel || details?.calibration?.mm_per_pixel || 'uncal'}-${photo?.version || ''}`}
                 photo={photo}
                 details={details}
                 inspectionId={photo?.inspection_id || photo?.inspectionId}
@@ -3157,15 +3170,29 @@ export function SessionDamageAssessmentCard({
     const gateThreshold = typeof aiCls?.threshold === "number" ? aiCls.threshold : 0.80;
     const isCrackDefect = crackProb !== null ? crackProb >= gateThreshold : Boolean(aiCls?.has_crack);
 
-    const geo = isCrackDefect ? (photo.crackGeometry || photo.crack_geometry || photo.quality_report?.crack_geometry || photo.qualityReport?.crack_geometry) : null;
+    const calibCandidates = [
+      photo.calibration,
+      photo.qualityReport?.calibration,
+      photo.quality_report?.calibration,
+    ].filter(Boolean);
+    const calib =
+      calibCandidates.find((c: any) => c?.calibrated || (c?.mm_per_pixel && c.mm_per_pixel > 0) || (c?.mm_per_px && c.mm_per_px > 0)) ||
+      calibCandidates[0] ||
+      {};
+    const geoCandidates = [
+      photo.crackGeometry,
+      photo.crack_geometry,
+      photo.quality_report?.crack_geometry,
+      photo.qualityReport?.crack_geometry,
+    ].filter((g: any) => g && g.summary);
+    const geo = isCrackDefect ? (geoCandidates.find((g: any) => g?.summary?.is_calibrated) || geoCandidates[0] || null) : null;
     const summary = geo?.summary || {};
-    const calib = photo.calibration || photo.qualityReport?.calibration || {};
     const unet = isCrackDefect ? (photo.unetSegmentation || photo.unet_segmentation || photo.qualityReport?.unet_segmentation || photo.quality_report?.unet_segmentation) : null;
     const rfdetr = isCrackDefect ? (photo.rfdetrDetection || photo.rfdetr_detection || photo.qualityReport?.rfdetr_detection || photo.quality_report?.rfdetr_detection) : null;
     const dmg = isCrackDefect ? (photo.damageAssessment || photo.damage_assessment || photo.qualityReport?.damage_assessment || photo.quality_report?.damage_assessment || summary.damage_assessment) : null;
 
-    const isCalibrated = Boolean(calib.is_calibrated || summary.is_calibrated || calib.calibrated);
-    const scale = Number(calib.scale_factor_mm_per_pixel || calib.mm_per_pixel || summary.calibration_mm_per_pixel || summary.mm_per_pixel || 0);
+    const scale = Number(calib.scale_factor_mm_per_pixel || calib.mm_per_pixel || calib.mm_per_px || summary.calibration_mm_per_pixel || summary.mm_per_pixel || 0);
+    const isCalibrated = Boolean((calib.is_calibrated || summary.is_calibrated || calib.calibrated) && scale > 0);
 
     const crackCount = isCrackDefect ? Number(summary.crack_count || (unet?.has_crack ? 1 : (rfdetr?.num_detections || 0))) : 0;
     let crackArea = isCrackDefect ? Number(summary.total_crack_area_pixels || summary.crack_area_px || unet?.crack_pixels || 0) : 0;
@@ -3465,21 +3492,35 @@ export function PhotoDamageSeverityCard({
   details?: any;
   onCalibrate?: (photo: any) => void;
 }) {
-  const geo =
-    details?.crackGeometry ||
-    details?.crack_geometry ||
-    photo?.crackGeometry ||
-    photo?.crack_geometry ||
-    details?.qualityReport?.crack_geometry ||
-    photo?.qualityReport?.crack_geometry ||
-    photo?.quality_report?.crack_geometry;
-  const summary = geo?.summary || {};
+  const calibCandidates = [
+    photo?.calibration,
+    details?.calibration,
+    photo?.qualityReport?.calibration,
+    details?.qualityReport?.calibration,
+    photo?.quality_report?.calibration,
+    details?.quality_report?.calibration,
+  ].filter(Boolean);
   const calib =
-    details?.calibration ||
-    photo?.calibration ||
-    details?.qualityReport?.calibration ||
-    photo?.qualityReport?.calibration ||
+    calibCandidates.find((c: any) => c?.calibrated || (c?.mm_per_pixel && c.mm_per_pixel > 0) || (c?.mm_per_px && c.mm_per_px > 0)) ||
+    calibCandidates[0] ||
     {};
+
+  const geoCandidates = [
+    details?.crackGeometry,
+    details?.crack_geometry,
+    photo?.crackGeometry,
+    photo?.crack_geometry,
+    details?.qualityReport?.crack_geometry,
+    details?.quality_report?.crack_geometry,
+    photo?.qualityReport?.crack_geometry,
+    photo?.quality_report?.crack_geometry,
+  ].filter((g) => g && g.summary);
+  const geo =
+    geoCandidates.find((g) => g?.summary?.is_calibrated) ||
+    geoCandidates[0] ||
+    null;
+
+  const summary = geo?.summary || {};
   const unet =
     details?.unetSegmentation ||
     details?.unet_segmentation ||
@@ -3781,7 +3822,7 @@ export function PhotoDamageSeverityCard({
             <span className="text-xs font-semibold text-foreground truncate">
               {isCalibrated ? `${scale.toFixed(4)} mm/px` : "Uncalibrated"}
             </span>
-            {!isCalibrated && onCalibrate && (
+            {onCalibrate && (
               <Button
                 type="button"
                 variant="outline"
@@ -3790,7 +3831,7 @@ export function PhotoDamageSeverityCard({
                 className="h-5 text-[9px] px-1.5 py-0 border-border"
               >
                 <Ruler className="size-2.5 mr-1 text-primary" />
-                Calibrate
+                {isCalibrated ? "Recalibrate" : "Calibrate"}
               </Button>
             )}
           </div>

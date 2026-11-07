@@ -208,7 +208,7 @@ export function DamageAnalyticsPage() {
     const unitLabel = isCalibratedSeries ? "mm" : "px";
 
     const datasets = activeSeries.map((s: any, idx: number) => {
-      const dataPoints = s.epochs.map((e: any) => e.max_aperture_px);
+      const dataPoints = s.epochs.map((e: any) => isCalibratedSeries ? (e.max_aperture_mm ?? e.max_aperture_px) : e.max_aperture_px);
       return {
         label: `${s.asset_id} (${s.asset_name})`,
         data: dataPoints,

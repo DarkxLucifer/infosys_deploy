@@ -291,6 +291,29 @@ def get_crack_progression(
                     if m.calibrated:
                         calibrated = True
 
+            # Also check inspection imagery for calibrated crack geometry
+            images = db.query(InspectionImage).filter(
+                InspectionImage.inspection_id == insp.id,
+                InspectionImage.is_deleted == False
+            ).all()
+            for img in images:
+                if img.calibration and img.calibration.get("calibrated"):
+                    calibrated = True
+                qr = img.quality_report or {}
+                if isinstance(qr, dict):
+                    cg = qr.get("crack_geometry", {}).get("summary", {})
+                    if cg.get("is_calibrated"):
+                        calibrated = True
+                        if cg.get("maximum_crack_width_mm") and float(cg["maximum_crack_width_mm"]) > max_width:
+                            max_width = float(cg["maximum_crack_width_mm"])
+                        if cg.get("average_crack_width_mm"):
+                            avg_width_sum += float(cg["average_crack_width_mm"])
+                            meas_count += 1
+                        if cg.get("total_crack_length_mm"):
+                            total_length += float(cg["total_crack_length_mm"])
+                        if cg.get("total_crack_area_mm2"):
+                            total_area += float(cg["total_crack_area_mm2"])
+
             # If measurements were zeros, derive realistic values from severity
             if max_width == 0.0 and total_cracks > 0:
                 highest_sev = max((d.severity or "minor" for d in dets), default="minor")
@@ -328,6 +351,8 @@ def get_crack_progression(
                 "status": insp.status,
                 "defect_count": total_cracks,
                 "max_aperture_px": round(max_width, 2),
+                "max_aperture_mm": round(max_width, 2) if calibrated else None,
+                "unit": "mm" if calibrated else "px",
                 "avg_width_px": round(avg_width, 2),
                 "total_length_px": round(total_length, 2),
                 "total_area_px": round(total_area, 2),
