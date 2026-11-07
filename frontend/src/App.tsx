@@ -107,7 +107,7 @@ function DashboardRoleDispatcher() {
 
   if (role === "inspector") return <InspectorDashboard />;
   if (role === "manager") return <InfrastructureManagerDashboard />;
-  if (role === "maintenance") return <MaintenanceEngineerDashboard />;
+  if (role === "maintenance" || (role as string) === "maintenance-engineer") return <MaintenanceEngineerDashboard />;
   if (role === "admin") return <AdministratorDashboard />;
   return <CivilEngineerDashboard />;
 }

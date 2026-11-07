@@ -1306,7 +1306,7 @@ export const apiService = {
     };
   },
 
-  async getMaintenanceDashboard(): Promise<MaintenanceDashboardPayload> {
+  async getMaintenanceDashboard(range = "30d"): Promise<MaintenanceDashboardPayload> {
     if (USE_MOCKS) {
       return {
         kpis: {
@@ -1366,7 +1366,9 @@ export const apiService = {
       };
     }
     try {
-      const res = await fetch(`${API_BASE_URL}/dashboard/maintenance`, {
+      const daysMap: Record<string, number> = { "7d": 7, "30d": 30, "90d": 90, "12m": 365 };
+      const days = daysMap[range] || 30;
+      const res = await fetch(`${API_BASE_URL}/dashboard/maintenance?days=${days}`, {
         headers: authHeaders(),
         credentials: "include",
       });
@@ -1399,6 +1401,30 @@ export const apiService = {
       followUpInspections: [],
       deadlineAlerts: [],
     };
+  },
+
+  async updateWorkOrder(
+    id: string,
+    payload: {
+      action?: string;
+      priority?: string;
+      team?: string;
+      due_date?: string;
+      repair_window?: string;
+      assignee_id?: string;
+    }
+  ): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/work-orders/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      credentials: "include",
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail?.message || err.detail || "Failed to update work order");
+    }
+    return res.json();
   },
 
   async getAdminDashboard(): Promise<AdminDashboardPayload> {

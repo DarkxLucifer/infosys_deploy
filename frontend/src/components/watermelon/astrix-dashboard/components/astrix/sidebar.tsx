@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
 import {
   LayoutDashboard,
@@ -22,6 +23,7 @@ import { SidebarToggleIcon } from "./icons";
 import { useTheme } from "./theme-provider";
 import { useAppStore } from "@/store/app";
 import { useAuth } from "@/store/auth-context";
+import { api } from "@/lib/api";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -62,6 +64,30 @@ export function DashboardSidebar() {
 
   const currentRole = authUser?.role || (state.session?.role === "maintenance-engineer" ? "maintenance" : state.session?.role === "civil-engineer" ? "engineer" : state.session?.role) || "engineer";
 
+  const [unreadCount, setUnreadCount] = useState<number>(0);
+
+  useEffect(() => {
+    let mounted = true;
+    const fetchUnread = () => {
+      api.getNotifications(undefined, undefined, undefined, currentRole)
+        .then((items) => {
+          if (mounted && Array.isArray(items)) {
+            const count = items.filter((n) => !n.read_at).length;
+            setUnreadCount(count);
+          }
+        })
+        .catch(() => {});
+    };
+    fetchUnread();
+    const interval = setInterval(fetchUnread, 15000);
+    return () => {
+      mounted = false;
+      clearInterval(interval);
+    };
+  }, [currentRole]);
+
+  const notifBadge = unreadCount > 0 ? String(unreadCount) : undefined;
+
   // Build role-specific sidebar items complying with Section 3.3
   const navItems: NavEntry[] = [
     { name: "Dashboard", href: "/app/dashboard", icon: LayoutDashboard },
@@ -73,7 +99,7 @@ export function DashboardSidebar() {
       { name: "Assets", href: "/app/assets", icon: Building },
       { name: "Damage Analytics", href: "/app/analytics", icon: BarChart3 },
       ...(FEATURES.damageMap ? [{ name: "Damage Map", href: "/app/map", icon: MapPin }] : []),
-      { name: "Notifications", href: "/app/notifications", icon: Bell },
+      { name: "Notifications", href: "/app/notifications", icon: Bell, badge: notifBadge },
     );
   } else if (currentRole === "engineer") {
     navItems.push(
@@ -83,7 +109,7 @@ export function DashboardSidebar() {
       { name: "Assets", href: "/app/assets", icon: Building },
       ...(FEATURES.damageMap ? [{ name: "Damage Map", href: "/app/map", icon: MapPin }] : []),
       ...(FEATURES.reportsRoute ? [{ name: "Reports", href: "/app/reports", icon: FileText }] : []),
-      { name: "Notifications", href: "/app/notifications", icon: Bell },
+      { name: "Notifications", href: "/app/notifications", icon: Bell, badge: notifBadge },
     );
   } else if (currentRole === "maintenance") {
     navItems.push(
@@ -91,7 +117,7 @@ export function DashboardSidebar() {
       { name: "Damage Analytics", href: "/app/analytics", icon: BarChart3 },
       { name: "Assets", href: "/app/assets", icon: Building },
       ...(FEATURES.damageMap ? [{ name: "Damage Map", href: "/app/map", icon: MapPin }] : []),
-      { name: "Notifications", href: "/app/notifications", icon: Bell },
+      { name: "Notifications", href: "/app/notifications", icon: Bell, badge: notifBadge },
     );
   } else if (currentRole === "manager") {
     navItems.push(
@@ -101,7 +127,7 @@ export function DashboardSidebar() {
       ...(FEATURES.damageMap ? [{ name: "Damage Map", href: "/app/map", icon: MapPin }] : []),
       ...(FEATURES.maintenanceRoute ? [{ name: "Maintenance", href: "/app/maintenance", icon: Wrench }] : []),
       ...(FEATURES.reportsRoute ? [{ name: "Reports", href: "/app/reports", icon: FileText }] : []),
-      { name: "Notifications", href: "/app/notifications", icon: Bell },
+      { name: "Notifications", href: "/app/notifications", icon: Bell, badge: notifBadge },
     );
   } else if (currentRole === "admin") {
     navItems.push(
@@ -112,7 +138,7 @@ export function DashboardSidebar() {
       ...(FEATURES.adminHealthRoute ? [{ name: "Platform health", href: "/app/admin/health", icon: HeartPulse }] : []),
       { name: "Assets", href: "/app/assets", icon: Building },
       ...(FEATURES.damageMap ? [{ name: "Damage Map", href: "/app/map", icon: MapPin }] : []),
-      { name: "Notifications", href: "/app/notifications", icon: Bell },
+      { name: "Notifications", href: "/app/notifications", icon: Bell, badge: notifBadge },
     );
   }
 

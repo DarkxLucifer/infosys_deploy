@@ -1987,7 +1987,7 @@ function FindingsTab({ inspection }: { inspection: Inspection }) {
                       navigate(`/dashboard/analysis/${inspection.id}?finding=${finding.id}`)
                     }
                   >
-                    Review
+                    {inspection.status === "reviewed" ? "View Finding" : "Review"}
                   </Button>
                 </TableCell>
               </TableRow>

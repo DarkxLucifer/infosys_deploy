@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from pydantic import BaseModel, Field
@@ -11,6 +11,12 @@ from app.models.all_models import (
     InspectionImage, Measurement, RepairTaskTemplate, User, AuditLog, Notification
 )
 from app.security.jwt import get_current_user
+
+# Indian Standard Time (UTC+05:30) helper for notifications & audit logs
+IST = timezone(timedelta(hours=5, minutes=30))
+
+def get_now_ist_str() -> str:
+    return datetime.now(IST).strftime('%b %d, %Y at %I:%M %p IST')
 
 router = APIRouter(prefix="", tags=["Maintenance & Work Orders"])
 
@@ -166,8 +172,7 @@ def create_work_order(
     )
     db.add(evt)
 
-    now_utc = datetime.now(timezone.utc)
-    now_str = now_utc.strftime('%b %d, %Y at %I:%M %p UTC')
+    now_str = get_now_ist_str()
     asset = db.query(Asset).filter(Asset.id == req.asset_id).first()
     asset_name = asset.name if asset else "Asset"
 
@@ -362,8 +367,7 @@ def transition_work_order(
     )
     db.add(evt)
 
-    now_utc = datetime.now(timezone.utc)
-    now_str = now_utc.strftime('%b %d, %Y at %I:%M %p UTC')
+    now_str = get_now_ist_str()
     asset = wo.asset
     asset_name = asset.name if asset else "Asset"
 

@@ -28,6 +28,7 @@ import {
 import { toast } from "sonner";
 import { useAuth } from "@/store/auth-context";
 import { Button } from "@/components/ui/button";
+import { formatISTDateTime } from "@/lib/date-utils";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
@@ -248,12 +249,10 @@ export function AnalysisDetailPage() {
           dbInspection.inspectorId ||
           "Infrastructure Inspector",
         method: "walkdown" as const,
-        status: (dbInspection.status === "in_progress"
-          ? "in-progress"
-          : dbInspection.status === "pending_review" || dbInspection.status === "images_uploaded"
-          ? "awaiting-review"
-          : dbInspection.isSignedOff || dbInspection.status === "reviewed" || dbInspection.status === "reported" || dbInspection.status === "closed"
+        status: (dbInspection.isSignedOff || dbInspection.status === "reviewed" || dbInspection.status === "reported" || dbInspection.status === "closed" || dbInspection.reviewedAt
           ? "reviewed"
+          : dbInspection.status === "in_progress"
+          ? "in-progress"
           : "awaiting-review") as any,
         startedAt: dbInspection.inspectionDate || dbInspection.createdAt,
         completedAt: dbInspection.status === "closed" ? dbInspection.createdAt : undefined,
@@ -753,7 +752,7 @@ export function AnalysisDetailPage() {
             <div className="p-3 rounded-xl bg-muted/40 border border-border">
               <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Certified Date</div>
               <div className="text-xs font-bold text-foreground mt-0.5">
-                {dbInspection?.reviewedAt ? new Date(dbInspection.reviewedAt).toLocaleString() : new Date().toLocaleDateString()}
+                {formatISTDateTime(dbInspection?.reviewedAt || new Date())}
               </div>
             </div>
             <div className="p-3 rounded-xl bg-muted/40 border border-border">

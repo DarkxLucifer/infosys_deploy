@@ -480,10 +480,11 @@ def get_role_dashboard_metrics(
         total_detections = db.query(Detection).count()
         correction_rate = round((verified_count / total_detections * 100), 1) if total_detections > 0 else 0.0
 
-        # Review queue list: include all active, pending, or newly uploaded inspections
+        # Review queue list: include all active, pending, or newly uploaded inspections that have not been signed off
         review_inspections = db.query(Inspection).filter(
             Inspection.organization_id == org_id,
-            Inspection.status.in_(["pending_review", "in_review", "images_uploaded", "assigned", "in_progress", "draft"])
+            Inspection.status.in_(["pending_review", "in_review", "images_uploaded", "assigned", "in_progress", "draft"]),
+            Inspection.reviewed_at.is_(None)
         ).order_by(desc(Inspection.created_at), desc(Inspection.inspection_date)).limit(25).all()
 
         formatted_review_queue = []
@@ -994,11 +995,11 @@ def get_review_queue(
 
     if status and status != "all":
         if status == "needs_review":
-            query = query.filter(Inspection.status.in_(["pending_review", "in_review"]))
+            query = query.filter(Inspection.status.in_(["pending_review", "in_review"]), Inspection.reviewed_at.is_(None))
         elif status == "ai_analysing":
-            query = query.filter(Inspection.status.in_(["images_uploaded", "analysing", "assigned", "in_progress", "draft"]))
+            query = query.filter(Inspection.status.in_(["images_uploaded", "analysing", "assigned", "in_progress", "draft"]), Inspection.reviewed_at.is_(None))
         elif status == "reviewed":
-            query = query.filter(Inspection.status.in_(["reviewed", "reported", "closed"]))
+            query = query.filter(or_(Inspection.status.in_(["reviewed", "reported", "closed"]), Inspection.reviewed_at.isnot(None)))
 
     if search:
         term = f"%{search.strip()}%"
@@ -1015,15 +1016,17 @@ def get_review_queue(
         ).count(),
         "ai_analysing": db.query(Inspection).filter(
             Inspection.organization_id == org_id,
-            Inspection.status.in_(["images_uploaded", "analysing", "assigned", "in_progress", "draft"])
+            Inspection.status.in_(["images_uploaded", "analysing", "assigned", "in_progress", "draft"]),
+            Inspection.reviewed_at.is_(None)
         ).count(),
         "needs_review": db.query(Inspection).filter(
             Inspection.organization_id == org_id,
-            Inspection.status.in_(["pending_review", "in_review"])
+            Inspection.status.in_(["pending_review", "in_review"]),
+            Inspection.reviewed_at.is_(None)
         ).count(),
         "reviewed": db.query(Inspection).filter(
             Inspection.organization_id == org_id,
-            Inspection.status.in_(["reviewed", "reported", "closed"])
+            or_(Inspection.status.in_(["reviewed", "reported", "closed"]), Inspection.reviewed_at.isnot(None))
         ).count(),
     }
 

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   Bell,
@@ -28,6 +28,7 @@ import { useTheme } from "./theme-provider";
 import { api, type NotificationItem } from "@/lib/api";
 import { CommandPalette } from "@/components/dashboard/command-palette";
 import { type RoleType } from "@/lib/rules";
+import { formatISTDateTime } from "@/lib/date-utils";
 
 const ROLE_OPTIONS: { role: RoleType; label: string; desc: string }[] = [
   { role: "inspector", label: "Infrastructure Inspector", desc: "Plan visits, capture and upload images, track what is waiting for review" },
@@ -70,16 +71,18 @@ export function DashboardTopbar() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  // Fetch notifications
-  const loadNotifications = () => {
-    api.getNotifications()
+  // Fetch notifications with role scoping and polling
+  const loadNotifications = useCallback(() => {
+    api.getNotifications(undefined, undefined, undefined, user?.role)
       .then((data) => setNotifications(Array.isArray(data) ? data : []))
       .catch(() => setNotifications([]));
-  };
+  }, [user?.role]);
 
   useEffect(() => {
     loadNotifications();
-  }, []);
+    const interval = setInterval(loadNotifications, 15000);
+    return () => clearInterval(interval);
+  }, [loadNotifications]);
 
   const safeNotifications = Array.isArray(notifications) ? notifications : [];
   const unreadCount = safeNotifications.filter((n) => !n.read_at).length;
@@ -199,18 +202,25 @@ export function DashboardTopbar() {
                   safeNotifications.slice(0, 5).map((n) => (
                     <div
                       key={n.id}
-                      className={`p-2.5 text-xs space-y-1 transition-colors ${
-                        !n.read_at ? "bg-secondary/40" : "hover:bg-muted/40"
+                      onClick={() => {
+                        if (!n.read_at) handleMarkRead(n.id);
+                        if (n.link) navigate(n.link);
+                      }}
+                      className={`p-2.5 text-xs space-y-1 transition-colors cursor-pointer ${
+                        !n.read_at ? "bg-secondary/40 hover:bg-secondary/70" : "hover:bg-muted/40"
                       }`}
                     >
                       <div className="flex items-start justify-between gap-2">
-                        <span className="font-semibold text-foreground text-[11px] leading-tight">
+                        <span className="font-semibold text-foreground text-[11px] leading-tight hover:text-primary">
                           {n.title}
                         </span>
                         {!n.read_at && (
                           <button
                             type="button"
-                            onClick={() => handleMarkRead(n.id)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleMarkRead(n.id);
+                            }}
                             className="text-muted-foreground hover:text-primary shrink-0"
                             title="Mark as read"
                           >
@@ -222,7 +232,7 @@ export function DashboardTopbar() {
                         {n.body}
                       </p>
                       <span className="text-[10px] text-muted-foreground/70 font-mono">
-                        {new Date(n.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                        {formatISTDateTime(n.created_at)}
                       </span>
                     </div>
                   ))

@@ -14,6 +14,12 @@ from app.models.all_models import (
 )
 from app.security.jwt import get_current_user
 
+# Indian Standard Time (UTC+05:30) helper for notifications & audit logs
+IST = timezone(timedelta(hours=5, minutes=30))
+
+def get_now_ist_str() -> str:
+    return datetime.now(IST).strftime('%b %d, %Y at %I:%M %p IST')
+
 router = APIRouter(prefix="/inspections", tags=["Inspections"])
 
 
@@ -107,8 +113,7 @@ def create_inspection(
         db.add(inspection)
         db.flush()
 
-        now_utc = datetime.now(timezone.utc)
-        now_str = now_utc.strftime('%b %d, %Y at %I:%M %p UTC')
+        now_str = get_now_ist_str()
         insp_date_str = insp_date.strftime('%b %d, %Y')
         due_date_str = d_date.strftime('%b %d, %Y')
 
@@ -475,12 +480,12 @@ def reassign_inspection(
     if not inspection:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection not found")
 
-    if inspection.status == "closed":
+    if inspection.status in ("reviewed", "reported", "closed") or inspection.reviewed_at is not None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
-                "code": "ALREADY_CLOSED",
-                "message": f"Inspection {inspection.id} is already closed."
+                "code": "ALREADY_REVIEWED",
+                "message": f"Inspection {inspection.id} has already been certified and signed off. Inference cannot be re-run on sealed records."
             }
         )
 
@@ -607,6 +612,7 @@ def run_ai_analysis_for_inspection(inspection: Inspection, db: Session, user: Us
     return {"results": results, "cracks_found": cracks_found, "total_images": len(valid_images)}
 
 @router.post("/{inspection_id}/submit")
+@router.post("/{inspection_id}/submit-for-review")
 def submit_inspection_for_review(
     inspection_id: str,
     payload: Optional[Dict[str, Any]] = None,
@@ -621,12 +627,12 @@ def submit_inspection_for_review(
     if not inspection:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection not found")
 
-    if inspection.status == "closed":
+    if inspection.status in ("reviewed", "reported", "closed") or inspection.reviewed_at is not None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
-                "code": "ALREADY_CLOSED",
-                "message": f"Inspection {inspection.id} is already closed."
+                "code": "ALREADY_REVIEWED",
+                "message": f"Inspection {inspection.id} has already been certified and signed off. A civil engineer can only sign off an inspection once. Record is permanently locked."
             }
         )
 
@@ -677,8 +683,7 @@ def submit_inspection_for_review(
     inspection.submitted_at = datetime.now(timezone.utc)
     inspection.analysis_status = "completed"
 
-    now_utc = datetime.now(timezone.utc)
-    now_str = now_utc.strftime('%b %d, %Y at %I:%M %p UTC')
+    now_str = get_now_ist_str()
     asset = db.query(Asset).filter(Asset.id == inspection.asset_id).first()
     asset_name = asset.name if asset else "Asset"
     cracks_found = analysis_summary.get("cracks_found", 0)
@@ -771,12 +776,12 @@ def trigger_ai_analysis(
     if not inspection:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection not found")
 
-    if inspection.status == "closed":
+    if inspection.status in ("reviewed", "reported", "closed") or inspection.reviewed_at is not None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
-                "code": "ALREADY_CLOSED",
-                "message": f"Inspection {inspection.id} is already closed."
+                "code": "ALREADY_REVIEWED",
+                "message": f"Inspection {inspection.id} has already been certified and signed off. Inference cannot be re-run on sealed records."
             }
         )
 
@@ -849,12 +854,12 @@ def claim_inspection(
     if not inspection:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection not found")
 
-    if inspection.status == "closed":
+    if inspection.status in ("reviewed", "reported", "closed") or inspection.reviewed_at is not None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
-                "code": "ALREADY_CLOSED",
-                "message": f"Inspection {inspection.id} is already closed."
+                "code": "ALREADY_REVIEWED",
+                "message": f"Inspection {inspection.id} has already been certified and signed off. Inference cannot be re-run on sealed records."
             }
         )
 
@@ -870,8 +875,7 @@ def claim_inspection(
     inspection.claimed_at = datetime.now(timezone.utc)
     inspection.status = "in_review"
 
-    now_utc = datetime.now(timezone.utc)
-    now_str = now_utc.strftime('%b %d, %Y at %I:%M %p UTC')
+    now_str = get_now_ist_str()
     asset = inspection.asset
     asset_name = asset.name if asset else "Asset"
 
@@ -914,12 +918,12 @@ def release_claim(
     if not inspection:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection not found")
 
-    if inspection.status == "closed":
+    if inspection.status in ("reviewed", "reported", "closed") or inspection.reviewed_at is not None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
-                "code": "ALREADY_CLOSED",
-                "message": f"Inspection {inspection.id} is already closed."
+                "code": "ALREADY_REVIEWED",
+                "message": f"Inspection {inspection.id} has already been certified and signed off. Inference cannot be re-run on sealed records."
             }
         )
 
@@ -1263,8 +1267,7 @@ def sign_off_inspection(
             ))
         inspection.status = "reported"
 
-        now_utc = datetime.now(timezone.utc)
-        now_str = now_utc.strftime('%b %d, %Y at %I:%M %p UTC')
+        now_str = get_now_ist_str()
         asset_name = asset.name if asset else "Asset"
         certifier_name = current_user.name or current_user.email
         prio_str = confirmed_priority.replace('_', ' ').title()
@@ -1286,8 +1289,7 @@ def sign_off_inspection(
         pass
 
     # Notifications (Section 20: Event Triggers & 5 Alert Levels)
-    now_utc = datetime.now(timezone.utc)
-    now_str = now_utc.strftime('%b %d, %Y at %I:%M %p UTC')
+    now_str = get_now_ist_str()
     asset_name = asset.name if asset else "Asset"
     certifier_name = current_user.name or current_user.email
     prio_str = confirmed_priority.replace('_', ' ').title()
@@ -1398,12 +1400,12 @@ def confirm_priority(
     if not inspection:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection not found")
 
-    if inspection.status == "closed":
+    if inspection.status in ("reviewed", "reported", "closed") or inspection.reviewed_at is not None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
-                "code": "ALREADY_CLOSED",
-                "message": f"Inspection {inspection.id} is already closed."
+                "code": "ALREADY_REVIEWED",
+                "message": f"Inspection {inspection.id} has already been certified and signed off. Inference cannot be re-run on sealed records."
             }
         )
 

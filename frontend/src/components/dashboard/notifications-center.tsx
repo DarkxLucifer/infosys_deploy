@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { apiService, type NotificationItem } from "@/lib/api";
 import { useAuth } from "@/store/auth-context";
+import { formatISTDateTime } from "@/lib/date-utils";
 
 export function NotificationsCenter() {
   const { user } = useAuth();
@@ -194,7 +195,7 @@ export function NotificationsCenter() {
                     </div>
                     <p className="text-muted-foreground leading-relaxed">{notif.body}</p>
                     <div className="text-[10px] text-muted-foreground font-mono">
-                      {new Date(notif.created_at).toLocaleString()}
+                      {formatISTDateTime(notif.created_at)}
                     </div>
                   </div>
                 </div>

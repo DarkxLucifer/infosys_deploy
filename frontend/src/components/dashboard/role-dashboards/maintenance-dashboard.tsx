@@ -1,9 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   Wrench, AlertTriangle, CheckCircle2, Calendar,
-  ShieldAlert, Download, ChevronDown, Clock
+  ShieldAlert, Download, ChevronDown, Clock, RefreshCw
 } from "lucide-react";
+import { toast } from "sonner";
 import { api, type MaintenanceDashboardPayload, type MaintenanceItem } from "@/lib/api";
+import { cn } from "@/lib/utils";
 
 const DATE_RANGES = [
   { id: "7d", label: "Last 7 days" },
@@ -15,61 +17,87 @@ const DATE_RANGES = [
 export function MaintenanceEngineerDashboard() {
   const [data, setData] = useState<MaintenanceDashboardPayload | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [selectedRange, setSelectedRange] = useState("30d");
   const [statusFilter, setStatusFilter] = useState<string>("all");
 
-  const loadData = async () => {
+  const loadData = useCallback(async (showIndicator = false) => {
+    if (showIndicator) setRefreshing(true);
     try {
-      const res = await api.getMaintenanceDashboard();
+      const res = await api.getMaintenanceDashboard(selectedRange);
       setData(res);
+    } catch (err: any) {
+      console.warn("Failed to load maintenance dashboard:", err);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
-  };
+  }, [selectedRange]);
 
   useEffect(() => {
     loadData();
-  }, [selectedRange]);
+    // Auto-refresh every 15 seconds so engineer sign-offs and updates stream in live
+    const interval = setInterval(() => {
+      loadData(false);
+    }, 15000);
+    return () => clearInterval(interval);
+  }, [loadData]);
 
   const handleUpdateStatus = async (woId: string, newStatus: MaintenanceItem["status"]) => {
     if (!data) return;
     try {
       if (newStatus === "closed") {
-        const note = window.prompt("Mandatory resolution note for closure (ACI / AASHTO verification):", "On-site repair executed and verified by technician.");
+        const note = window.prompt(
+          "Mandatory resolution note for closure (ACI / AASHTO verification):",
+          "On-site repair executed and verified by technician."
+        );
         if (!note || !note.trim()) return;
         await api.transitionWorkOrder(woId, { to_status: "closed", note: note.trim() });
+        toast.success("Work order resolved & closed", {
+          description: "Remediation note archived in engineering audit log.",
+        });
       } else {
         await api.transitionWorkOrder(woId, { to_status: newStatus });
+        toast.success(`Work order status updated to ${newStatus.replace("_", " ")}`);
       }
-      loadData();
-    } catch (e) {
+      await loadData(false);
+    } catch (e: any) {
       console.warn("Status transition error:", e);
-      // Optimistic update fallback
-      const updated = data.workOrders.map((wo) =>
-        wo.id === woId ? { ...wo, status: newStatus } : wo
-      );
-      setData({ ...data, workOrders: updated });
+      toast.error(e?.message || "Invalid state transition for this work order.");
+      await loadData(false);
     }
   };
 
-  const handleSetDueDate = (woId: string, newDate: string) => {
+  const handleSetDueDate = async (woId: string, newDate: string) => {
     if (!data) return;
     const updated = data.workOrders.map((wo) =>
       wo.id === woId ? { ...wo, due_date: newDate } : wo
     );
     setData({ ...data, workOrders: updated });
+    try {
+      await api.updateWorkOrder(woId, { due_date: newDate });
+      toast.success("Work order due date updated");
+    } catch (err: any) {
+      toast.error(err.message || "Failed to save due date to database");
+      loadData(false);
+    }
   };
 
   const handleExportCsv = async () => {
-    const csvContent = await api.exportDashboardCsv("maintenance", selectedRange);
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.setAttribute("download", `infrascan-work-orders-${selectedRange}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    try {
+      const csvContent = await api.exportDashboardCsv("maintenance", selectedRange);
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute("download", `infrascan-work-orders-${selectedRange}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      toast.success("Work order CSV exported");
+    } catch (e: any) {
+      toast.error("Failed to export CSV: " + (e?.message || "error"));
+    }
   };
 
   if (loading || !data) {
@@ -108,6 +136,16 @@ export function MaintenanceEngineerDashboard() {
         </div>
 
         <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => loadData(true)}
+            disabled={refreshing}
+            className="p-2.5 rounded-lg border border-border bg-card hover:bg-muted text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+            title="Refresh work orders from backend"
+          >
+            <RefreshCw className={cn("size-4", refreshing && "animate-spin")} />
+          </button>
+
           <div className="relative">
             <select
               value={selectedRange}

@@ -9,7 +9,7 @@ from app.database import Base, get_db, ensure_schema_upgrades
 from app.main import app
 from app.models.all_models import (
     User, Organization, Asset, Inspection, InspectionImage,
-    Detection, PriorityRecommendation, WorkOrder
+    Detection, PriorityRecommendation, WorkOrder, Notification
 )
 from app.security.jwt import create_access_token
 
@@ -153,5 +153,36 @@ def test_confirm_sound_surface_and_signoff():
         headers=headers
     )
     assert unconfirm_res.status_code == 423
+
+    # 5. Sign off a second time -> must fail with 423 Locked (can only sign off once!)
+    second_signoff = client.post(
+        f"/api/v1/inspections/{inspection.id}/sign-off",
+        json={"auto_verify_all": True},
+        headers=headers
+    )
+    assert second_signoff.status_code == 423, second_signoff.text
+    assert "ALREADY_SIGNED_OFF" in second_signoff.text
+
+    # 6. Attempt submit-for-review on reviewed inspection -> must fail with 400 ALREADY_REVIEWED
+    resubmit_res = client.post(
+        f"/api/v1/inspections/{inspection.id}/submit-for-review",
+        json={},
+        headers=headers
+    )
+    assert resubmit_res.status_code == 400
+    assert "ALREADY_REVIEWED" in resubmit_res.text
+
+    # 7. Attempt claim on reviewed inspection -> must fail with 400 ALREADY_REVIEWED
+    reclaim_res = client.post(
+        f"/api/v1/inspections/{inspection.id}/claim",
+        headers=headers
+    )
+    assert reclaim_res.status_code == 400
+    assert "ALREADY_REVIEWED" in reclaim_res.text
+
+    # 8. Verify notifications contain Indian Standard Time (IST)
+    notifs = db.query(Notification).filter(Notification.organization_id == user.organization_id).all()
+    assert len(notifs) > 0
+    assert any("IST" in (n.message or "") for n in notifs)
 
     db.close()

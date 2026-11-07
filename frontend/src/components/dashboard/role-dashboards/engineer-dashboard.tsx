@@ -286,9 +286,13 @@ export function CivilEngineerDashboard() {
                       <td className="py-2.5 px-4 text-right">
                         <Link
                           to={`/app/review/${item.inspectionId}`}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-primary hover:opacity-90 text-primary-foreground font-semibold text-[11px] transition-all shadow-xs"
+                          className={
+                            statusKey === "reviewed"
+                              ? "inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-secondary hover:bg-muted text-foreground border border-border font-semibold text-[11px] transition-all shadow-xs"
+                              : "inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-primary hover:opacity-90 text-primary-foreground font-semibold text-[11px] transition-all shadow-xs"
+                          }
                         >
-                          <span>Review</span>
+                          <span>{statusKey === "reviewed" ? "View Certified" : "Review"}</span>
                           <ArrowRight className="size-3" />
                         </Link>
                       </td>
