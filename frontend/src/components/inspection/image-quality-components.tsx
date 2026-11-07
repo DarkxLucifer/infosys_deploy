@@ -1142,6 +1142,33 @@ export function ImageDetailsDrawer({
     };
   }, [open, photo?.id]);
 
+  // Synchronize details when incoming photo props (calibration, crack geometry, damage assessment) update
+  useEffect(() => {
+    if (!open || !photo?.id) return;
+    if (photo.calibration !== undefined || photo.crack_geometry || photo.crackGeometry || photo.damage_assessment || photo.damageAssessment || photo.version) {
+      setDetails((prev: any) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          calibration: photo.calibration !== undefined ? photo.calibration : prev.calibration,
+          crack_geometry: photo.crack_geometry || photo.crackGeometry || prev.crack_geometry,
+          crackGeometry: photo.crackGeometry || photo.crack_geometry || prev.crackGeometry,
+          damage_assessment: photo.damage_assessment || photo.damageAssessment || prev.damage_assessment,
+          damageAssessment: photo.damageAssessment || photo.damage_assessment || prev.damageAssessment,
+        };
+      });
+    }
+  }, [
+    open,
+    photo?.id,
+    photo?.calibration,
+    photo?.crack_geometry,
+    photo?.crackGeometry,
+    photo?.damage_assessment,
+    photo?.damageAssessment,
+    photo?.version,
+  ]);
+
   if (!photo) return null;
 
   const [analyzingAi, setAnalyzingAi] = useState(false);
@@ -1494,7 +1521,7 @@ export function ImageDetailsDrawer({
               <PhotoDamageSeverityCard
                 photo={photo}
                 details={details}
-                onCalibrate={onCalibrate}
+                onCalibrate={(p) => onCalibrate?.(typeof p === "string" ? p : p?.id || photo.id)}
               />
 
               {/* Multi-Stage AI Crack Classification Assessment Card */}
@@ -2033,46 +2060,54 @@ export function ImageDetailsDrawer({
                   <span className="text-[10px] text-muted-foreground font-semibold uppercase flex items-center gap-1">
                     <Ruler className="size-3 text-primary" /> Optical Scale Calibration
                   </span>
-                  {photo.calibration && (
-                    <Badge variant="outline" className="text-[10px] text-foreground border-border">
-                      Calibrated
-                    </Badge>
-                  )}
+                  {(() => {
+                    const activeCalib = details?.calibration || photo?.calibration || details?.qualityReport?.calibration || photo?.qualityReport?.calibration;
+                    const calibScale = activeCalib?.mm_per_pixel || activeCalib?.mm_per_px;
+                    return activeCalib && calibScale ? (
+                      <Badge variant="outline" className="text-[10px] text-foreground border-border">
+                        Calibrated
+                      </Badge>
+                    ) : null;
+                  })()}
                 </div>
-                {photo.calibration ? (
-                  <div className="space-y-1">
+                {(() => {
+                  const activeCalib = details?.calibration || photo?.calibration || details?.qualityReport?.calibration || photo?.qualityReport?.calibration;
+                  const calibScale = activeCalib?.mm_per_pixel || activeCalib?.mm_per_px;
+                  return activeCalib && calibScale ? (
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between">
+                        <p className="font-mono text-foreground text-xs">
+                          Scale saved: <strong>{Number(calibScale).toFixed(4)} mm/px</strong>
+                        </p>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => onCalibrate?.(photo.id)}
+                          className="h-6 text-[10px] text-primary"
+                        >
+                          Recalibrate
+                        </Button>
+                      </div>
+                      {activeCalib.width_metric && (
+                        <span className="text-[10px] text-muted-foreground block font-mono">
+                          Controlling metric: {activeCalib.width_metric} width
+                        </span>
+                      )}
+                    </div>
+                  ) : (
                     <div className="flex items-center justify-between">
-                      <p className="font-mono text-foreground text-xs">
-                        Scale saved: <strong>{photo.calibration.mm_per_pixel || photo.calibration.mm_per_px} mm/px</strong>
-                      </p>
+                      <span className="text-muted-foreground text-[11px]">Not calibrated. Measurements will be in pixels only.</span>
                       <Button
                         size="sm"
-                        variant="ghost"
+                        variant="outline"
                         onClick={() => onCalibrate?.(photo.id)}
-                        className="h-6 text-[10px] text-primary"
+                        className="h-7 text-xs border-primary/40 text-primary hover:bg-primary/10"
                       >
-                        Recalibrate
+                        Calibrate scale
                       </Button>
                     </div>
-                    {photo.calibration.width_metric && (
-                      <span className="text-[10px] text-muted-foreground block font-mono">
-                        Controlling metric: {photo.calibration.width_metric} width
-                      </span>
-                    )}
-                  </div>
-                ) : (
-                  <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground text-[11px]">Not calibrated. Measurements will be in pixels only.</span>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => onCalibrate?.(photo.id)}
-                      className="h-7 text-xs border-primary/40 text-primary hover:bg-primary/10"
-                    >
-                      Calibrate scale
-                    </Button>
-                  </div>
-                )}
+                  );
+                })()}
               </div>
             </TabsContent>
 
@@ -2126,7 +2161,41 @@ export function ImageDetailsDrawer({
                 photo={photo}
                 details={details}
                 inspectionId={photo?.inspection_id || photo?.inspectionId}
-                onCalibrate={onCalibrate}
+                onCalibrate={(arg: any) => onCalibrate?.(typeof arg === "string" ? arg : arg?.id || photo.id)}
+                onGeometryUpdated={(newGeo) => {
+                  setDetails((prev: any) => {
+                    if (!prev) return prev;
+                    return {
+                      ...prev,
+                      crack_geometry: newGeo,
+                      crackGeometry: newGeo,
+                      calibration: newGeo?.summary?.is_calibrated ? {
+                        calibrated: true,
+                        mm_per_pixel: newGeo.summary.mm_per_pixel,
+                        mm_per_px: newGeo.summary.mm_per_pixel,
+                        width_metric: (newGeo.summary.controlling_metric || newGeo.summary.width_metric_controlling || "maximum") as any,
+                      } : prev.calibration,
+                      damage_assessment: newGeo?.summary?.damage_assessment || prev.damage_assessment,
+                      damageAssessment: newGeo?.summary?.damage_assessment || prev.damageAssessment,
+                    };
+                  });
+                  if (onUpdatePhoto) {
+                    onUpdatePhoto({
+                      id: photo.id,
+                      crack_geometry: newGeo,
+                      crackGeometry: newGeo,
+                      calibration: newGeo?.summary?.is_calibrated ? {
+                        calibrated: true,
+                        mm_per_pixel: newGeo.summary.mm_per_pixel,
+                        mm_per_px: newGeo.summary.mm_per_pixel,
+                        width_metric: (newGeo.summary.controlling_metric || newGeo.summary.width_metric_controlling || "maximum") as any,
+                      } : photo.calibration,
+                      damage_assessment: newGeo?.summary?.damage_assessment,
+                      damageAssessment: newGeo?.summary?.damage_assessment,
+                      version: Date.now(),
+                    });
+                  }
+                }}
               />
             </TabsContent>
           </Tabs>
@@ -3436,14 +3505,15 @@ export function PhotoDamageSeverityCard({
     photo?.qualityReport?.damage_assessment ||
     summary?.damage_assessment;
 
-  const isCalibrated = Boolean(calib.is_calibrated || summary.is_calibrated || calib.calibrated);
   const scale = Number(
     calib.scale_factor_mm_per_pixel ||
       calib.mm_per_pixel ||
+      calib.mm_per_px ||
       summary.calibration_mm_per_pixel ||
       summary.mm_per_pixel ||
       0
   );
+  const isCalibrated = Boolean((calib.is_calibrated || summary.is_calibrated || calib.calibrated) && scale > 0);
 
   const crackCount = Number(summary.crack_count || (unet?.has_crack ? 1 : rfdetr?.num_detections || 0));
   let crackArea = Number(summary.total_crack_area_pixels || summary.crack_area_px || unet?.crack_pixels || 0);
@@ -3709,14 +3779,14 @@ export function PhotoDamageSeverityCard({
           </span>
           <div className="flex items-center justify-between gap-1 pt-0.5">
             <span className="text-xs font-semibold text-foreground truncate">
-              {isCalibrated ? `${scale} mm/px` : "Uncalibrated"}
+              {isCalibrated ? `${scale.toFixed(4)} mm/px` : "Uncalibrated"}
             </span>
             {!isCalibrated && onCalibrate && (
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
-                onClick={() => onCalibrate(photo)}
+                onClick={() => onCalibrate(photo?.id || photo)}
                 className="h-5 text-[9px] px-1.5 py-0 border-border"
               >
                 <Ruler className="size-2.5 mr-1 text-primary" />

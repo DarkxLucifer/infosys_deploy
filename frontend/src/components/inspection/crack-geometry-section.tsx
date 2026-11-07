@@ -87,6 +87,7 @@ export interface CrackGeometrySummary {
   average_crack_width_mm?: number | null;
   maximum_crack_width_mm?: number | null;
   width_metric_controlling?: "maximum" | "average";
+  controlling_metric?: string;
   crack_severity_category?: string;
   crack_severity_code?: string;
   severity_assessment?: SeverityAssessmentDetail;
@@ -109,6 +110,7 @@ interface CrackGeometrySectionProps {
   details?: any;
   inspectionId?: string | null;
   onCalibrate?: (id: string) => void;
+  onGeometryUpdated?: (geo: CrackGeometryReport) => void;
 }
 
 export function CrackGeometrySection({
@@ -116,6 +118,7 @@ export function CrackGeometrySection({
   details,
   inspectionId,
   onCalibrate,
+  onGeometryUpdated,
 }: CrackGeometrySectionProps) {
   const [geoData, setGeoData] = useState<CrackGeometryReport | null>(null);
   const [loading, setLoading] = useState(false);
@@ -129,6 +132,12 @@ export function CrackGeometrySection({
   const [selectedWidthMetric, setSelectedWidthMetric] = useState<"maximum" | "average">("maximum");
 
   const photoId = photo?.id;
+  const calibObj =
+    details?.calibration ||
+    photo?.calibration ||
+    details?.qualityReport?.calibration ||
+    photo?.qualityReport?.calibration;
+
   const initialGeometry =
     details?.crackGeometry ||
     details?.crack_geometry ||
@@ -138,12 +147,13 @@ export function CrackGeometrySection({
     photo?.crack_geometry ||
     photo?.qualityReport?.crack_geometry;
 
-  // Load geometry on mount or when photo changes
+  // Load geometry on mount or when photo/details change
   useEffect(() => {
     if (initialGeometry && initialGeometry.summary) {
       setGeoData(initialGeometry);
-      if (initialGeometry.summary.mm_per_pixel) {
-        setScaleInput(String(initialGeometry.summary.mm_per_pixel));
+      const mm = initialGeometry.summary.mm_per_pixel || calibObj?.mm_per_pixel || calibObj?.mm_per_px;
+      if (mm) {
+        setScaleInput(String(mm));
       }
       if (initialGeometry.summary.width_metric_controlling) {
         setSelectedWidthMetric(initialGeometry.summary.width_metric_controlling);
@@ -160,8 +170,9 @@ export function CrackGeometrySection({
       .then((res: CrackGeometryReport) => {
         if (isMounted && res?.summary) {
           setGeoData(res);
-          if (res.summary.mm_per_pixel) {
-            setScaleInput(String(res.summary.mm_per_pixel));
+          const mm = res.summary.mm_per_pixel || calibObj?.mm_per_pixel || calibObj?.mm_per_px;
+          if (mm) {
+            setScaleInput(String(mm));
           }
           if (res.summary.width_metric_controlling) {
             setSelectedWidthMetric(res.summary.width_metric_controlling);
@@ -174,8 +185,9 @@ export function CrackGeometrySection({
           .then((res: CrackGeometryReport) => {
             if (isMounted && res?.summary) {
               setGeoData(res);
-              if (res.summary.mm_per_pixel) {
-                setScaleInput(String(res.summary.mm_per_pixel));
+              const mm = res.summary.mm_per_pixel || calibObj?.mm_per_pixel || calibObj?.mm_per_px;
+              if (mm) {
+                setScaleInput(String(mm));
               }
               if (res.summary.width_metric_controlling) {
                 setSelectedWidthMetric(res.summary.width_metric_controlling);
@@ -193,7 +205,16 @@ export function CrackGeometrySection({
     return () => {
       isMounted = false;
     };
-  }, [photoId, initialGeometry]);
+  }, [
+    photoId,
+    details?.crackGeometry,
+    details?.crack_geometry,
+    photo?.crackGeometry,
+    photo?.crack_geometry,
+    details?.calibration?.mm_per_pixel,
+    photo?.calibration?.mm_per_pixel,
+    photo?.version,
+  ]);
 
   const handleRecalculate = async (forceScale?: number, metricToUse?: "maximum" | "average") => {
     if (!photoId) return;
@@ -219,6 +240,7 @@ export function CrackGeometrySection({
         if (res.summary.mm_per_pixel) {
           setScaleInput(String(res.summary.mm_per_pixel));
         }
+        onGeometryUpdated?.(res);
         toast.success(
           res.summary.is_calibrated
             ? `Calibrated crack geometry: ${res.summary.crack_coverage_pct}% crack area, max width ${res.summary.maximum_crack_width_mm} mm [${res.summary.crack_severity_category}].`
@@ -239,7 +261,15 @@ export function CrackGeometrySection({
 
   const summary = geoData?.summary;
   const cracks = geoData?.cracks || [];
-  const isCalibrated = Boolean(summary?.is_calibrated && summary?.mm_per_pixel);
+  const effectiveScale = Number(
+    summary?.mm_per_pixel ||
+      calibObj?.mm_per_pixel ||
+      calibObj?.mm_per_px ||
+      0
+  );
+  const isCalibrated = Boolean(
+    (summary?.is_calibrated || calibObj?.calibrated) && effectiveScale > 0
+  );
   const activeUnit = unitMode === "auto" ? (isCalibrated ? "mm" : "px") : unitMode;
 
   const originalUrl = details?.originalUrl || photo?.originalUrl || photo?.previewUrl;
@@ -267,9 +297,61 @@ export function CrackGeometrySection({
 
   const selectedCrack = cracks.find((c) => c.id === selectedCrackId);
 
+  const sevAssessment = summary?.severity_assessment;
+  const controllingWidthMm =
+    selectedWidthMetric === "average"
+      ? (summary?.average_crack_width_mm ?? (effectiveScale > 0 && summary?.average_crack_width_px ? summary.average_crack_width_px * effectiveScale : null))
+      : (summary?.maximum_crack_width_mm ?? (effectiveScale > 0 && summary?.maximum_crack_width_px ? summary.maximum_crack_width_px * effectiveScale : null));
+
+  let derivedCategory = summary?.crack_severity_category || sevAssessment?.category;
+  let derivedCode = summary?.crack_severity_code || sevAssessment?.category_code;
+
+  if (isCalibrated && (!derivedCategory || derivedCategory === "Uncalibrated")) {
+    if (cracks.length === 0 || controllingWidthMm === 0) {
+      derivedCategory = "Sound Surface";
+      derivedCode = "none";
+    } else if (controllingWidthMm !== null && controllingWidthMm !== undefined) {
+      if (controllingWidthMm < 1.0) {
+        derivedCategory = "Hairline";
+        derivedCode = "hairline";
+      } else if (controllingWidthMm < 3.0) {
+        derivedCategory = "Minor";
+        derivedCode = "minor";
+      } else if (controllingWidthMm <= 5.0) {
+        derivedCategory = "Moderate";
+        derivedCode = "moderate";
+      } else {
+        derivedCategory = "Severe";
+        derivedCode = "severe";
+      }
+    } else {
+      derivedCategory = "Minor";
+      derivedCode = "minor";
+    }
+  }
+
+  const currentCategory = derivedCategory || (isCalibrated ? "Minor" : "Uncalibrated");
+  const currentCode = derivedCode || (isCalibrated ? "minor" : "uncalibrated");
+
   // Severity styling helper: Strict 1-3 colors (Neutral + Primary or subtle Warning)
   const getSeverityBadge = (category?: string, code?: string) => {
-    const norm = (code || category || "").toLowerCase();
+    let cat = (category || "").toLowerCase();
+    let c = (code || "").toLowerCase();
+
+    if (isCalibrated && (c === "uncalibrated" || cat === "uncalibrated" || (!c && !cat))) {
+      if (controllingWidthMm !== null && controllingWidthMm !== undefined) {
+        if (controllingWidthMm <= 0) { c = "none"; cat = "sound surface"; }
+        else if (controllingWidthMm < 1.0) { c = "hairline"; cat = "hairline"; }
+        else if (controllingWidthMm < 3.0) { c = "minor"; cat = "minor"; }
+        else if (controllingWidthMm <= 5.0) { c = "moderate"; cat = "moderate"; }
+        else { c = "severe"; cat = "severe"; }
+      } else {
+        c = "minor";
+        cat = "minor";
+      }
+    }
+
+    const norm = (c || cat).toLowerCase();
     if (norm === "hairline") {
       return (
         <Badge variant="outline" className="border-border bg-muted/50 text-foreground font-semibold px-2 py-0.5">
@@ -298,10 +380,17 @@ export function CrackGeometrySection({
         </Badge>
       );
     }
-    if (norm === "no_visible_damage" || norm === "none") {
+    if (norm === "no_visible_damage" || norm === "none" || norm.includes("sound")) {
       return (
         <Badge variant="outline" className="border-border bg-muted/40 text-muted-foreground font-medium px-2 py-0.5">
           Sound Surface (0.0 mm)
+        </Badge>
+      );
+    }
+    if (isCalibrated) {
+      return (
+        <Badge variant="outline" className="border-primary/40 bg-primary/10 text-primary font-semibold px-2 py-0.5">
+          Calibrated ({effectiveScale.toFixed(4)} mm/px)
         </Badge>
       );
     }
@@ -332,10 +421,6 @@ export function CrackGeometrySection({
       </div>
     );
   }
-
-  const sevAssessment = summary?.severity_assessment;
-  const currentCategory = summary?.crack_severity_category || sevAssessment?.category || (isCalibrated ? "None" : "Uncalibrated");
-  const currentCode = summary?.crack_severity_code || sevAssessment?.category_code || (isCalibrated ? "no_visible_damage" : "uncalibrated");
 
   const dmg =
     summary?.damage_assessment ||
@@ -722,7 +807,10 @@ export function CrackGeometrySection({
             <div className="pt-1.5 flex items-center justify-between">
               <span className="text-[11px] text-muted-foreground">Category by Max Width:</span>
               <span className="font-semibold text-foreground">
-                {sevAssessment?.category_by_max_width?.category || (isCalibrated ? currentCategory : "Uncalibrated")}
+                {(typeof sevAssessment?.category_by_max_width === "object"
+                  ? sevAssessment?.category_by_max_width?.category
+                  : sevAssessment?.category_by_max_width) ||
+                  (isCalibrated ? currentCategory : "Uncalibrated")}
               </span>
             </div>
           </div>
@@ -762,7 +850,10 @@ export function CrackGeometrySection({
             <div className="pt-1.5 flex items-center justify-between">
               <span className="text-[11px] text-muted-foreground">Category by Avg Width:</span>
               <span className="font-semibold text-foreground">
-                {sevAssessment?.category_by_avg_width?.category || (isCalibrated ? currentCategory : "Uncalibrated")}
+                {(typeof sevAssessment?.category_by_avg_width === "object"
+                  ? sevAssessment?.category_by_avg_width?.category
+                  : sevAssessment?.category_by_avg_width) ||
+                  (isCalibrated ? currentCategory : "Uncalibrated")}
               </span>
             </div>
           </div>
@@ -1201,6 +1292,9 @@ export function CrackGeometrySection({
           }
           if (result?.calibration?.width_metric) {
             setSelectedWidthMetric(result.calibration.width_metric);
+          }
+          if (result?.crack_geometry) {
+            onGeometryUpdated?.(result.crack_geometry);
           }
         }}
       />

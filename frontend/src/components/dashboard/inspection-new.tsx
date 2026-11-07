@@ -930,8 +930,8 @@ export function InspectionNewPage() {
     [replaceTargetId]
   );
 
-  const handleCalibrate = useCallback((id: string) => {
-    setCalibratingPhotoId(id);
+  const handleCalibrate = useCallback((idOrPhoto: any) => {
+    setCalibratingPhotoId(typeof idOrPhoto === "string" ? idOrPhoto : idOrPhoto?.id);
   }, []);
 
   const handleRemovePhoto = useCallback(
@@ -1618,7 +1618,7 @@ export function InspectionNewPage() {
         onCalibrated={(res) => {
           setPhotos((prev) =>
             prev.map((p) =>
-              p.id === calibratingPhotoId
+              p.id === (res?.imageId || calibratingPhotoId)
                 ? {
                     ...p,
                     calibration: res.calibration,
@@ -1628,6 +1628,7 @@ export function InspectionNewPage() {
                     damageAssessment: res.damageAssessment || res.damage_assessment,
                     hasGeometry: Boolean(res.crack_geometry || res.crackGeometry),
                     has_geometry: Boolean(res.crack_geometry || res.crackGeometry),
+                    version: Date.now(),
                   }
                 : p
             )

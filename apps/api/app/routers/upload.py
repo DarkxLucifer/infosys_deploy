@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse
 from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy import desc
 from PIL import Image
 import cv2
@@ -1470,7 +1471,12 @@ def get_image_details(
         # On-demand crack geometry extraction if mask exists
         geo_file = find_stored_file("geometry", f"{image.id}.jpg") or os.path.join(GEOMETRY_DIR, f"{image.id}.jpg")
         qr_curr = dict(image.quality_report or {})
-        if os.path.exists(unet_mask) and ("crack_geometry" not in qr_curr or not (geo_file and os.path.exists(geo_file))):
+        existing_geo = qr_curr.get("crack_geometry")
+        cached_calib = bool(existing_geo.get("summary", {}).get("is_calibrated")) if (existing_geo and isinstance(existing_geo, dict)) else False
+        actual_calib = bool(image.calibration and (image.calibration.get("mm_per_pixel") or image.calibration.get("mm_per_px")))
+        calib_mismatch = (existing_geo is not None and cached_calib != actual_calib)
+
+        if os.path.exists(unet_mask) and ("crack_geometry" not in qr_curr or not (geo_file and os.path.exists(geo_file)) or calib_mismatch):
             try:
                 from app.services.crack_geometry import extract_crack_geometry
                 orig_target = image.original_path if (image.original_path and os.path.exists(image.original_path)) else proc_target
@@ -1968,9 +1974,17 @@ def get_image_geometry_endpoint(
     inspection = db.query(Inspection).filter(Inspection.id == image.inspection_id).first()
     enforce_image_visibility(current_user, image, inspection)
 
-    # Return cached geometry if present
+    # Return cached geometry if present and calibration matches
     if image.quality_report and isinstance(image.quality_report, dict) and "crack_geometry" in image.quality_report:
-        return image.quality_report["crack_geometry"]
+        cached_geo = image.quality_report["crack_geometry"]
+        if isinstance(cached_geo, dict):
+            cached_calib = bool(cached_geo.get("summary", {}).get("is_calibrated"))
+            actual_calib = bool(image.calibration and (image.calibration.get("mm_per_pixel") or image.calibration.get("mm_per_px")))
+            cached_scale = cached_geo.get("summary", {}).get("mm_per_pixel")
+            actual_scale = (image.calibration.get("mm_per_pixel") or image.calibration.get("mm_per_px")) if actual_calib else None
+            scale_match = (not actual_calib) or (cached_scale is not None and abs(float(cached_scale) - float(actual_scale)) < 1e-5)
+            if (cached_calib == actual_calib) and scale_match:
+                return cached_geo
 
     return execute_geometry_calculation(image=image, payload=None, inspection_id=inspection_id, user_id=current_user.id, db=db)
 
@@ -1999,9 +2013,15 @@ def calculate_image_geometry_endpoint(
     if payload and not payload.force_recompute and payload.mm_per_pixel is None:
         existing_geo = image.quality_report.get("crack_geometry") if (image.quality_report and isinstance(image.quality_report, dict)) else None
         if existing_geo and isinstance(existing_geo, dict):
-            current_metric = existing_geo.get("summary", {}).get("controlling_metric")
-            if not payload.width_metric or payload.width_metric == current_metric:
-                return existing_geo
+            cached_calib = bool(existing_geo.get("summary", {}).get("is_calibrated"))
+            actual_calib = bool(image.calibration and (image.calibration.get("mm_per_pixel") or image.calibration.get("mm_per_px")))
+            cached_scale = existing_geo.get("summary", {}).get("mm_per_pixel")
+            actual_scale = (image.calibration.get("mm_per_pixel") or image.calibration.get("mm_per_px")) if actual_calib else None
+            scale_match = (not actual_calib) or (cached_scale is not None and abs(float(cached_scale) - float(actual_scale)) < 1e-5)
+            if (cached_calib == actual_calib) and scale_match:
+                current_metric = existing_geo.get("summary", {}).get("controlling_metric")
+                if not payload.width_metric or payload.width_metric == current_metric:
+                    return existing_geo
 
     return execute_geometry_calculation(image=image, payload=payload, inspection_id=inspection_id, user_id=current_user.id, db=db)
 
@@ -2177,6 +2197,8 @@ def execute_geometry_calculation(
 
     qr = dict(image.quality_report or {})
     qr["crack_geometry"] = geo_res
+    if image.calibration and isinstance(image.calibration, dict):
+        qr["calibration"] = image.calibration
     image.quality_report = qr
     flag_modified(image, "quality_report")
 
@@ -3034,6 +3056,13 @@ def calibrate_scale_endpoint(
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
     image.calibration = calib_record
+    flag_modified(image, "calibration")
+
+    # Keep quality_report["calibration"] synchronized
+    qr = dict(image.quality_report or {})
+    qr["calibration"] = calib_record
+    image.quality_report = qr
+    flag_modified(image, "quality_report")
 
     audit = AuditLog(
         user_id=current_user.id,
@@ -3099,6 +3128,13 @@ def delete_image_calibration_endpoint(
     enforce_image_visibility(current_user, image, inspection)
 
     image.calibration = None
+    flag_modified(image, "calibration")
+
+    # Clear calibration from quality_report
+    qr = dict(image.quality_report or {})
+    qr.pop("calibration", None)
+    image.quality_report = qr
+    flag_modified(image, "quality_report")
     db.flush()
 
     geo_res = None

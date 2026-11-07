@@ -1552,9 +1552,39 @@ export function InspectionDetailPage() {
               (drawerPhoto?.id === calibratingImageId ? drawerPhoto : { id: calibratingImageId })
             }
             inspectionId={id}
-            onCalibrated={() => {
+            onCalibrated={(res) => {
               fetchData();
               setCalibratingImageId(null);
+              if (res) {
+                setDrawerPhoto((prev: any) => {
+                  if (!prev) return prev;
+                  if (res.imageId && prev.id !== res.imageId) return prev;
+                  return {
+                    ...prev,
+                    calibration: res.calibration,
+                    crack_geometry: res.crack_geometry,
+                    crackGeometry: res.crack_geometry,
+                    damageAssessment: res.damage_assessment || res.damageAssessment,
+                    damage_assessment: res.damage_assessment || res.damageAssessment,
+                    version: Date.now(),
+                  };
+                });
+                setDbImages((prev: any[]) =>
+                  prev.map((img: any) =>
+                    img.id === (res.imageId || calibratingImageId)
+                      ? {
+                          ...img,
+                          calibration: res.calibration,
+                          crack_geometry: res.crack_geometry,
+                          crackGeometry: res.crack_geometry,
+                          damageAssessment: res.damage_assessment || res.damageAssessment,
+                          damage_assessment: res.damage_assessment || res.damageAssessment,
+                          version: Date.now(),
+                        }
+                      : img
+                  )
+                );
+              }
             }}
           />
 
@@ -1653,7 +1683,7 @@ export function InspectionDetailPage() {
             photo={drawerPhoto}
             onConfirmWarning={handleConfirmWarning}
             onRetryProcessing={handleRunPreprocess}
-            onCalibrate={(imgId) => setCalibratingImageId(imgId)}
+            onCalibrate={(arg: any) => setCalibratingImageId(typeof arg === "string" ? arg : arg?.id)}
             onReplace={!isImageSetLocked ? (imgId) => setReplacePhotoId(imgId) : undefined}
             onRemove={!isImageSetLocked ? (imgId) => setDeletePhoto(dbImages.find((img: any) => img.id === imgId) || { id: imgId }) : undefined}
             onTransform={(p) => setTransformPhoto(p)}

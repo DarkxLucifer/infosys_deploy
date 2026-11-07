@@ -204,6 +204,8 @@ export function DamageAnalyticsPage() {
     const labels = Array.from({ length: maxEpochs }, (_, i) => `Epoch ${i + 1}`);
 
     const strokeColors = ["#6366f1", "#f43f5e", "#0ea5e9", "#10b981"];
+    const isCalibratedSeries = activeSeries.some((s: any) => s.epochs?.some((e: any) => e.calibrated));
+    const unitLabel = isCalibratedSeries ? "mm" : "px";
 
     const datasets = activeSeries.map((s: any, idx: number) => {
       const dataPoints = s.epochs.map((e: any) => e.max_aperture_px);
@@ -239,11 +241,11 @@ export function DamageAnalyticsPage() {
             ticks: {
               font: { size: 11 },
               color: "#94a3b8",
-              callback: (val) => `${val} px`,
+              callback: (val) => `${val} ${unitLabel}`,
             },
             title: {
               display: true,
-              text: "Max Crack Aperture",
+              text: `Max Crack Aperture (${unitLabel})`,
               color: "#94a3b8",
               font: { size: 11 },
             },
@@ -260,7 +262,7 @@ export function DamageAnalyticsPage() {
           },
           tooltip: {
             callbacks: {
-              label: (context) => ` ${context.dataset.label}: ${context.raw} px`,
+              label: (context) => ` ${context.dataset.label}: ${context.raw} ${unitLabel}`,
             },
           },
         },

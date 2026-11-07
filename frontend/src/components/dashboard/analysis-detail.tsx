@@ -353,7 +353,17 @@ export function AnalysisDetailPage() {
                   (d.measurements?.max_width_mm || d.measurement?.max_width || 0) * 10
                 ) / 10,
             },
-            mmPerPx: d.measurements?.calibrated ? 0.25 : 1,
+            mmPerPx: (() => {
+              const parentImg = dbImages.find((img: any) => img.id === (d.image_id || d.imageId));
+              const imgCalib = parentImg?.calibration || parentImg?.qualityReport?.calibration;
+              const scale = Number(
+                imgCalib?.mm_per_pixel ||
+                imgCalib?.mm_per_px ||
+                d.measurements?.mm_per_pixel ||
+                (d.measurements?.calibrated ? 0.25 : 1)
+              );
+              return (d.measurements?.calibrated || imgCalib?.calibrated) ? scale : 1;
+            })(),
             review: (d.verified_by || d.verified || d.geometry_verified)
               ? ("confirmed" as const)
               : ("pending" as const),
