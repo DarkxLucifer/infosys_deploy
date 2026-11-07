@@ -209,33 +209,27 @@ export function ClassificationBadge({
 
   // 3. AI Classification result exists
   if (ai || photo?.rfdetrDetection || photo?.yoloDetection || photo?.unetSegmentation) {
-    const rfDef = Boolean(photo?.rfdetrDetection?.has_defect || (photo?.rfdetrDetection?.num_detections && photo.rfdetrDetection.num_detections > 0));
-    const yoloDef = Boolean(photo?.yoloDetection?.has_defect || (photo?.yoloDetection?.num_detections && photo.yoloDetection.num_detections > 0));
-    const unetDef = Boolean(photo?.unetSegmentation?.has_crack || (photo?.unetSegmentation?.crack_area_pct !== undefined && photo.unetSegmentation.crack_area_pct > 0));
+    const crackProb = typeof ai?.crack_probability === "number"
+      ? ai.crack_probability
+      : (typeof ai?.confidence === "number" && ai?.has_crack ? ai.confidence : null);
+    const threshold = typeof ai?.threshold === "number" ? ai.threshold : 0.80;
+    const thresholdPct = (threshold * 100).toFixed(0);
 
-    const hasCrack = Boolean(
-      ai?.has_crack ||
-      ai?.predicted_class === "Cracked" ||
-      (ai?.crack_probability ?? 0) >= 0.80 ||
-      rfDef ||
-      yoloDef ||
-      unetDef ||
-      photo?.is_cracked ||
-      photo?.isCracked
-    );
-    const rawProb = hasCrack
-      ? Math.max(
-          ai?.crack_probability ?? 0,
-          photo?.rfdetrDetection?.confidence ?? 0,
-          photo?.yoloDetection?.confidence ?? 0,
-          photo?.unetSegmentation?.mean_crack_confidence ?? 0,
-          0.86
-        )
-      : (ai?.uncracked_probability ?? (1 - (ai?.crack_probability || 0)));
-    const pct = typeof rawProb === "number" ? Math.round(rawProb * 100) : 86;
-    const thresholdPct = typeof ai?.threshold === "number" ? (ai.threshold * 100).toFixed(1) : "80.0";
+    // STRICT 80% GATE RULE:
+    // If crack probability is available, crack defect is ONLY confirmed if crack_probability >= threshold (80%).
+    const hasCrack = crackProb !== null
+      ? crackProb >= threshold
+      : Boolean(ai?.has_crack || ai?.predicted_class === "Cracked" || photo?.is_cracked);
 
     if (hasCrack) {
+      const rawProb = Math.max(
+        crackProb ?? 0,
+        photo?.rfdetrDetection?.confidence ?? 0,
+        photo?.yoloDetection?.confidence ?? 0,
+        photo?.unetSegmentation?.mean_crack_confidence ?? 0,
+        0.86
+      );
+      const pct = Math.round(rawProb * 100);
       return (
         <span
           title={`InfraScan Two-Stage AI: Defect confirmed (${pct}% score exceeds ${thresholdPct}% alarm threshold)`}
@@ -247,14 +241,18 @@ export function ClassificationBadge({
         </span>
       );
     } else {
+      const soundProb = typeof ai?.uncracked_probability === "number"
+        ? ai.uncracked_probability
+        : (crackProb !== null ? 1 - crackProb : 0.88);
+      const soundPct = Math.round(soundProb * 100);
       return (
         <span
-          title={`InfraScan Two-Stage AI: Sound concrete surface (${pct}% confidence)`}
+          title={`InfraScan Two-Stage AI: Sound concrete surface verified (${soundPct}% sound score, below ${thresholdPct}% defect cutoff)`}
           className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-bold bg-muted/80 text-foreground border border-border shadow-xs backdrop-blur-xs ${className}`}
         >
-          <CheckCircle2 className="size-3 text-muted-foreground shrink-0" />
-          <span>No Crack</span>
-          <span className="text-[9px] font-mono text-muted-foreground font-normal">({pct}%)</span>
+          <CheckCircle2 className="size-3 text-primary shrink-0" />
+          <span>Sound Surface</span>
+          <span className="text-[9px] font-mono text-muted-foreground font-normal">({soundPct}%)</span>
         </span>
       );
     }
@@ -1185,44 +1183,47 @@ export function ImageDetailsDrawer({
     photo?.quality_report?.unet_segmentation ||
     aiClassification?.unet_segmentation;
 
-  const isCrackDetected = Boolean(
-    aiClassification?.has_crack ||
-    aiClassification?.predicted_class === "Cracked" ||
-    (aiClassification?.crack_probability ?? 0) >= 0.80 ||
-    rfdetrDetection?.has_defect ||
-    Boolean(rfdetrDetection?.num_detections && rfdetrDetection.num_detections > 0) ||
-    unetSegmentation?.has_crack ||
-    (unetSegmentation?.crack_area_pct !== undefined && unetSegmentation.crack_area_pct > 0) ||
-    photo?.is_cracked ||
-    photo?.isCracked
-  );
+  const crackProb = typeof aiClassification?.crack_probability === "number"
+    ? aiClassification.crack_probability
+    : null;
+  const gateThreshold = typeof aiClassification?.threshold === "number"
+    ? aiClassification.threshold
+    : 0.80;
+
+  // STRICT 80% GATE RULE:
+  // If crack probability is available, crack defect is ONLY confirmed if crack_probability >= threshold (80%).
+  const isCrackDetected = crackProb !== null
+    ? crackProb >= gateThreshold
+    : Boolean(
+        aiClassification?.has_crack ||
+        aiClassification?.predicted_class === "Cracked" ||
+        photo?.is_cracked ||
+        photo?.isCracked
+      );
 
   const rfdetrUrl =
     details?.rfdetrUrl ||
     photo?.rfdetrUrl ||
-    (details?.hasRfdetr || photo?.hasRfdetr || isCrackDetected
+    (isCrackDetected && (details?.hasRfdetr || photo?.hasRfdetr)
       ? `/api/v1/images/${photo.id}/file?variant=rfdetr`
       : null);
-    photo?.rfdetr_detection ||
-    photo?.qualityReport?.rfdetr_detection ||
-    photo?.quality_report?.rfdetr_detection ||
-    aiClassification?.rfdetr_detection;
 
-  const activeStage2Model =
-    details?.activeStage2Model ||
-    details?.active_stage2_model ||
-    photo?.activeStage2Model ||
-    photo?.active_stage2_model ||
-    aiClassification?.active_stage2_model ||
-    (rfdetrDetection?.has_defect ? "rfdetr" : (isCrackDetected ? "unet_fallback" : null));
+  const activeStage2Model = isCrackDetected
+    ? (details?.activeStage2Model ||
+       details?.active_stage2_model ||
+       photo?.activeStage2Model ||
+       photo?.active_stage2_model ||
+       aiClassification?.active_stage2_model ||
+       (rfdetrDetection?.has_defect ? "rfdetr" : "unet_fallback"))
+    : "none";
 
-  const modelFallback = Boolean(
+  const modelFallback = isCrackDetected && Boolean(
     details?.modelFallback ??
     details?.model_fallback ??
     photo?.modelFallback ??
     photo?.model_fallback ??
     aiClassification?.model_fallback ??
-    (isCrackDetected && (!rfdetrDetection || !rfdetrDetection.has_defect))
+    (!rfdetrDetection || !rfdetrDetection.has_defect)
   );
 
   const yoloUrl =
@@ -1548,19 +1549,19 @@ export function ImageDetailsDrawer({
                     {/* Status banner */}
                     <div
                       className={`p-3 rounded-lg border flex items-center justify-between text-xs font-semibold ${
-                        aiClassification.has_crack || aiClassification.predicted_class === "Cracked"
+                        isCrackDetected
                           ? "bg-rose-500/10 border-rose-500/30 text-rose-400"
                           : "bg-muted/30 border-border text-foreground"
                       }`}
                     >
                       <div className="flex items-center gap-2">
-                        {aiClassification.has_crack || aiClassification.predicted_class === "Cracked" ? (
+                        {isCrackDetected ? (
                           <AlertTriangle className="size-4 text-rose-400 shrink-0" />
                         ) : (
-                          <CheckCircle2 className="size-4 text-muted-foreground shrink-0" />
+                          <CheckCircle2 className="size-4 text-primary shrink-0" />
                         )}
                         <span>
-                          {aiClassification.has_crack || aiClassification.predicted_class === "Cracked"
+                          {isCrackDetected
                             ? (modelFallback
                                 ? "Crack Identified · RF-DETR 0 bboxes &rarr; U-Net Fallback Active"
                                 : (rfdetrDetection?.has_defect
@@ -1570,9 +1571,9 @@ export function ImageDetailsDrawer({
                         </span>
                       </div>
                       <span className="font-mono text-[11px] px-2 py-0.5 rounded bg-muted/60 text-foreground border border-border">
-                        {aiClassification.has_crack || aiClassification.predicted_class === "Cracked"
+                        {isCrackDetected
                           ? `Probability: ${((aiClassification.crack_probability ?? aiClassification.confidence ?? 0) * 100).toFixed(1)}%`
-                          : `Sound: ${(((aiClassification.uncracked_probability ?? (1 - (aiClassification.crack_probability || 0)))) * 100).toFixed(1)}%`}
+                          : `Sound: ${(((aiClassification.uncracked_probability ?? (1 - (aiClassification.crack_probability || 0)))) * 100).toFixed(1)}% (Crack: ${((aiClassification.crack_probability ?? 0) * 100).toFixed(1)}%)`}
                       </span>
                     </div>
 
@@ -1594,12 +1595,12 @@ export function ImageDetailsDrawer({
                         {/* Probability fill */}
                         <div
                           className={`h-full transition-all duration-500 ${
-                            aiClassification.has_crack || aiClassification.predicted_class === "Cracked"
+                            isCrackDetected
                               ? "bg-rose-500"
                               : "bg-primary"
                           }`}
                           style={{
-                            width: `${Math.min(100, Math.max(2, (aiClassification.crack_probability ?? (aiClassification.has_crack ? 0.9 : 0.05)) * 100))}%`
+                            width: `${Math.min(100, Math.max(2, (aiClassification.crack_probability ?? (isCrackDetected ? 0.9 : 0.05)) * 100))}%`
                           }}
                         />
                       </div>
@@ -1609,7 +1610,7 @@ export function ImageDetailsDrawer({
                         <span>100% Cracked</span>
                       </div>
                       <p className="text-[10px] text-muted-foreground leading-snug bg-muted/30 p-2 rounded-lg border border-border/50">
-                        <strong className="text-foreground">Pipeline Rule:</strong> If crack prob is <strong>&ge; 80%</strong>, run <strong>RF-DETR Medium</strong> first. If RF-DETR finds 0 bounding boxes, activate fallback to <strong>best_model.pth (UNet)</strong>.
+                        <strong className="text-foreground">Pipeline Rule:</strong> If crack prob is <strong>&ge; 80%</strong>, run <strong>RF-DETR Medium</strong> first. If RF-DETR finds 0 bounding boxes, activate fallback to <strong>best_model.pth (UNet)</strong>. {isCrackDetected ? "Crack gate passed (>= 80%)." : "Crack probability below 80% cutoff — surface classified as sound."}
                       </p>
                     </div>
 
@@ -1617,14 +1618,14 @@ export function ImageDetailsDrawer({
                     <div className="grid grid-cols-4 gap-2 text-center text-xs">
                       <div className="p-2 rounded-lg bg-muted/30 border border-border/60">
                         <span className="text-[10px] text-muted-foreground block">Predicted Class</span>
-                        <span className={`font-bold font-mono ${aiClassification.has_crack || aiClassification.predicted_class === "Cracked" ? "text-rose-400" : "text-foreground"}`}>
-                          {aiClassification.predicted_class || (aiClassification.has_crack ? "Cracked" : "Uncracked")}
+                        <span className={`font-bold font-mono ${isCrackDetected ? "text-rose-400" : "text-foreground"}`}>
+                          {isCrackDetected ? "Cracked" : "Uncracked"}
                         </span>
                       </div>
                       <div className="p-2 rounded-lg bg-muted/30 border border-border/60">
                         <span className="text-[10px] text-muted-foreground block">Stage 2 Active</span>
                         <span className="font-bold font-mono text-foreground">
-                          {modelFallback ? "UNet Fallback" : (rfdetrDetection?.has_defect ? "RF-DETR" : "ResNet-18")}
+                          {isCrackDetected ? (modelFallback ? "UNet Fallback" : (rfdetrDetection?.has_defect ? "RF-DETR" : "ResNet-18")) : "Gate Closed (< 80%)"}
                         </span>
                       </div>
                       <div className="p-2 rounded-lg bg-muted/30 border border-border/60">
@@ -1715,8 +1716,8 @@ export function ImageDetailsDrawer({
                       <td className="py-2.5 px-3 font-semibold text-foreground">Classification Status</td>
                       <td className="py-2.5 px-3 font-mono font-bold">
                         {aiClassification ? (
-                          <span className={aiClassification.has_crack || aiClassification.predicted_class === "Cracked" ? "text-rose-400" : "text-foreground"}>
-                            {aiClassification.predicted_class || (aiClassification.has_crack ? "Cracked" : "Uncracked")} ({((aiClassification.crack_probability ?? aiClassification.confidence ?? 0) * 100).toFixed(1)}%)
+                          <span className={isCrackDetected ? "text-rose-400" : "text-foreground"}>
+                            {isCrackDetected ? (aiClassification.predicted_class || "Cracked") : "Uncracked"} ({((aiClassification.crack_probability ?? aiClassification.confidence ?? 0) * 100).toFixed(1)}%)
                           </span>
                         ) : (
                           <span className="text-muted-foreground">Not evaluated yet</span>
@@ -2740,10 +2741,12 @@ export function ImageQualityCard({
       photo.quality_report?.ai_classification;
 
     if (ai) {
-      const hasCrack = Boolean(ai.has_crack || ai.predicted_class === "Cracked" || (ai.crack_probability ?? 0) >= 0.80);
+      const crackProb = typeof ai.crack_probability === "number" ? ai.crack_probability : null;
+      const threshold = typeof ai.threshold === "number" ? ai.threshold : 0.80;
+      const hasCrack = crackProb !== null ? crackProb >= threshold : Boolean(ai.has_crack || ai.predicted_class === "Cracked");
       const rawProb = hasCrack
-        ? (ai.crack_probability ?? ai.confidence)
-        : (ai.uncracked_probability ?? (1 - (ai.crack_probability || 0)));
+        ? (crackProb ?? ai.confidence)
+        : (ai.uncracked_probability ?? (1 - (crackProb || 0)));
       const pct = typeof rawProb === "number" ? Math.round(rawProb * 100) : 0;
       if (hasCrack) {
         if (!isFallback && rfdetrDet?.has_defect) {
@@ -2789,30 +2792,32 @@ export function ImageQualityCard({
     photo.qualityReport?.ai_classification ||
     photo.quality_report?.ai_classification;
 
-  const hasCrackDefect = Boolean(
-    aiForThumb?.has_crack ||
-    aiForThumb?.predicted_class === "Cracked" ||
-    (aiForThumb?.crack_probability ?? 0) >= 0.80 ||
-    rfdetrDet?.has_defect ||
-    Boolean(rfdetrDet?.num_detections && rfdetrDet.num_detections > 0) ||
-    unetSeg?.has_crack ||
-    (unetSeg?.crack_area_pct !== undefined && unetSeg.crack_area_pct > 0) ||
-    photo.is_cracked ||
-    photo.isCracked
-  );
+  const thumbCrackProb = typeof aiForThumb?.crack_probability === "number"
+    ? aiForThumb.crack_probability
+    : null;
+  const thumbThreshold = typeof aiForThumb?.threshold === "number"
+    ? aiForThumb.threshold
+    : 0.80;
+
+  // STRICT 80% GATE RULE:
+  const hasCrackDefect = thumbCrackProb !== null
+    ? thumbCrackProb >= thumbThreshold
+    : Boolean(
+        aiForThumb?.has_crack ||
+        aiForThumb?.predicted_class === "Cracked" ||
+        photo.is_cracked ||
+        photo.isCracked
+      );
   const isRealServerId = Boolean(photo.id && !photo.id.startsWith("client-") && !photo.id.startsWith("temp-") && photo.id.length > 15);
-  const isFallback = Boolean(photo.modelFallback || photo.model_fallback || (hasCrackDefect && (!rfdetrDet || !rfdetrDet.has_defect)));
+  const isFallback = Boolean(hasCrackDefect && (photo.modelFallback || photo.model_fallback || (!rfdetrDet || !rfdetrDet.has_defect)));
 
-  // The thumbnail area MUST ALWAYS show the UNet model output image as requested by the user
-  const unetCandidate =
-    photo.unetUrl ||
-    (isRealServerId ? `/api/v1/images/${photo.id}/file?variant=unet` : null) ||
-    photo.annotatedUrl;
+  const unetCandidate = hasCrackDefect
+    ? (photo.unetUrl || (isRealServerId ? `/api/v1/images/${photo.id}/file?variant=unet` : null) || photo.annotatedUrl)
+    : null;
 
-  const displayThumbnail =
-    unetCandidate ||
-    photo.thumbnailUrl ||
-    photo.previewUrl;
+  const displayThumbnail = hasCrackDefect
+    ? (unetCandidate || photo.thumbnailUrl || photo.previewUrl)
+    : (photo.processedUrl || photo.previewUrl || photo.originalUrl);
 
   const authThumbSrc = getAuthenticatedUrl(displayThumbnail) || displayThumbnail;
 
@@ -2833,7 +2838,7 @@ export function ImageQualityCard({
             onError={(e) => {
               // Never fallback to original raw photo on error!
               const target = e.currentTarget;
-              if (isRealServerId) {
+              if (isRealServerId && hasCrackDefect) {
                 const retryUnet = getAuthenticatedUrl(`/api/v1/images/${photo.id}/file?variant=unet&retry=1`);
                 if (retryUnet && target.src !== retryUnet) {
                   target.src = retryUnet;
@@ -2852,13 +2857,13 @@ export function ImageQualityCard({
               <ProcessingBadge status={photo.processing_status} />
             )}
             <ClassificationBadge photo={photo} />
-            {!isFallback && rfdetrDet?.has_defect && (
+            {hasCrackDefect && !isFallback && rfdetrDet?.has_defect && (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-muted/80 text-foreground border border-border shadow-xs">
                 <Cpu className="size-2.5 text-primary" />
                 RF-DETR: {rfdetrDet.primary_label || `${rfdetrDet.num_detections} defect(s)`}
               </span>
             )}
-            {isFallback && crackAreaPct !== undefined && crackAreaPct > 0 && (
+            {hasCrackDefect && isFallback && crackAreaPct !== undefined && crackAreaPct > 0 && (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-muted/80 text-foreground border border-border shadow-xs">
                 <Sparkles className="size-2.5 text-primary" />
                 UNet Fallback: {crackAreaPct}%
@@ -3078,44 +3083,49 @@ export function SessionDamageAssessmentCard({
   let controllingPhotoName = "";
 
   photos.forEach((photo, idx) => {
-    const geo = photo.crackGeometry || photo.crack_geometry || photo.quality_report?.crack_geometry || photo.qualityReport?.crack_geometry;
+    const aiCls = photo.aiClassification || photo.ai_classification || photo.qualityReport?.ai_classification || photo.quality_report?.ai_classification;
+    const crackProb = typeof aiCls?.crack_probability === "number" ? aiCls.crack_probability : null;
+    const gateThreshold = typeof aiCls?.threshold === "number" ? aiCls.threshold : 0.80;
+    const isCrackDefect = crackProb !== null ? crackProb >= gateThreshold : Boolean(aiCls?.has_crack);
+
+    const geo = isCrackDefect ? (photo.crackGeometry || photo.crack_geometry || photo.quality_report?.crack_geometry || photo.qualityReport?.crack_geometry) : null;
     const summary = geo?.summary || {};
     const calib = photo.calibration || photo.qualityReport?.calibration || {};
-    const unet = photo.unetSegmentation || photo.unet_segmentation || photo.qualityReport?.unet_segmentation || photo.quality_report?.unet_segmentation;
-    const rfdetr = photo.rfdetrDetection || photo.rfdetr_detection || photo.qualityReport?.rfdetr_detection || photo.quality_report?.rfdetr_detection;
-    const dmg = photo.damageAssessment || photo.damage_assessment || photo.qualityReport?.damage_assessment || photo.quality_report?.damage_assessment || summary.damage_assessment;
+    const unet = isCrackDefect ? (photo.unetSegmentation || photo.unet_segmentation || photo.qualityReport?.unet_segmentation || photo.quality_report?.unet_segmentation) : null;
+    const rfdetr = isCrackDefect ? (photo.rfdetrDetection || photo.rfdetr_detection || photo.qualityReport?.rfdetr_detection || photo.quality_report?.rfdetr_detection) : null;
+    const dmg = isCrackDefect ? (photo.damageAssessment || photo.damage_assessment || photo.qualityReport?.damage_assessment || photo.quality_report?.damage_assessment || summary.damage_assessment) : null;
 
     const isCalibrated = Boolean(calib.is_calibrated || summary.is_calibrated || calib.calibrated);
     const scale = Number(calib.scale_factor_mm_per_pixel || calib.mm_per_pixel || summary.calibration_mm_per_pixel || summary.mm_per_pixel || 0);
 
-    const crackCount = Number(summary.crack_count || (unet?.has_crack ? 1 : (rfdetr?.num_detections || 0)));
-    let crackArea = Number(summary.total_crack_area_pixels || summary.crack_area_px || unet?.crack_pixels || 0);
+    const crackCount = isCrackDefect ? Number(summary.crack_count || (unet?.has_crack ? 1 : (rfdetr?.num_detections || 0))) : 0;
+    let crackArea = isCrackDefect ? Number(summary.total_crack_area_pixels || summary.crack_area_px || unet?.crack_pixels || 0) : 0;
     let surfaceArea = Number(summary.total_surface_area_pixels || summary.inspected_surface_area_px || (photo.width && photo.height ? photo.width * photo.height : 0));
 
-    let density = Number(summary.crack_coverage_pct || summary.crack_density_pct || unet?.crack_area_pct || 0);
-    if (density <= 0 && surfaceArea > 0 && crackArea > 0) {
+    let density = isCrackDefect ? Number(summary.crack_coverage_pct || summary.crack_density_pct || unet?.crack_area_pct || 0) : 0;
+    if (isCrackDefect && density <= 0 && surfaceArea > 0 && crackArea > 0) {
       density = (crackArea / surfaceArea) * 100;
     }
-    if (density > 0 && crackArea <= 0 && surfaceArea > 0) {
+    if (isCrackDefect && density > 0 && crackArea <= 0 && surfaceArea > 0) {
       crackArea = Math.round((density / 100) * surfaceArea);
     }
-    if (density > 0 && surfaceArea <= 0 && crackArea > 0) {
+    if (isCrackDefect && density > 0 && surfaceArea <= 0 && crackArea > 0) {
       surfaceArea = Math.round(crackArea / (density / 100));
     }
 
-    const peakWidthPx = Number(summary.maximum_crack_width_px || unet?.max_width_px || 0);
-    const peakWidthMm = summary.maximum_crack_width_mm != null
+    const peakWidthPx = isCrackDefect ? Number(summary.maximum_crack_width_px || unet?.max_width_px || 0) : 0;
+    const peakWidthMm = isCrackDefect && summary.maximum_crack_width_mm != null
       ? Number(summary.maximum_crack_width_mm)
-      : (unet?.max_width_mm != null
+      : (isCrackDefect && unet?.max_width_mm != null
         ? Number(unet.max_width_mm)
-        : (isCalibrated && scale > 0 && peakWidthPx > 0 ? peakWidthPx * scale : null));
-    const branches = Number(summary.total_branch_count || 0);
-    const defectType = String(photo.activeStage2Model || photo.defect_type || rfdetr?.primary_label || "").toLowerCase();
+        : (isCrackDefect && isCalibrated && scale > 0 && peakWidthPx > 0 ? peakWidthPx * scale : null));
+    const branches = isCrackDefect ? Number(summary.total_branch_count || 0) : 0;
+    const defectType = isCrackDefect ? String(photo.activeStage2Model || photo.defect_type || rfdetr?.primary_label || "").toLowerCase() : "";
 
     const minDim = photo.width && photo.height ? Math.min(photo.width, photo.height) : (surfaceArea > 0 ? Math.sqrt(surfaceArea) : null);
-    const relThickness = minDim && minDim > 0 ? peakWidthPx / minDim : null;
+    const relThickness = isCrackDefect && minDim && minDim > 0 ? peakWidthPx / minDim : null;
 
-    const hasCracks = crackCount > 0 || crackArea > 0 || density > 0 || summary.has_cracks || Boolean(unet?.has_crack) || Boolean(rfdetr?.has_defect);
+    const hasCracks = isCrackDefect && (crackCount > 0 || crackArea > 0 || density > 0 || summary.has_cracks || Boolean(unet?.has_crack) || Boolean(rfdetr?.has_defect));
 
     if (geo || unet || rfdetr || dmg || photo.quality_status || photo.status === "valid" || photo.processing_status === "complete") {
       analyzedCount++;
@@ -3134,7 +3144,11 @@ export function SessionDamageAssessmentCard({
     let pFactor = "Zero cracks";
     let pVal = "0.0% coverage";
 
-    if (dmg && dmg.severity_code) {
+    if (!isCrackDefect) {
+      photoCode = "none";
+      pFactor = "Sound Surface";
+      pVal = "0.0% coverage";
+    } else if (dmg && dmg.severity_code) {
       photoCode = dmg.severity_code;
       pFactor = dmg.controlling_factor || "AI Assessment";
       pVal = dmg.controlling_value || `${density.toFixed(2)}% coverage`;
@@ -3478,19 +3492,33 @@ export function PhotoDamageSeverityCard({
       : null;
   const relThickness = minDim && minDim > 0 ? peakWidthPx / minDim : null;
 
-  const hasCracks =
+  const photoAi = details?.aiClassification || photo?.aiClassification || details?.qualityReport?.ai_classification || photo?.qualityReport?.ai_classification || photo?.quality_report?.ai_classification;
+  const pProb = typeof photoAi?.crack_probability === "number" ? photoAi.crack_probability : null;
+  const pThresh = typeof photoAi?.threshold === "number" ? photoAi.threshold : 0.80;
+  // STRICT 80% GATE RULE:
+  // If crack probability is < 80%, this image is screened as Sound Concrete Surface (no damage).
+  const isCrackGated = pProb !== null ? pProb >= pThresh : true;
+
+  const hasCracks = isCrackGated && (
     crackCount > 0 ||
     crackArea > 0 ||
     density > 0 ||
     summary.has_cracks ||
     Boolean(unet?.has_crack) ||
-    Boolean(rfdetr?.has_defect);
+    Boolean(rfdetr?.has_defect)
+  );
 
   let photoCode = "none";
   let pFactor = "Zero cracks";
   let pVal = "0.0% coverage";
 
-  if (dmg && dmg.severity_code) {
+  if (!isCrackGated || !hasCracks || (crackArea <= 0 && density <= 0)) {
+    photoCode = "none";
+    pFactor = "Sound Surface";
+    pVal = pProb !== null
+      ? `0.0% coverage (${(pProb * 100).toFixed(1)}% crack prob < ${(pThresh * 100).toFixed(0)}% gate)`
+      : "0.0% coverage";
+  } else if (dmg && dmg.severity_code) {
     photoCode = dmg.severity_code;
     pFactor = dmg.controlling_factor || "AI Assessment";
     pVal = dmg.controlling_value || `${density.toFixed(2)}% coverage`;
@@ -3498,10 +3526,6 @@ export function PhotoDamageSeverityCard({
     photoCode = "critical";
     pFactor = "Exposed Rebar";
     pVal = "Critical Defect";
-  } else if (!hasCracks || (crackArea <= 0 && density <= 0)) {
-    photoCode = "none";
-    pFactor = "Sound Surface";
-    pVal = "0.0% coverage";
   } else if (isCalibrated && peakWidthMm != null) {
     if (peakWidthMm > 8.0) {
       photoCode = "critical";
@@ -3655,14 +3679,20 @@ export function PhotoDamageSeverityCard({
           <span className="text-[10px] text-muted-foreground font-bold block uppercase tracking-wider">
             Crack Density
           </span>
-          <span className="text-sm font-bold text-foreground font-mono">{density.toFixed(2)}%</span>
+          <span className="text-sm font-bold text-foreground font-mono">
+            {isCrackGated ? `${density.toFixed(2)}%` : "0.00%"}
+          </span>
         </div>
         <div className="p-2.5 rounded-lg bg-background border border-foreground/30 shadow-xs">
           <span className="text-[10px] text-muted-foreground font-bold block uppercase tracking-wider">
             Peak Width
           </span>
           <span className="text-sm font-bold text-foreground font-mono truncate block">
-            {isCalibrated && peakWidthMm != null ? `${peakWidthMm.toFixed(2)} mm` : `${peakWidthPx.toFixed(1)} px`}
+            {!isCrackGated
+              ? "0.0 px"
+              : isCalibrated && peakWidthMm != null
+              ? `${peakWidthMm.toFixed(2)} mm`
+              : `${peakWidthPx.toFixed(1)} px`}
           </span>
         </div>
         <div className="p-2.5 rounded-lg bg-background border border-foreground/30 shadow-xs">

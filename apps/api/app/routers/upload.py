@@ -329,14 +329,78 @@ def run_and_persist_ai_classification(
         qr = dict(image.quality_report or {})
         qr["ai_classification"] = pred
 
-        has_crack = bool(pred.get("has_crack", False))
+        threshold = float(pred.get("threshold", 0.80))
         p_crack = float(pred.get("crack_probability", 0.0))
+        # STRICT 80% GATE RULE:
+        # A concrete crack defect is ONLY confirmed if crack probability is >= calibrated decision threshold (80%).
+        has_crack = bool(p_crack >= threshold)
+
         rfdetr_result = None
         unet_result = None
         yolo_result = None
 
-        # Stage 2: Always run localized detection and pixel segmentation for concrete inspection
         proc_target = image.processed_path if (image.processed_path and os.path.exists(image.processed_path)) else target_path
+
+        # Clean prior AI detections & associated measurements for this image
+        old_det_ids = [d[0] for d in db.query(Detection.id).filter(
+            Detection.image_id == image.id,
+            Detection.source == "ai_model"
+        ).all()]
+        if old_det_ids:
+            db.query(Measurement).filter(Measurement.detection_id.in_(old_det_ids)).delete(synchronize_session=False)
+            db.query(Detection).filter(Detection.id.in_(old_det_ids)).delete(synchronize_session=False)
+
+        # -----------------------------------------------------------------
+        # CASE A: SUB-THRESHOLD (< 80%) -> SOUND CONCRETE SURFACE
+        # -----------------------------------------------------------------
+        if not has_crack:
+            pred["has_crack"] = False
+            pred["predicted_class"] = "Uncracked"
+            pred["active_stage2_model"] = "none"
+            pred["model_fallback"] = False
+            pred["defect_type"] = "uncracked"
+            p_uncracked = float(pred.get("uncracked_probability", 1.0 - p_crack))
+            pred["confidence"] = round(p_uncracked, 4)
+
+            sound_assessment = {
+                "severity": "No Visible Damage",
+                "severity_code": "none",
+                "severity_level": 0,
+                "is_calibrated": False,
+                "basis": "stage1_resnet18_gate",
+                "controlling_factor": "Sound Surface",
+                "controlling_value": f"0.0% coverage ({p_crack * 100:.1f}% crack prob < {threshold * 100:.0f}% gate)",
+                "density_pct": 0.0,
+                "crack_count": 0,
+                "peak_width_px": 0.0,
+                "average_width_px": 0.0,
+                "total_length_px": 0.0,
+                "priority": {
+                    "code": "none",
+                    "label": "Routine Maintenance",
+                    "action_window": "Routine",
+                    "action": f"Surface screened as sound concrete surface (crack probability {p_crack * 100:.1f}% is below {threshold * 100:.0f}% decision gate)."
+                },
+                "requires_engineer_review": False
+            }
+            qr["damage_assessment"] = sound_assessment
+            pred["damage_assessment"] = sound_assessment
+            qr["ai_classification"] = pred
+            qr["active_stage2_model"] = "none"
+            qr["model_fallback"] = False
+            qr["rfdetr_detection"] = None
+            qr["unet_segmentation"] = None
+            qr["yolo_detection"] = None
+            qr["crack_geometry"] = None
+            image.quality_report = qr
+            image.thumbnail_path = image.processed_path or target_path
+            return pred
+
+        # -----------------------------------------------------------------
+        # CASE B: ABOVE-THRESHOLD (>= 80%) -> STAGE 2 CASCADE ACTIVE
+        # -----------------------------------------------------------------
+        pred["has_crack"] = True
+        pred["predicted_class"] = "Cracked"
 
         # Stage 2A: Run RF-DETR Medium Defect Detector (RDD2022)
         try:
@@ -429,21 +493,11 @@ def run_and_persist_ai_classification(
 
         image.quality_report = qr
 
-        # Clean prior AI detections & associated measurements for this image
-        old_det_ids = [d[0] for d in db.query(Detection.id).filter(
-            Detection.image_id == image.id,
-            Detection.source == "ai_model"
-        ).all()]
-        if old_det_ids:
-            db.query(Measurement).filter(Measurement.detection_id.in_(old_det_ids)).delete(synchronize_session=False)
-            db.query(Detection).filter(Detection.id.in_(old_det_ids)).delete(synchronize_session=False)
-
         insp_id = inspection_id or image.inspection_id
         if insp_id:
             # 1. Compute Crack Geometry & Multi-Factor Damage Severity Assessment
             geo_data = qr.get("crack_geometry") if isinstance(qr, dict) else None
             geo_sum = geo_data.get("summary", {}) if (geo_data and geo_data.get("success")) else {}
-            sev_info = geo_sum.get("severity_assessment", {})
             dmg_assessment = None
             geo_sev = None
 
@@ -485,120 +539,106 @@ def run_and_persist_ai_classification(
             rf_has_def = bool(rfdetr_result and rfdetr_result.get("has_defect"))
             unet_has_crk = bool(unet_result and (unet_result.get("has_crack") or (unet_result.get("crack_area_pct") or 0) > 0))
             yolo_has_def = bool(yolo_result and (yolo_result.get("has_defect") or (yolo_result.get("num_detections", 0) > 0)))
-            is_damaged = has_crack or rf_has_def or unet_has_crk or yolo_has_def
-
-            if is_damaged:
-                has_crack = True
-                pred["has_crack"] = True
-                pred["predicted_class"] = "Cracked"
-                image.is_cracked = True
 
             if rf_has_def and rfdetr_result.get("primary_defect"):
                 primary_defect = rfdetr_result.get("primary_defect")
             elif yolo_has_def and yolo_result.get("primary_defect"):
                 primary_defect = yolo_result.get("primary_defect")
-            elif is_damaged:
-                primary_defect = "crack"
             else:
-                primary_defect = "uncracked"
+                primary_defect = "crack"
 
             pred["defect_type"] = primary_defect
 
             if geo_sev:
                 final_severity = geo_sev
-            elif is_damaged:
-                final_severity = "severe" if p_crack >= 0.95 else ("moderate" if p_crack >= 0.70 else "minor")
             else:
-                final_severity = "no_visible_damage"
+                final_severity = "severe" if p_crack >= 0.95 else ("moderate" if p_crack >= 0.70 else "minor")
 
             # 3. Best Confidence Across Pipelines
             best_conf = float(max(
-                p_crack if has_crack else pred.get("uncracked_probability", 0.89),
+                p_crack,
                 rfdetr_result.get("confidence", 0.0) if rfdetr_result else 0.0,
                 unet_result.get("mean_crack_confidence", 0.0) if unet_result else 0.0,
                 yolo_result.get("confidence", 0.0) if yolo_result else 0.0
             ))
-            if is_damaged and best_conf < 0.80:
+            if best_conf < 0.80:
                 best_conf = 0.86
 
-                # 4. Synthesize Combined Human-Readable Findings Note
-                if is_damaged:
-                    notes_parts = []
-                    if rf_has_def and rfdetr_result.get("num_detections"):
-                        notes_parts.append(f"RF-DETR: {rfdetr_result.get('num_detections')} defect regions detected ({rfdetr_result.get('primary_label')}).")
-                    if unet_has_crk:
-                        notes_parts.append(f"UNet: {unet_result.get('crack_area_pct')}% crack surface area ({unet_result.get('crack_pixels'):,} px), max thickness {unet_result.get('max_width_px')}px.")
-                    if dmg_assessment and dmg_assessment.get("severity"):
-                        notes_parts.append(f"Damage: {dmg_assessment['severity']}.")
-                    unified_note = " ".join(notes_parts) if notes_parts else f"AI Pipeline: Defect detected ({best_conf:.1%} confidence)."
-                else:
-                    unified_note = f"ResNet-18: Sound concrete / Uncracked ({pred.get('uncracked_probability', 1.0 - p_crack):.1%} confidence)."
+            # 4. Synthesize Combined Human-Readable Findings Note
+            notes_parts = []
+            if rf_has_def and rfdetr_result.get("num_detections"):
+                notes_parts.append(f"RF-DETR: {rfdetr_result.get('num_detections')} defect regions detected ({rfdetr_result.get('primary_label')}).")
+            if unet_has_crk:
+                notes_parts.append(f"UNet: {unet_result.get('crack_area_pct')}% crack surface area ({unet_result.get('crack_pixels'):,} px), max thickness {unet_result.get('max_width_px')}px.")
+            if dmg_assessment and dmg_assessment.get("severity"):
+                notes_parts.append(f"Damage: {dmg_assessment['severity']}.")
+            unified_note = " ".join(notes_parts) if notes_parts else f"AI Pipeline: Defect detected ({best_conf:.1%} confidence)."
 
-                # 5. Persist EXACTLY ONE Unified Detection Record per Image
-                unified_det = Detection(
-                    inspection_id=insp_id,
-                    image_id=image.id,
-                    source="ai_model",
-                    defect_type=primary_defect,
-                    geometry={
-                        "type": "unified_crack_detection",
-                        "model": "InfraScan AI Pipeline (ResNet-18 + RF-DETR + UNet)",
-                        "predicted_class": pred.get("predicted_class", "Uncertain"),
-                        "probabilities": {
-                            "uncracked": pred.get("uncracked_probability", 0.0),
-                            "cracked": p_crack
-                        },
-                        "threshold": pred.get("threshold", 0.80),
-                        "rfdetr": {
-                            "has_defect": rf_has_def,
-                            "num_detections": rfdetr_result.get("num_detections", 0) if rfdetr_result else 0,
-                            "primary_defect": rfdetr_result.get("primary_defect") if rfdetr_result else None,
-                            "primary_label": rfdetr_result.get("primary_label") if rfdetr_result else None,
-                            "detections": rfdetr_result.get("detections", []) if rfdetr_result else [],
-                        },
-                        "unet": {
-                            "has_crack": unet_has_crk,
-                            "crack_area_pct": unet_result.get("crack_area_pct", 0) if unet_result else 0,
-                            "crack_pixels": unet_result.get("crack_pixels", 0) if unet_result else 0,
-                            "max_width_px": unet_result.get("max_width_px", 0) if unet_result else 0,
-                            "max_width_mm": unet_result.get("max_width_mm") if unet_result else None,
-                            "total_length_px": unet_result.get("total_length_px", 0) if unet_result else 0,
-                            "total_length_mm": unet_result.get("total_length_mm") if unet_result else None,
-                            "mean_crack_confidence": unet_result.get("mean_crack_confidence") if unet_result else None,
-                        },
-                        "crack_geometry": geo_sum if geo_sum else None,
-                        "damage_assessment": dmg_assessment if dmg_assessment else None,
+            # 5. Persist EXACTLY ONE Unified Detection Record per Image
+            unified_det = Detection(
+                inspection_id=insp_id,
+                image_id=image.id,
+                source="ai_model",
+                defect_type=primary_defect,
+                geometry={
+                    "type": "unified_crack_detection",
+                    "model": "InfraScan AI Pipeline (ResNet-18 + RF-DETR + UNet)",
+                    "predicted_class": "Cracked",
+                    "probabilities": {
+                        "uncracked": pred.get("uncracked_probability", 0.0),
+                        "cracked": p_crack
                     },
-                    severity=final_severity,
-                    created_by=user_id,
-                    confidence=best_conf,
-                    model_id="InfraScan AI Pipeline (ResNet-18 + RF-DETR + UNet)",
-                    notes=unified_note
-                )
-                db.add(unified_det)
-                db.flush()
+                    "threshold": threshold,
+                    "rfdetr": {
+                        "has_defect": rf_has_def,
+                        "num_detections": rfdetr_result.get("num_detections", 0) if rfdetr_result else 0,
+                        "primary_defect": rfdetr_result.get("primary_defect") if rfdetr_result else None,
+                        "primary_label": rfdetr_result.get("primary_label") if rfdetr_result else None,
+                        "detections": rfdetr_result.get("detections", []) if rfdetr_result else [],
+                    },
+                    "unet": {
+                        "has_crack": unet_has_crk,
+                        "crack_area_pct": unet_result.get("crack_area_pct", 0) if unet_result else 0,
+                        "crack_pixels": unet_result.get("crack_pixels", 0) if unet_result else 0,
+                        "max_width_px": unet_result.get("max_width_px", 0) if unet_result else 0,
+                        "max_width_mm": unet_result.get("max_width_mm") if unet_result else None,
+                        "total_length_px": unet_result.get("total_length_px", 0) if unet_result else 0,
+                        "total_length_mm": unet_result.get("total_length_mm") if unet_result else None,
+                        "mean_crack_confidence": unet_result.get("mean_crack_confidence") if unet_result else None,
+                    },
+                    "crack_geometry": geo_sum if geo_sum else None,
+                    "damage_assessment": dmg_assessment if dmg_assessment else None,
+                },
+                severity=final_severity,
+                created_by=user_id,
+                confidence=best_conf,
+                model_id="InfraScan AI Pipeline (ResNet-18 + RF-DETR + UNet)",
+                notes=unified_note
+            )
+            db.add(unified_det)
+            db.flush()
 
-                # 6. Persist Associated Single Measurement Record
-                is_cal = bool(geo_sum.get("is_calibrated")) if geo_sum else False
-                length_val = float(geo_sum.get("total_crack_length_mm") if is_cal and geo_sum.get("total_crack_length_mm") is not None else (geo_sum.get("total_crack_length_px", 0.0) if geo_sum else (unet_result.get("total_length_px", 0.0) if unet_result else 0.0)))
-                avg_w_val = float(geo_sum.get("average_crack_width_mm") if is_cal and geo_sum.get("average_crack_width_mm") is not None else (geo_sum.get("average_crack_width_px", 0.0) if geo_sum else 0.0))
-                max_w_val = float(geo_sum.get("maximum_crack_width_mm") if is_cal and geo_sum.get("maximum_crack_width_mm") is not None else (geo_sum.get("maximum_crack_width_px", 0.0) if geo_sum else (unet_result.get("max_width_px", 0.0) if unet_result else 0.0)))
-                area_val = float(geo_sum.get("total_crack_area_mm2") if is_cal and geo_sum.get("total_crack_area_mm2") is not None else (geo_sum.get("total_crack_area_px", 0.0) if geo_sum else (unet_result.get("crack_pixels", 0.0) if unet_result else 0.0)))
-                density_val = float(geo_sum.get("crack_coverage_pct", 0.0) if geo_sum else (unet_result.get("crack_area_pct", 0.0) if unet_result else 0.0))
+            # 6. Persist Associated Single Measurement Record
+            is_cal = bool(geo_sum.get("is_calibrated")) if geo_sum else False
+            length_val = float(geo_sum.get("total_crack_length_mm") if is_cal and geo_sum.get("total_crack_length_mm") is not None else (geo_sum.get("total_crack_length_px", 0.0) if geo_sum else (unet_result.get("total_length_px", 0.0) if unet_result else 0.0)))
+            avg_w_val = float(geo_sum.get("average_crack_width_mm") if is_cal and geo_sum.get("average_crack_width_mm") is not None else (geo_sum.get("average_crack_width_px", 0.0) if geo_sum else 0.0))
+            max_w_val = float(geo_sum.get("maximum_crack_width_mm") if is_cal and geo_sum.get("maximum_crack_width_mm") is not None else (geo_sum.get("maximum_crack_width_px", 0.0) if geo_sum else (unet_result.get("max_width_px", 0.0) if unet_result else 0.0)))
+            area_val = float(geo_sum.get("total_crack_area_mm2") if is_cal and geo_sum.get("total_crack_area_mm2") is not None else (geo_sum.get("total_crack_area_px", 0.0) if geo_sum else (unet_result.get("crack_pixels", 0.0) if unet_result else 0.0)))
+            density_val = float(geo_sum.get("crack_coverage_pct", 0.0) if geo_sum else (unet_result.get("crack_area_pct", 0.0) if unet_result else 0.0))
 
-                meas = Measurement(
-                    detection_id=unified_det.id,
-                    length=length_val,
-                    avg_width=avg_w_val,
-                    max_width=max_w_val,
-                    area=area_val,
-                    unit="mm" if is_cal else "px",
-                    calibrated=is_cal,
-                    density=density_val
-                )
-                db.add(meas)
+            meas = Measurement(
+                detection_id=unified_det.id,
+                length=length_val,
+                avg_width=avg_w_val,
+                max_width=max_w_val,
+                area=area_val,
+                unit="mm" if is_cal else "px",
+                calibrated=is_cal,
+                density=density_val
+            )
+            db.add(meas)
 
-            return pred
+        return pred
     except Exception as exc:
         logger.warning("Auto AI classification failed for image %s: %s", image.id, exc)
     return None
@@ -965,21 +1005,38 @@ async def upload_image_endpoint(
     has_yolo = bool(yolo_file and os.path.exists(yolo_file))
     has_unet = bool(unet_file and os.path.exists(unet_file))
 
-    if unet_file and os.path.exists(unet_file):
+    p_crack = float(ai_clf.get("crack_probability", 0.0)) if isinstance(ai_clf, dict) else 0.0
+    threshold = float(ai_clf.get("threshold", 0.80)) if isinstance(ai_clf, dict) else 0.80
+    is_crack_defect = bool(p_crack >= threshold)
+
+    if is_crack_defect and unet_file and os.path.exists(unet_file):
         img_record.thumbnail_path = unet_file
         db.commit()
+        default_preview = f"/api/v1/images/{img_record.id}/file?variant=unet"
+    elif is_crack_defect and has_rfdetr:
+        default_preview = f"/api/v1/images/{img_record.id}/file?variant=rfdetr"
+    else:
+        default_preview = f"/api/v1/images/{img_record.id}/file?variant=processed"
 
-    p_crack = float(ai_clf.get("crack_probability", 0.0)) if isinstance(ai_clf, dict) else 0.0
-    is_crack_defect = bool(
-        p_crack >= 0.80 or
-        (isinstance(ai_clf, dict) and ai_clf.get("has_crack")) or
-        (rfdetr_det and rfdetr_det.get("has_defect")) or
-        (unet_seg and (unet_seg.get("has_crack") or (unet_seg.get("crack_area_pct") or 0) > 0)) or
-        getattr(img_record, "is_cracked", False)
-    )
-
-    # The default preview & thumbnail MUST ALWAYS show the UNet model output image
-    default_preview = f"/api/v1/images/{img_record.id}/file?variant=unet"
+    if not is_crack_defect:
+        has_unet = False
+        has_rfdetr = False
+        active_stage2_model = "none"
+        model_fallback = False
+        unet_seg = None
+        rfdetr_det = None
+        dmg_assess = {
+            "severity": "No Visible Damage",
+            "severity_code": "none",
+            "controlling_factor": "Sound Surface",
+            "controlling_value": "No crack defects detected above 80% decision threshold",
+            "crack_count": 0,
+            "crack_density_pct": 0.0,
+            "peak_width_px": 0.0,
+            "peak_width_mm": 0.0,
+            "priority_action": "Routine Monitoring",
+            "mode": "uncalibrated"
+        }
 
     return {
         "id": img_record.id,
@@ -997,40 +1054,40 @@ async def upload_image_endpoint(
         "quality_report": report,
         "aiClassification": ai_clf,
         "ai_classification": ai_clf,
-        "hasRfdetr": has_rfdetr,
-        "has_rfdetr": has_rfdetr,
-        "rfdetrDetection": rfdetr_det,
-        "rfdetr_detection": rfdetr_det,
-        "activeStage2Model": active_stage2_model,
-        "active_stage2_model": active_stage2_model,
-        "modelFallback": model_fallback,
-        "model_fallback": model_fallback,
-        "yoloDetection": yolo_det,
-        "yolo_detection": yolo_det,
-        "unetSegmentation": unet_seg,
-        "unet_segmentation": unet_seg,
-        "hasYolo": has_yolo,
-        "has_yolo": has_yolo,
-        "hasUnet": True,
-        "has_unet": True,
-        "hasGeometry": bool(crack_geo),
-        "has_geometry": bool(crack_geo),
-        "crackGeometry": crack_geo,
-        "crack_geometry": crack_geo,
+        "hasRfdetr": has_rfdetr if is_crack_defect else False,
+        "has_rfdetr": has_rfdetr if is_crack_defect else False,
+        "rfdetrDetection": rfdetr_det if is_crack_defect else None,
+        "rfdetr_detection": rfdetr_det if is_crack_defect else None,
+        "activeStage2Model": active_stage2_model if is_crack_defect else "none",
+        "active_stage2_model": active_stage2_model if is_crack_defect else "none",
+        "modelFallback": model_fallback if is_crack_defect else False,
+        "model_fallback": model_fallback if is_crack_defect else False,
+        "yoloDetection": yolo_det if is_crack_defect else None,
+        "yolo_detection": yolo_det if is_crack_defect else None,
+        "unetSegmentation": unet_seg if is_crack_defect else None,
+        "unet_segmentation": unet_seg if is_crack_defect else None,
+        "hasYolo": has_yolo if is_crack_defect else False,
+        "has_yolo": has_yolo if is_crack_defect else False,
+        "hasUnet": has_unet if is_crack_defect else False,
+        "has_unet": has_unet if is_crack_defect else False,
+        "hasGeometry": bool(crack_geo) if is_crack_defect else False,
+        "has_geometry": bool(crack_geo) if is_crack_defect else False,
+        "crackGeometry": crack_geo if is_crack_defect else None,
+        "crack_geometry": crack_geo if is_crack_defect else None,
         "damageAssessment": dmg_assess,
         "damage_assessment": dmg_assess,
         "calibration": img_record.calibration,
-        "geometryUrl": (f"/api/v1/images/{img_record.id}/file?variant=geometry") if crack_geo else None,
+        "geometryUrl": (f"/api/v1/images/{img_record.id}/file?variant=geometry") if (crack_geo and is_crack_defect) else None,
         "previewUrl": default_preview,
         "originalUrl": f"/api/v1/images/{img_record.id}/file?variant=original",
         "thumbnailUrl": default_preview,
         "processedUrl": f"/api/v1/images/{img_record.id}/file?variant=processed",
         "enhancedUrl": f"/api/v1/images/{img_record.id}/file?variant=enhanced",
-        "rfdetrUrl": f"/api/v1/images/{img_record.id}/file?variant=rfdetr" if has_rfdetr else None,
-        "yoloUrl": f"/api/v1/images/{img_record.id}/file?variant=yolo" if has_yolo else None,
+        "rfdetrUrl": f"/api/v1/images/{img_record.id}/file?variant=rfdetr" if (has_rfdetr and is_crack_defect) else None,
+        "yoloUrl": f"/api/v1/images/{img_record.id}/file?variant=yolo" if (has_yolo and is_crack_defect) else None,
         "annotatedUrl": default_preview,
-        "unetUrl": default_preview,
-        "unetMaskUrl": f"/api/v1/images/{img_record.id}/file?variant=mask",
+        "unetUrl": (f"/api/v1/images/{img_record.id}/file?variant=unet") if (is_crack_defect and has_unet) else None,
+        "unetMaskUrl": (f"/api/v1/images/{img_record.id}/file?variant=mask") if (is_crack_defect and has_unet) else None,
         "createdAt": img_record.created_at.isoformat()
     }
 
@@ -1089,18 +1146,18 @@ def list_inspection_images(
         qr_item = img.quality_report or {}
         ai_item = qr_item.get("ai_classification") if isinstance(qr_item, dict) else None
         p_item_crack = float(ai_item.get("crack_probability", 0.0)) if isinstance(ai_item, dict) else 0.0
-        item_rfdetr = qr_item.get("rfdetr_detection") if isinstance(qr_item, dict) else (ai_item.get("rfdetr_detection") if isinstance(ai_item, dict) else None)
-        item_unet = qr_item.get("unet_segmentation") if isinstance(qr_item, dict) else (ai_item.get("unet_segmentation") if isinstance(ai_item, dict) else None)
-        item_is_crack = bool(
-            p_item_crack >= 0.80 or
-            (isinstance(ai_item, dict) and ai_item.get("has_crack")) or
-            (item_rfdetr and item_rfdetr.get("has_defect")) or
-            (item_unet and (item_unet.get("has_crack") or (item_unet.get("crack_area_pct") or 0) > 0)) or
-            getattr(img, "is_cracked", False)
-        )
+        item_threshold = float(ai_item.get("threshold", 0.80)) if isinstance(ai_item, dict) else 0.80
+        item_is_crack = bool(p_item_crack >= item_threshold)
 
-        # Default preview and thumbnail MUST ALWAYS point to U-Net model output image
-        default_preview = f"/api/v1/images/{img.id}/file?variant=unet"
+        if item_is_crack and has_unet:
+            default_preview = f"/api/v1/images/{img.id}/file?variant=unet"
+            thumb_preview = f"/api/v1/images/{img.id}/file?variant=unet&v={img.sha256[:10] if img.sha256 else ''}"
+        elif item_is_crack and has_rfdetr:
+            default_preview = f"/api/v1/images/{img.id}/file?variant=rfdetr"
+            thumb_preview = f"/api/v1/images/{img.id}/file?variant=rfdetr&v={img.sha256[:10] if img.sha256 else ''}"
+        else:
+            default_preview = f"/api/v1/images/{img.id}/file?variant=processed"
+            thumb_preview = f"/api/v1/images/{img.id}/file?variant=processed&v={img.sha256[:10] if img.sha256 else ''}"
 
         item = {
             "id": img.id,
@@ -1116,22 +1173,22 @@ def list_inspection_images(
             "phash": img.phash,
             "calibration": img.calibration,
             "warningConfirmed": bool(img.warning_confirmed_by),
-            "hasRfdetr": has_rfdetr,
-            "has_rfdetr": has_rfdetr,
-            "hasYolo": has_yolo,
-            "has_yolo": has_yolo,
-            "hasUnet": True,
-            "has_unet": True,
+            "hasRfdetr": has_rfdetr if item_is_crack else False,
+            "has_rfdetr": has_rfdetr if item_is_crack else False,
+            "hasYolo": has_yolo if item_is_crack else False,
+            "has_yolo": has_yolo if item_is_crack else False,
+            "hasUnet": has_unet if item_is_crack else False,
+            "has_unet": has_unet if item_is_crack else False,
             "originalUrl": f"/api/v1/images/{img.id}/file?variant=original",
             "previewUrl": f"{default_preview}{'&' if '?' in default_preview else '?'}v={img.sha256[:10] if img.sha256 else ''}",
-            "thumbnailUrl": f"/api/v1/images/{img.id}/file?variant=unet&v={img.sha256[:10] if img.sha256 else ''}",
+            "thumbnailUrl": thumb_preview,
             "processedUrl": f"/api/v1/images/{img.id}/file?variant=processed&v={img.sha256[:10] if img.sha256 else ''}",
             "enhancedUrl": f"/api/v1/images/{img.id}/file?variant=enhanced&v={img.sha256[:10] if img.sha256 else ''}",
-            "rfdetrUrl": (f"/api/v1/images/{img.id}/file?variant=rfdetr&v={img.sha256[:10] if img.sha256 else ''}") if has_rfdetr else None,
-            "yoloUrl": (f"/api/v1/images/{img.id}/file?variant=yolo&v={img.sha256[:10] if img.sha256 else ''}") if has_yolo else None,
-            "annotatedUrl": f"/api/v1/images/{img.id}/file?variant=unet&v={img.sha256[:10] if img.sha256 else ''}",
-            "unetUrl": f"/api/v1/images/{img.id}/file?variant=unet&v={img.sha256[:10] if img.sha256 else ''}",
-            "unetMaskUrl": f"/api/v1/images/{img.id}/file?variant=mask&v={img.sha256[:10] if img.sha256 else ''}",
+            "rfdetrUrl": (f"/api/v1/images/{img.id}/file?variant=rfdetr&v={img.sha256[:10] if img.sha256 else ''}") if (item_is_crack and has_rfdetr) else None,
+            "yoloUrl": (f"/api/v1/images/{img.id}/file?variant=yolo&v={img.sha256[:10] if img.sha256 else ''}") if (item_is_crack and has_yolo) else None,
+            "annotatedUrl": (f"/api/v1/images/{img.id}/file?variant=unet&v={img.sha256[:10] if img.sha256 else ''}") if item_is_crack else f"/api/v1/images/{img.id}/file?variant=processed&v={img.sha256[:10] if img.sha256 else ''}",
+            "unetUrl": (f"/api/v1/images/{img.id}/file?variant=unet&v={img.sha256[:10] if img.sha256 else ''}") if item_is_crack else None,
+            "unetMaskUrl": (f"/api/v1/images/{img.id}/file?variant=mask&v={img.sha256[:10] if img.sha256 else ''}") if item_is_crack else None,
             "createdAt": img.created_at.isoformat()
         }
 
@@ -1171,7 +1228,8 @@ def list_inspection_images(
         # Stage 2 on-demand RF-DETR (primary) & UNet (fallback/measurement) checks
         ai_clf = item.get("aiClassification")
         p_crack = float(ai_clf.get("crack_probability", 0.0)) if isinstance(ai_clf, dict) else 0.0
-        if (p_crack >= 0.80 or (isinstance(ai_clf, dict) and ai_clf.get("has_crack"))):
+        thresh = float(ai_clf.get("threshold", 0.80)) if isinstance(ai_clf, dict) else 0.80
+        if p_crack >= thresh:
             proc_target = img.processed_path if (img.processed_path and os.path.exists(img.processed_path)) else img.original_path
             if proc_target and os.path.exists(proc_target):
                 # On-demand RF-DETR
@@ -1229,19 +1287,26 @@ def list_inspection_images(
                         if has_unet:
                             item["unetUrl"] = f"/api/v1/images/{img.id}/file?variant=unet"
                             item["unetMaskUrl"] = f"/api/v1/images/{img.id}/file?variant=mask"
-                            if (p_crack >= 0.80) or not has_rfdetr or qr.get("model_fallback"):
+                            if not has_rfdetr or qr.get("model_fallback"):
                                 item["previewUrl"] = f"/api/v1/images/{img.id}/file?variant=unet"
                                 item["annotatedUrl"] = f"/api/v1/images/{img.id}/file?variant=unet"
                     except Exception as unet_err:
                         logger.warning("On-demand UNet generation error in list_inspection_images for %s: %s", img.id, unet_err)
 
-        rfdetr_det = (img.quality_report.get("rfdetr_detection") if (img.quality_report and isinstance(img.quality_report, dict)) else None) or (ai_clf.get("rfdetr_detection") if isinstance(ai_clf, dict) else None)
-        active_stage2_model = (img.quality_report.get("active_stage2_model") if isinstance(img.quality_report, dict) else None) or (ai_clf.get("active_stage2_model") if isinstance(ai_clf, dict) else ("rfdetr" if (rfdetr_det and rfdetr_det.get("has_defect")) else ("unet_fallback" if (p_crack >= 0.80) else None)))
-        model_fallback = bool(img.quality_report.get("model_fallback") if isinstance(img.quality_report, dict) else (ai_clf.get("model_fallback") if isinstance(ai_clf, dict) else (p_crack >= 0.80 and not (rfdetr_det and rfdetr_det.get("has_defect")))))
-
-        yolo_det = (img.quality_report.get("yolo_detection") if (img.quality_report and isinstance(img.quality_report, dict)) else None) or (ai_clf.get("yolo_detection") if isinstance(ai_clf, dict) else None)
-        unet_seg = (img.quality_report.get("unet_segmentation") if (img.quality_report and isinstance(img.quality_report, dict)) else None) or (ai_clf.get("unet_segmentation") if isinstance(ai_clf, dict) else None)
-        crack_geo = (img.quality_report.get("crack_geometry") if (img.quality_report and isinstance(img.quality_report, dict)) else None) or (ai_clf.get("crack_geometry") if isinstance(ai_clf, dict) else None)
+        if p_crack >= thresh:
+            rfdetr_det = (img.quality_report.get("rfdetr_detection") if (img.quality_report and isinstance(img.quality_report, dict)) else None) or (ai_clf.get("rfdetr_detection") if isinstance(ai_clf, dict) else None)
+            active_stage2_model = (img.quality_report.get("active_stage2_model") if isinstance(img.quality_report, dict) else None) or (ai_clf.get("active_stage2_model") if isinstance(ai_clf, dict) else ("rfdetr" if (rfdetr_det and rfdetr_det.get("has_defect")) else "unet_fallback"))
+            model_fallback = bool(img.quality_report.get("model_fallback") if isinstance(img.quality_report, dict) else (ai_clf.get("model_fallback") if isinstance(ai_clf, dict) else (not (rfdetr_det and rfdetr_det.get("has_defect")))))
+            yolo_det = (img.quality_report.get("yolo_detection") if (img.quality_report and isinstance(img.quality_report, dict)) else None) or (ai_clf.get("yolo_detection") if isinstance(ai_clf, dict) else None)
+            unet_seg = (img.quality_report.get("unet_segmentation") if (img.quality_report and isinstance(img.quality_report, dict)) else None) or (ai_clf.get("unet_segmentation") if isinstance(ai_clf, dict) else None)
+            crack_geo = (img.quality_report.get("crack_geometry") if (img.quality_report and isinstance(img.quality_report, dict)) else None) or (ai_clf.get("crack_geometry") if isinstance(ai_clf, dict) else None)
+        else:
+            rfdetr_det = None
+            active_stage2_model = "none"
+            model_fallback = False
+            yolo_det = None
+            unet_seg = None
+            crack_geo = None
 
         item["rfdetrDetection"] = rfdetr_det
         item["rfdetr_detection"] = rfdetr_det
@@ -1325,7 +1390,8 @@ def get_image_details(
     # If classified as cracked (p >= 0.80), ensure YOLO & UNet models run on-demand
     ai_clf_existing = image.quality_report.get("ai_classification") if (image.quality_report and isinstance(image.quality_report, dict)) else None
     p_crack_existing = float(ai_clf_existing.get("crack_probability", 0.0)) if isinstance(ai_clf_existing, dict) else 0.0
-    is_crack_defect = (p_crack_existing >= 0.80 or (isinstance(ai_clf_existing, dict) and ai_clf_existing.get("has_crack")))
+    thresh_existing = float(ai_clf_existing.get("threshold", 0.80)) if isinstance(ai_clf_existing, dict) else 0.80
+    is_crack_defect = bool(p_crack_existing >= thresh_existing)
 
     if is_crack_defect:
         proc_target = image.processed_path if (image.processed_path and os.path.exists(image.processed_path)) else image.original_path
@@ -1425,23 +1491,34 @@ def get_image_details(
             except Exception as geo_err:
                 logger.warning("On-demand geometry extraction error in get_image_details for %s: %s", image.id, geo_err)
 
-    geo_file = find_stored_file("geometry", f"{image.id}.jpg") or os.path.join(GEOMETRY_DIR, f"{image.id}.jpg")
-    has_geo = bool((geo_file and os.path.exists(geo_file)) or (image.quality_report and "crack_geometry" in image.quality_report))
-    crack_geo = (image.quality_report.get("crack_geometry") if (image.quality_report and isinstance(image.quality_report, dict)) else None) or (ai_clf_existing.get("crack_geometry") if isinstance(ai_clf_existing, dict) else None)
-
-    unet_seg = (image.quality_report.get("unet_segmentation") if (image.quality_report and isinstance(image.quality_report, dict)) else None) or (ai_clf_existing.get("unet_segmentation") if isinstance(ai_clf_existing, dict) else None)
-    yolo_det = (image.quality_report.get("yolo_detection") if (image.quality_report and isinstance(image.quality_report, dict)) else None) or (ai_clf_existing.get("yolo_detection") if isinstance(ai_clf_existing, dict) else None)
-
-    rfdetr_file = find_stored_file("rfdetr", f"{image.id}.jpg") or os.path.join(RFDETR_DIR, f"{image.id}.jpg")
-    has_rfdetr = bool((rfdetr_file and os.path.exists(rfdetr_file)) or (image.quality_report and "rfdetr_detection" in image.quality_report))
-    rfdetr_det = (image.quality_report.get("rfdetr_detection") if (image.quality_report and isinstance(image.quality_report, dict)) else None) or (ai_clf_existing.get("rfdetr_detection") if isinstance(ai_clf_existing, dict) else None)
-    active_stage2_model = (image.quality_report.get("active_stage2_model") if isinstance(image.quality_report, dict) else None) or (ai_clf_existing.get("active_stage2_model") if isinstance(ai_clf_existing, dict) else ("rfdetr" if (rfdetr_det and rfdetr_det.get("has_defect")) else ("unet_fallback" if is_crack_defect else None)))
-    model_fallback = bool(image.quality_report.get("model_fallback") if isinstance(image.quality_report, dict) else (ai_clf_existing.get("model_fallback") if isinstance(ai_clf_existing, dict) else (is_crack_defect and not (rfdetr_det and rfdetr_det.get("has_defect")))))
-
     v_tag = image.sha256[:10] if image.sha256 else ""
 
-    # The default preview & thumbnail MUST ALWAYS show the UNet model output image
-    default_preview = f"/api/v1/images/{image.id}/file?variant=unet"
+    if is_crack_defect:
+        geo_file = find_stored_file("geometry", f"{image.id}.jpg") or os.path.join(GEOMETRY_DIR, f"{image.id}.jpg")
+        has_geo = bool((geo_file and os.path.exists(geo_file)) or (image.quality_report and "crack_geometry" in image.quality_report))
+        crack_geo = (image.quality_report.get("crack_geometry") if (image.quality_report and isinstance(image.quality_report, dict)) else None) or (ai_clf_existing.get("crack_geometry") if isinstance(ai_clf_existing, dict) else None)
+        unet_seg = (image.quality_report.get("unet_segmentation") if (image.quality_report and isinstance(image.quality_report, dict)) else None) or (ai_clf_existing.get("unet_segmentation") if isinstance(ai_clf_existing, dict) else None)
+        yolo_det = (image.quality_report.get("yolo_detection") if (image.quality_report and isinstance(image.quality_report, dict)) else None) or (ai_clf_existing.get("yolo_detection") if isinstance(ai_clf_existing, dict) else None)
+        rfdetr_file = find_stored_file("rfdetr", f"{image.id}.jpg") or os.path.join(RFDETR_DIR, f"{image.id}.jpg")
+        has_rfdetr = bool((rfdetr_file and os.path.exists(rfdetr_file)) or (image.quality_report and "rfdetr_detection" in image.quality_report))
+        rfdetr_det = (image.quality_report.get("rfdetr_detection") if (image.quality_report and isinstance(image.quality_report, dict)) else None) or (ai_clf_existing.get("rfdetr_detection") if isinstance(ai_clf_existing, dict) else None)
+        active_stage2_model = (image.quality_report.get("active_stage2_model") if isinstance(image.quality_report, dict) else None) or (ai_clf_existing.get("active_stage2_model") if isinstance(ai_clf_existing, dict) else ("rfdetr" if (rfdetr_det and rfdetr_det.get("has_defect")) else "unet_fallback"))
+        model_fallback = bool(image.quality_report.get("model_fallback") if isinstance(image.quality_report, dict) else (ai_clf_existing.get("model_fallback") if isinstance(ai_clf_existing, dict) else (not (rfdetr_det and rfdetr_det.get("has_defect")))))
+        default_preview = f"/api/v1/images/{image.id}/file?variant=unet"
+        thumb_url = f"/api/v1/images/{image.id}/file?variant=unet&v={v_tag}"
+    else:
+        has_geo = False
+        crack_geo = None
+        unet_seg = None
+        yolo_det = None
+        has_rfdetr = False
+        rfdetr_det = None
+        has_unet = False
+        has_yolo = False
+        active_stage2_model = "none"
+        model_fallback = False
+        default_preview = f"/api/v1/images/{image.id}/file?variant=processed"
+        thumb_url = f"/api/v1/images/{image.id}/file?variant=processed&v={v_tag}"
 
     response = {
         "id": image.id,
@@ -1464,40 +1541,40 @@ def get_image_details(
             "lng": image.exif_lng,
             "captured_at": image.exif_captured_at.isoformat() if image.exif_captured_at else None
         },
-        "hasRfdetr": has_rfdetr,
-        "has_rfdetr": has_rfdetr,
-        "rfdetrDetection": rfdetr_det,
-        "rfdetr_detection": rfdetr_det,
+        "hasRfdetr": has_rfdetr if is_crack_defect else False,
+        "has_rfdetr": has_rfdetr if is_crack_defect else False,
+        "rfdetrDetection": rfdetr_det if is_crack_defect else None,
+        "rfdetr_detection": rfdetr_det if is_crack_defect else None,
         "activeStage2Model": active_stage2_model,
         "active_stage2_model": active_stage2_model,
         "modelFallback": model_fallback,
         "model_fallback": model_fallback,
-        "hasYolo": has_yolo,
-        "has_yolo": has_yolo,
-        "yoloDetection": yolo_det,
-        "yolo_detection": yolo_det,
-        "hasUnet": True,
-        "has_unet": True,
-        "unetSegmentation": unet_seg,
-        "unet_segmentation": unet_seg,
-        "hasGeometry": has_geo,
-        "has_geometry": has_geo,
-        "crackGeometry": crack_geo,
-        "crack_geometry": crack_geo,
+        "hasYolo": has_yolo if is_crack_defect else False,
+        "has_yolo": has_yolo if is_crack_defect else False,
+        "yoloDetection": yolo_det if is_crack_defect else None,
+        "yolo_detection": yolo_det if is_crack_defect else None,
+        "hasUnet": has_unet if is_crack_defect else False,
+        "has_unet": has_unet if is_crack_defect else False,
+        "unetSegmentation": unet_seg if is_crack_defect else None,
+        "unet_segmentation": unet_seg if is_crack_defect else None,
+        "hasGeometry": has_geo if is_crack_defect else False,
+        "has_geometry": has_geo if is_crack_defect else False,
+        "crackGeometry": crack_geo if is_crack_defect else None,
+        "crack_geometry": crack_geo if is_crack_defect else None,
         "damageAssessment": (image.quality_report.get("damage_assessment") if (image.quality_report and isinstance(image.quality_report, dict)) else None) or (crack_geo.get("summary", {}).get("damage_assessment") if (crack_geo and isinstance(crack_geo, dict)) else None),
         "damage_assessment": (image.quality_report.get("damage_assessment") if (image.quality_report and isinstance(image.quality_report, dict)) else None) or (crack_geo.get("summary", {}).get("damage_assessment") if (crack_geo and isinstance(crack_geo, dict)) else None),
         "calibration": image.calibration,
         "originalUrl": f"/api/v1/images/{image.id}/file?variant=original&v={v_tag}",
-        "thumbnailUrl": f"/api/v1/images/{image.id}/file?variant=unet&v={v_tag}",
+        "thumbnailUrl": thumb_url,
         "previewUrl": f"{default_preview}{'&' if '?' in default_preview else '?'}v={v_tag}",
         "processedUrl": (f"/api/v1/images/{image.id}/file?variant=processed&v={v_tag}") if image.processing_status == "complete" else None,
         "enhancedUrl": (f"/api/v1/images/{image.id}/file?variant=enhanced&v={v_tag}") if image.processing_status == "complete" else None,
-        "rfdetrUrl": (f"/api/v1/images/{image.id}/file?variant=rfdetr&v={v_tag}") if has_rfdetr else None,
-        "yoloUrl": (f"/api/v1/images/{image.id}/file?variant=yolo&v={v_tag}") if has_yolo else None,
-        "annotatedUrl": f"/api/v1/images/{image.id}/file?variant=unet&v={v_tag}",
-        "unetUrl": f"/api/v1/images/{image.id}/file?variant=unet&v={v_tag}",
-        "unetMaskUrl": f"/api/v1/images/{image.id}/file?variant=mask&v={v_tag}",
-        "geometryUrl": (f"/api/v1/images/{image.id}/file?variant=geometry&v={v_tag}") if has_geo else None,
+        "rfdetrUrl": (f"/api/v1/images/{image.id}/file?variant=rfdetr&v={v_tag}") if (is_crack_defect and has_rfdetr) else None,
+        "yoloUrl": (f"/api/v1/images/{image.id}/file?variant=yolo&v={v_tag}") if (is_crack_defect and has_yolo) else None,
+        "annotatedUrl": (f"/api/v1/images/{image.id}/file?variant=unet&v={v_tag}") if is_crack_defect else f"/api/v1/images/{image.id}/file?variant=processed&v={v_tag}",
+        "unetUrl": (f"/api/v1/images/{image.id}/file?variant=unet&v={v_tag}") if is_crack_defect else None,
+        "unetMaskUrl": (f"/api/v1/images/{image.id}/file?variant=mask&v={v_tag}") if is_crack_defect else None,
+        "geometryUrl": (f"/api/v1/images/{image.id}/file?variant=geometry&v={v_tag}") if (is_crack_defect and has_geo) else None,
         "damageAssessment": (image.quality_report.get("damage_assessment") if (image.quality_report and isinstance(image.quality_report, dict)) else None) or (crack_geo.get("summary", {}).get("damage_assessment") if (crack_geo and isinstance(crack_geo, dict)) else None),
         "damage_assessment": (image.quality_report.get("damage_assessment") if (image.quality_report and isinstance(image.quality_report, dict)) else None) or (crack_geo.get("summary", {}).get("damage_assessment") if (crack_geo and isinstance(crack_geo, dict)) else None),
         "createdAt": image.created_at.isoformat()
@@ -1621,25 +1698,17 @@ def get_image_file_variant(
     qr = image.quality_report or {}
     ai_clf = qr.get("ai_classification") if isinstance(qr, dict) else None
     p_crack = float(ai_clf.get("crack_probability", 0.0)) if isinstance(ai_clf, dict) else 0.0
-    rfdetr_det = qr.get("rfdetr_detection") if isinstance(qr, dict) else (ai_clf.get("rfdetr_detection") if isinstance(ai_clf, dict) else None)
-    unet_seg = qr.get("unet_segmentation") if isinstance(qr, dict) else (ai_clf.get("unet_segmentation") if isinstance(ai_clf, dict) else None)
-    model_fallback = bool(qr.get("model_fallback") if isinstance(qr, dict) else (ai_clf.get("model_fallback") if isinstance(ai_clf, dict) else False))
-    is_crack_defect = bool(
-        p_crack >= 0.80 or
-        (isinstance(ai_clf, dict) and ai_clf.get("has_crack")) or
-        (rfdetr_det and rfdetr_det.get("has_defect")) or
-        (unet_seg and (unet_seg.get("has_crack") or (unet_seg.get("crack_area_pct") or 0) > 0)) or
-        getattr(image, "is_cracked", False)
-    )
+    thresh = float(ai_clf.get("threshold", 0.80)) if isinstance(ai_clf, dict) else 0.80
+    is_crack_defect = bool(p_crack >= thresh)
 
     proc_target = image.processed_path if (image.processed_path and os.path.exists(image.processed_path)) else image.original_path
 
     target_path = image.original_path
 
     if variant in ("rfdetr", "rdd2022"):
-        if has_rfdetr:
+        if has_rfdetr and is_crack_defect:
             target_path = rfdetr_file
-        elif has_yolo:
+        elif has_yolo and is_crack_defect:
             target_path = yolo_file
         elif image.processed_path and os.path.exists(image.processed_path):
             target_path = image.processed_path
@@ -1647,9 +1716,9 @@ def get_image_file_variant(
             target_path = image.original_path
 
     elif variant in ("yolo",):
-        if has_yolo:
+        if has_yolo and is_crack_defect:
             target_path = yolo_file
-        elif proc_target and os.path.exists(proc_target):
+        elif is_crack_defect and proc_target and os.path.exists(proc_target):
             try:
                 from app.services.yolo_detector import get_yolo_detector
                 detector = get_yolo_detector()
@@ -1669,24 +1738,27 @@ def get_image_file_variant(
                 logger.warning("On-demand YOLO generation failed in get_image_file_variant: %s", yolo_err)
                 target_path = rfdetr_file if has_rfdetr else proc_target
         else:
-            target_path = rfdetr_file if has_rfdetr else image.original_path
+            target_path = image.processed_path if (image.processed_path and os.path.exists(image.processed_path)) else image.original_path
 
     elif variant in ("annotated", "ai"):
-        if has_unet:
-            target_path = unet_file
-        elif has_rfdetr and not model_fallback:
-            target_path = rfdetr_file
-        elif has_yolo:
-            target_path = yolo_file
-        elif image.processed_path and os.path.exists(image.processed_path):
-            target_path = image.processed_path
+        if is_crack_defect:
+            if has_unet:
+                target_path = unet_file
+            elif has_rfdetr and not model_fallback:
+                target_path = rfdetr_file
+            elif has_yolo:
+                target_path = yolo_file
+            elif image.processed_path and os.path.exists(image.processed_path):
+                target_path = image.processed_path
+            else:
+                target_path = image.original_path
         else:
-            target_path = image.original_path
+            target_path = image.processed_path if (image.processed_path and os.path.exists(image.processed_path)) else image.original_path
 
     elif variant in ("unet", "segmentation", "unet_overlay"):
-        if has_unet:
+        if is_crack_defect and has_unet:
             target_path = unet_file
-        elif proc_target and os.path.exists(proc_target):
+        elif is_crack_defect and proc_target and os.path.exists(proc_target):
             try:
                 from app.services.unet_segmentor import get_unet_segmentor
                 segmentor = get_unet_segmentor()
@@ -1709,9 +1781,9 @@ def get_image_file_variant(
             target_path = proc_target if (proc_target and os.path.exists(proc_target)) else image.original_path
 
     elif variant in ("mask", "unet_mask"):
-        if os.path.exists(unet_mask):
+        if is_crack_defect and os.path.exists(unet_mask):
             target_path = unet_mask
-        elif proc_target and os.path.exists(proc_target):
+        elif is_crack_defect and proc_target and os.path.exists(proc_target):
             try:
                 from app.services.unet_segmentor import get_unet_segmentor
                 segmentor = get_unet_segmentor()
@@ -1733,22 +1805,20 @@ def get_image_file_variant(
             target_path = image.original_path
 
     elif variant in ("geometry", "geo", "skeleton"):
-        if geo_file and os.path.exists(geo_file):
+        if is_crack_defect and geo_file and os.path.exists(geo_file):
             target_path = geo_file
-        elif has_unet:
+        elif is_crack_defect and has_unet:
             target_path = unet_file
         else:
-            target_path = image.original_path
+            target_path = image.processed_path if (image.processed_path and os.path.exists(image.processed_path)) else image.original_path
 
     elif variant == "processed":
         # When crack defect was identified:
         # Deliver UNet segmentation if cracked, or RF-DETR if defects found
         if is_crack_defect and has_unet:
             target_path = unet_file
-        elif has_rfdetr and not model_fallback:
+        elif is_crack_defect and has_rfdetr and not model_fallback:
             target_path = rfdetr_file
-        elif has_unet:
-            target_path = unet_file
         elif image.processed_path and os.path.exists(image.processed_path):
             target_path = image.processed_path
         else:
@@ -1765,32 +1835,16 @@ def get_image_file_variant(
                 target_path = proc.output_path
 
     elif variant == "thumbnail":
-        if os.path.exists(unet_file):
+        if is_crack_defect and os.path.exists(unet_file):
             target_path = unet_file
-        elif proc_target and os.path.exists(proc_target):
-            try:
-                from app.services.unet_segmentor import get_unet_segmentor
-                segmentor = get_unet_segmentor()
-                mm_scale = image.calibration.get("mm_per_pixel") if (image.calibration and isinstance(image.calibration, dict)) else None
-                segmentor.segment(
-                    image_input=proc_target,
-                    threshold=0.5,
-                    save_overlay_path=unet_file,
-                    save_mask_path=unet_mask,
-                    mm_per_pixel=mm_scale
-                )
-                if os.path.exists(unet_file):
-                    target_path = unet_file
-                elif image.thumbnail_path and os.path.exists(image.thumbnail_path):
-                    target_path = image.thumbnail_path
-                else:
-                    target_path = proc_target
-            except Exception:
-                target_path = image.thumbnail_path if (image.thumbnail_path and os.path.exists(image.thumbnail_path)) else proc_target
+        elif is_crack_defect and has_rfdetr:
+            target_path = rfdetr_file
         elif image.thumbnail_path and os.path.exists(image.thumbnail_path):
             target_path = image.thumbnail_path
-        elif os.path.exists(unet_file):
-            target_path = unet_file
+        elif image.processed_path and os.path.exists(image.processed_path):
+            target_path = image.processed_path
+        else:
+            target_path = image.original_path
 
     elif variant == "original":
         target_path = image.original_path
@@ -2373,44 +2427,71 @@ def confirm_warning_endpoint(
     unet_file = find_stored_file("unet", f"{image.id}.jpg") or os.path.join(UNET_DIR, f"{image.id}.jpg")
     unet_mask_file = find_stored_file("unet", f"{image.id}_mask.png") or os.path.join(UNET_DIR, f"{image.id}_mask.png")
     geo_file = find_stored_file("geometry", f"{image.id}.jpg") or os.path.join(GEOMETRY_DIR, f"{image.id}.jpg")
-    has_rfdetr = bool(rfdetr_file and os.path.exists(rfdetr_file))
-    has_yolo = bool(yolo_file and os.path.exists(yolo_file))
-    has_unet = bool(unet_file and os.path.exists(unet_file))
-    has_geo = bool(geo_file and os.path.exists(geo_file))
-
-    # Ensure U-Net segmentation overlay is generated if not yet on disk
-    if not has_unet and target_to_classify and os.path.exists(target_to_classify):
-        try:
-            from app.services.unet_segmentor import get_unet_segmentor
-            segmentor = get_unet_segmentor()
-            mm_scale = image.calibration.get("mm_per_pixel") if (image.calibration and isinstance(image.calibration, dict)) else None
-            segmentor.segment(
-                image_input=target_to_classify,
-                threshold=0.5,
-                save_overlay_path=unet_file,
-                save_mask_path=unet_mask_file,
-                mm_per_pixel=mm_scale
-            )
-            has_unet = os.path.exists(unet_file)
-        except Exception as unet_e:
-            logger.warning("UNet on-demand error in confirm_warning: %s", unet_e)
-
-    if os.path.exists(unet_file):
-        image.thumbnail_path = unet_file
-        has_unet = True
-        db.commit()
 
     qr = image.quality_report or {}
     ai_clf = qr.get("ai_classification") if isinstance(qr, dict) else None
-    rfdetr_det = qr.get("rfdetr_detection") if isinstance(qr, dict) else (ai_clf.get("rfdetr_detection") if isinstance(ai_clf, dict) else None)
-    active_stage2_model = qr.get("active_stage2_model") if isinstance(qr, dict) else (ai_clf.get("active_stage2_model") if isinstance(ai_clf, dict) else None)
-    model_fallback = bool(qr.get("model_fallback") if isinstance(qr, dict) else (ai_clf.get("model_fallback") if isinstance(ai_clf, dict) else False))
-    yolo_det = qr.get("yolo_detection") if isinstance(qr, dict) else None
-    unet_seg = qr.get("unet_segmentation") if isinstance(qr, dict) else None
-    crack_geo = qr.get("crack_geometry") if isinstance(qr, dict) else None
+    p_crack = float(ai_clf.get("crack_probability", 0.0)) if isinstance(ai_clf, dict) else 0.0
+    thresh = float(ai_clf.get("threshold", 0.80)) if isinstance(ai_clf, dict) else 0.80
+    is_crack_defect = bool(p_crack >= thresh)
 
-    # The confirmed image thumbnail and preview must ALWAYS show the UNet model output image
-    default_preview = f"/api/v1/images/{image.id}/file?variant=unet"
+    has_rfdetr = bool(rfdetr_file and os.path.exists(rfdetr_file)) and is_crack_defect
+    has_yolo = bool(yolo_file and os.path.exists(yolo_file)) and is_crack_defect
+    has_unet = bool(unet_file and os.path.exists(unet_file)) and is_crack_defect
+    has_geo = bool(geo_file and os.path.exists(geo_file)) and is_crack_defect
+
+    if is_crack_defect:
+        # Ensure U-Net segmentation overlay is generated if defect detected and not yet on disk
+        if not has_unet and target_to_classify and os.path.exists(target_to_classify):
+            try:
+                from app.services.unet_segmentor import get_unet_segmentor
+                segmentor = get_unet_segmentor()
+                mm_scale = image.calibration.get("mm_per_pixel") if (image.calibration and isinstance(image.calibration, dict)) else None
+                segmentor.segment(
+                    image_input=target_to_classify,
+                    threshold=0.5,
+                    save_overlay_path=unet_file,
+                    save_mask_path=unet_mask_file,
+                    mm_per_pixel=mm_scale
+                )
+                has_unet = os.path.exists(unet_file)
+            except Exception as unet_e:
+                logger.warning("UNet on-demand error in confirm_warning: %s", unet_e)
+
+        if os.path.exists(unet_file):
+            image.thumbnail_path = unet_file
+            has_unet = True
+            db.commit()
+    else:
+        # Sound surface below 80% cutoff: keep thumbnail clean processed/original
+        image.thumbnail_path = image.processed_path or image.original_path
+        db.commit()
+
+    rfdetr_det = qr.get("rfdetr_detection") if (is_crack_defect and isinstance(qr, dict)) else None
+    active_stage2_model = qr.get("active_stage2_model") if (is_crack_defect and isinstance(qr, dict)) else "none"
+    model_fallback = bool(qr.get("model_fallback")) if (is_crack_defect and isinstance(qr, dict)) else False
+    yolo_det = qr.get("yolo_detection") if (is_crack_defect and isinstance(qr, dict)) else None
+    unet_seg = qr.get("unet_segmentation") if (is_crack_defect and isinstance(qr, dict)) else None
+    crack_geo = qr.get("crack_geometry") if (is_crack_defect and isinstance(qr, dict)) else None
+
+    if is_crack_defect and has_unet:
+        default_preview = f"/api/v1/images/{image.id}/file?variant=unet"
+    elif is_crack_defect and has_rfdetr:
+        default_preview = f"/api/v1/images/{image.id}/file?variant=rfdetr"
+    else:
+        default_preview = f"/api/v1/images/{image.id}/file?variant=processed"
+
+    dmg_assessment = qr.get("damage_assessment") if is_crack_defect else {
+        "severity": "No Visible Damage",
+        "severity_code": "none",
+        "controlling_factor": "Sound Surface",
+        "controlling_value": "No crack defects detected above 80% decision threshold",
+        "crack_count": 0,
+        "crack_density_pct": 0.0,
+        "peak_width_px": 0.0,
+        "peak_width_mm": 0.0,
+        "priority_action": "Routine Monitoring",
+        "mode": "uncalibrated"
+    }
 
     return {
         "status": "accepted",
@@ -2434,23 +2515,23 @@ def confirm_warning_endpoint(
         "unet_segmentation": unet_seg,
         "hasYolo": has_yolo,
         "has_yolo": has_yolo,
-        "hasUnet": True,
-        "has_unet": True,
+        "hasUnet": has_unet,
+        "has_unet": has_unet,
         "hasGeometry": has_geo,
         "has_geometry": has_geo,
         "crackGeometry": crack_geo,
         "crack_geometry": crack_geo,
-        "damageAssessment": qr.get("damage_assessment") or (crack_geo.get("summary", {}).get("damage_assessment") if crack_geo else None),
-        "damage_assessment": qr.get("damage_assessment") or (crack_geo.get("summary", {}).get("damage_assessment") if crack_geo else None),
+        "damageAssessment": dmg_assessment,
+        "damage_assessment": dmg_assessment,
         "calibration": image.calibration,
         "previewUrl": default_preview,
         "thumbnailUrl": default_preview,
-        "processedUrl": default_preview,
+        "processedUrl": f"/api/v1/images/{image.id}/file?variant=processed",
         "rfdetrUrl": f"/api/v1/images/{image.id}/file?variant=rfdetr" if has_rfdetr else None,
         "yoloUrl": f"/api/v1/images/{image.id}/file?variant=yolo" if has_yolo else None,
         "annotatedUrl": default_preview,
-        "unetUrl": default_preview,
-        "unetMaskUrl": f"/api/v1/images/{image.id}/file?variant=mask",
+        "unetUrl": (f"/api/v1/images/{image.id}/file?variant=unet") if (has_unet and is_crack_defect) else None,
+        "unetMaskUrl": (f"/api/v1/images/{image.id}/file?variant=mask") if (has_unet and is_crack_defect) else None,
         "geometryUrl": f"/api/v1/images/{image.id}/file?variant=geometry" if has_geo else None
     }
 
@@ -2819,16 +2900,38 @@ def analyze_image_endpoint(
 
     v_tag = image.sha256[:10] if image.sha256 else str(int(time.time()))
     p_crack = float(pred.get("crack_probability", 0.0)) if pred else 0.0
-    is_crack_defect = (p_crack >= 0.80 or (bool(pred.get("has_crack")) if pred else False))
+    thresh = float(pred.get("threshold", 0.80)) if pred else 0.80
+    is_crack_defect = bool(p_crack >= thresh)
 
-    if is_crack_defect and has_unet:
-        default_preview = f"/api/v1/images/{image.id}/file?variant=unet&v={v_tag}"
-    elif has_rfdetr and not model_fallback:
-        default_preview = f"/api/v1/images/{image.id}/file?variant=rfdetr&v={v_tag}"
-    elif has_unet:
-        default_preview = f"/api/v1/images/{image.id}/file?variant=unet&v={v_tag}"
-    else:
+    if not is_crack_defect:
+        has_rfdetr = False
+        has_unet = False
+        has_yolo = False
+        has_geo = False
+        active_stage2_model = "none"
+        model_fallback = False
+        rfdetr_det = None
         default_preview = f"/api/v1/images/{image.id}/file?variant=processed&v={v_tag}"
+        dmg_assess = {
+            "severity": "No Visible Damage",
+            "severity_code": "none",
+            "controlling_factor": "Sound Surface",
+            "controlling_value": "No crack defects detected above 80% decision threshold",
+            "crack_count": 0,
+            "crack_density_pct": 0.0,
+            "peak_width_px": 0.0,
+            "peak_width_mm": 0.0,
+            "priority_action": "Routine Monitoring",
+            "mode": "uncalibrated"
+        }
+    else:
+        if is_crack_defect and has_unet:
+            default_preview = f"/api/v1/images/{image.id}/file?variant=unet&v={v_tag}"
+        elif is_crack_defect and has_rfdetr and not model_fallback:
+            default_preview = f"/api/v1/images/{image.id}/file?variant=rfdetr&v={v_tag}"
+        else:
+            default_preview = f"/api/v1/images/{image.id}/file?variant=processed&v={v_tag}"
+        dmg_assess = qr.get("damage_assessment") or (qr.get("crack_geometry", {}).get("summary", {}).get("damage_assessment") if qr.get("crack_geometry") else None)
 
     return {
         "imageId": image.id,
@@ -2846,28 +2949,28 @@ def analyze_image_endpoint(
         "model_fallback": model_fallback,
         "hasUnet": has_unet,
         "has_unet": has_unet,
-        "unetSegmentation": qr.get("unet_segmentation"),
-        "unet_segmentation": qr.get("unet_segmentation"),
+        "unetSegmentation": qr.get("unet_segmentation") if is_crack_defect else None,
+        "unet_segmentation": qr.get("unet_segmentation") if is_crack_defect else None,
         "hasGeometry": has_geo,
         "has_geometry": has_geo,
-        "crackGeometry": qr.get("crack_geometry"),
-        "crack_geometry": qr.get("crack_geometry"),
-        "damageAssessment": qr.get("damage_assessment") or (qr.get("crack_geometry", {}).get("summary", {}).get("damage_assessment") if qr.get("crack_geometry") else None),
-        "damage_assessment": qr.get("damage_assessment") or (qr.get("crack_geometry", {}).get("summary", {}).get("damage_assessment") if qr.get("crack_geometry") else None),
+        "crackGeometry": qr.get("crack_geometry") if is_crack_defect else None,
+        "crack_geometry": qr.get("crack_geometry") if is_crack_defect else None,
+        "damageAssessment": dmg_assess,
+        "damage_assessment": dmg_assess,
         "calibration": image.calibration,
-        "yoloDetection": qr.get("yolo_detection"),
-        "yolo_detection": qr.get("yolo_detection"),
+        "yoloDetection": qr.get("yolo_detection") if is_crack_defect else None,
+        "yolo_detection": qr.get("yolo_detection") if is_crack_defect else None,
         "hasYolo": has_yolo,
         "previewUrl": default_preview,
         "originalUrl": f"/api/v1/images/{image.id}/file?variant=original&v={v_tag}",
         "processedUrl": f"/api/v1/images/{image.id}/file?variant=processed&v={v_tag}",
         "enhancedUrl": f"/api/v1/images/{image.id}/file?variant=enhanced&v={v_tag}",
-        "rfdetrUrl": f"/api/v1/images/{image.id}/file?variant=rfdetr&v={v_tag}" if has_rfdetr else None,
-        "unetUrl": f"/api/v1/images/{image.id}/file?variant=unet&v={v_tag}" if has_unet else None,
-        "unetMaskUrl": f"/api/v1/images/{image.id}/file?variant=mask&v={v_tag}" if has_unet else None,
-        "geometryUrl": f"/api/v1/images/{image.id}/file?variant=geometry&v={v_tag}" if has_geo else None,
-        "yoloUrl": f"/api/v1/images/{image.id}/file?variant=yolo&v={v_tag}" if has_yolo else None,
-        "annotatedUrl": (f"/api/v1/images/{image.id}/file?variant=unet&v={v_tag}" if (is_crack_defect and has_unet) else ((f"/api/v1/images/{image.id}/file?variant=rfdetr&v={v_tag}") if (has_rfdetr and not model_fallback) else ((f"/api/v1/images/{image.id}/file?variant=unet&v={v_tag}") if has_unet else None)))
+        "rfdetrUrl": (f"/api/v1/images/{image.id}/file?variant=rfdetr&v={v_tag}") if (has_rfdetr and is_crack_defect) else None,
+        "unetUrl": (f"/api/v1/images/{image.id}/file?variant=unet&v={v_tag}") if (has_unet and is_crack_defect) else None,
+        "unetMaskUrl": (f"/api/v1/images/{image.id}/file?variant=mask&v={v_tag}") if (has_unet and is_crack_defect) else None,
+        "geometryUrl": (f"/api/v1/images/{image.id}/file?variant=geometry&v={v_tag}") if (has_geo and is_crack_defect) else None,
+        "yoloUrl": (f"/api/v1/images/{image.id}/file?variant=yolo&v={v_tag}") if (has_yolo and is_crack_defect) else None,
+        "annotatedUrl": default_preview
     }
 
 
@@ -3490,18 +3593,39 @@ async def transform_image_endpoint(
     has_yolo = bool(pred and pred.get("yolo_detection"))
 
     p_crack = float(pred.get("crack_probability", 0.0)) if pred else 0.0
-    is_crack_defect = (p_crack >= 0.80 or (bool(pred.get("has_crack")) if pred else False))
+    thresh = float(pred.get("threshold", 0.80)) if pred else 0.80
+    is_crack_defect = bool(p_crack >= thresh)
 
-    if is_crack_defect and has_unet:
-        preview_url = f"/api/v1/images/{image.id}/file?variant=unet&v={v_tag}"
-    elif has_rfdetr and not model_fallback:
-        preview_url = f"/api/v1/images/{image.id}/file?variant=rfdetr&v={v_tag}"
-    elif has_unet:
-        preview_url = f"/api/v1/images/{image.id}/file?variant=unet&v={v_tag}"
-    elif image.processing_status == "complete":
+    if not is_crack_defect:
+        has_unet = False
+        has_rfdetr = False
+        has_yolo = False
+        has_geo = False
+        active_stage2_model = "none"
+        model_fallback = False
         preview_url = f"/api/v1/images/{image.id}/file?variant=processed&v={v_tag}"
+        dmg_assess = {
+            "severity": "No Visible Damage",
+            "severity_code": "none",
+            "controlling_factor": "Sound Surface",
+            "controlling_value": "No crack defects detected above 80% decision threshold",
+            "crack_count": 0,
+            "crack_density_pct": 0.0,
+            "peak_width_px": 0.0,
+            "peak_width_mm": 0.0,
+            "priority_action": "Routine Monitoring",
+            "mode": "uncalibrated"
+        }
     else:
-        preview_url = f"/api/v1/images/{image.id}/file?variant=original&v={v_tag}"
+        if is_crack_defect and has_unet:
+            preview_url = f"/api/v1/images/{image.id}/file?variant=unet&v={v_tag}"
+        elif has_rfdetr and not model_fallback:
+            preview_url = f"/api/v1/images/{image.id}/file?variant=rfdetr&v={v_tag}"
+        elif image.processing_status == "complete":
+            preview_url = f"/api/v1/images/{image.id}/file?variant=processed&v={v_tag}"
+        else:
+            preview_url = f"/api/v1/images/{image.id}/file?variant=original&v={v_tag}"
+        dmg_assess = pred.get("damage_assessment") if pred else None
 
     return {
         "status": "transformed",
@@ -3516,36 +3640,36 @@ async def transform_image_endpoint(
         "ai_classification": pred,
         "hasRfdetr": has_rfdetr,
         "has_rfdetr": has_rfdetr,
-        "rfdetrDetection": rfdetr_det,
-        "rfdetr_detection": rfdetr_det,
+        "rfdetrDetection": rfdetr_det if is_crack_defect else None,
+        "rfdetr_detection": rfdetr_det if is_crack_defect else None,
         "activeStage2Model": active_stage2_model,
         "active_stage2_model": active_stage2_model,
         "modelFallback": model_fallback,
         "model_fallback": model_fallback,
         "hasUnet": has_unet,
         "has_unet": has_unet,
-        "unetSegmentation": pred.get("unet_segmentation") if pred else None,
-        "unet_segmentation": pred.get("unet_segmentation") if pred else None,
+        "unetSegmentation": pred.get("unet_segmentation") if (pred and is_crack_defect) else None,
+        "unet_segmentation": pred.get("unet_segmentation") if (pred and is_crack_defect) else None,
         "hasGeometry": has_geo,
         "has_geometry": has_geo,
-        "crackGeometry": pred.get("crack_geometry") if pred else None,
-        "crack_geometry": pred.get("crack_geometry") if pred else None,
-        "damageAssessment": pred.get("damage_assessment") if pred else None,
-        "damage_assessment": pred.get("damage_assessment") if pred else None,
+        "crackGeometry": pred.get("crack_geometry") if (pred and is_crack_defect) else None,
+        "crack_geometry": pred.get("crack_geometry") if (pred and is_crack_defect) else None,
+        "damageAssessment": dmg_assess,
+        "damage_assessment": dmg_assess,
         "calibration": image.calibration,
         "hasYolo": has_yolo,
         "has_yolo": has_yolo,
-        "yoloDetection": pred.get("yolo_detection") if pred else None,
-        "yolo_detection": pred.get("yolo_detection") if pred else None,
+        "yoloDetection": pred.get("yolo_detection") if (pred and is_crack_defect) else None,
+        "yolo_detection": pred.get("yolo_detection") if (pred and is_crack_defect) else None,
         "previewUrl": preview_url,
         "originalUrl": f"/api/v1/images/{image.id}/file?variant=original&v={v_tag}",
         "processedUrl": f"/api/v1/images/{image.id}/file?variant=processed&v={v_tag}",
         "thumbnailUrl": f"/api/v1/images/{image.id}/file?variant=thumbnail&v={v_tag}",
-        "rfdetrUrl": f"/api/v1/images/{image.id}/file?variant=rfdetr&v={v_tag}" if has_rfdetr else None,
-        "unetUrl": f"/api/v1/images/{image.id}/file?variant=unet&v={v_tag}" if has_unet else None,
-        "unetMaskUrl": f"/api/v1/images/{image.id}/file?variant=mask&v={v_tag}" if has_unet else None,
-        "geometryUrl": f"/api/v1/images/{image.id}/file?variant=geometry&v={v_tag}" if has_geo else None,
-        "annotatedUrl": (f"/api/v1/images/{image.id}/file?variant=unet&v={v_tag}" if (is_crack_defect and has_unet) else ((f"/api/v1/images/{image.id}/file?variant=rfdetr&v={v_tag}") if (has_rfdetr and not model_fallback) else ((f"/api/v1/images/{image.id}/file?variant=unet&v={v_tag}") if has_unet else None))),
+        "rfdetrUrl": (f"/api/v1/images/{image.id}/file?variant=rfdetr&v={v_tag}") if (has_rfdetr and is_crack_defect) else None,
+        "unetUrl": (f"/api/v1/images/{image.id}/file?variant=unet&v={v_tag}") if (has_unet and is_crack_defect) else None,
+        "unetMaskUrl": (f"/api/v1/images/{image.id}/file?variant=mask&v={v_tag}") if (has_unet and is_crack_defect) else None,
+        "geometryUrl": (f"/api/v1/images/{image.id}/file?variant=geometry&v={v_tag}") if (has_geo and is_crack_defect) else None,
+        "annotatedUrl": preview_url,
     }
 
 

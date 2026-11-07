@@ -40,13 +40,10 @@ export function PhotoZoomModal({
   photo: any;
   inspectionId: string;
 }) {
-  const hasCrack = Boolean(
-    photo?.aiClassification?.has_crack ||
-    photo?.ai_classification?.has_crack ||
-    photo?.aiDetection?.defectType === "crack" ||
-    photo?.qualityReport?.ai_classification?.has_crack ||
-    (photo?.aiClassification?.crack_probability ?? 0) >= 0.80
-  );
+  const aiCls = photo?.aiClassification || photo?.ai_classification || photo?.qualityReport?.ai_classification || photo?.quality_report?.ai_classification;
+  const pProb = typeof aiCls?.crack_probability === "number" ? aiCls.crack_probability : null;
+  const pThresh = typeof aiCls?.threshold === "number" ? aiCls.threshold : 0.80;
+  const hasCrack = pProb !== null ? pProb >= pThresh : Boolean(aiCls?.has_crack);
   const [zoom, setZoom] = useState(1);
   const [viewMode, setViewMode] = useState<"orig" | "proc" | "yolo" | "unet">(hasCrack ? "unet" : "orig");
 
@@ -440,7 +437,7 @@ export function PhotoManualClassificationModal({
               <span className="font-semibold text-foreground">Machine Baseline (ResNet50 v1.0):</span>
               {aiPred ? (
                 <p className="text-[11px] text-muted-foreground font-mono">
-                  Predicted: <strong className={aiPred.has_crack ? "text-rose-400" : "text-foreground"}>{aiPred.predicted_class}</strong> · Crack Prob: {(aiPred.crack_probability * 100).toFixed(1)}% · Threshold: {(aiPred.threshold * 100).toFixed(1)}%
+                  Predicted: <strong className={((aiPred.crack_probability ?? 0) >= (aiPred.threshold ?? 0.80)) ? "text-rose-400" : "text-foreground"}>{((aiPred.crack_probability ?? 0) >= (aiPred.threshold ?? 0.80)) ? (aiPred.predicted_class || "Cracked") : "Uncracked"}</strong> · Crack Prob: {(aiPred.crack_probability * 100).toFixed(1)}% · Threshold: {((aiPred.threshold ?? 0.80) * 100).toFixed(1)}%
                 </p>
               ) : (
                 <p className="text-[11px] text-muted-foreground">

@@ -1222,13 +1222,15 @@ export function InspectionDetailPage() {
                         threshold: 0.80,
                         engine: "ONNXRuntime"
                       } : null);
-                      const hasCrack = Boolean(aiPred?.has_crack || aiPred?.predicted_class === "Cracked" || (aiPred?.crack_probability ?? 0) >= 0.80);
+                      const crackProb = typeof aiPred?.crack_probability === "number" ? aiPred.crack_probability : null;
+                      const gateThresh = typeof aiPred?.threshold === "number" ? aiPred.threshold : 0.80;
+                      const hasCrack = crackProb !== null ? crackProb >= gateThresh : Boolean(aiPred?.has_crack);
                       const rfdetrSeg = qr.rfdetr_detection || img.rfdetrDetection;
-                      const hasRfdetr = Boolean(img.hasRfdetr || (rfdetrSeg && rfdetrSeg.has_defect));
-                      const modelFallback = Boolean(img.modelFallback || img.model_fallback || (hasCrack && !hasRfdetr));
+                      const hasRfdetr = Boolean(hasCrack && (img.hasRfdetr || (rfdetrSeg && rfdetrSeg.has_defect)));
+                      const modelFallback = Boolean(hasCrack && (img.modelFallback || img.model_fallback || !hasRfdetr));
                       const unetSeg = qr.unet_segmentation || img.unetSegmentation;
-                      const hasUnet = Boolean(img.hasUnet || unetSeg || hasCrack);
-                      const defaultMode: "orig" | "proc" | "rfdetr" | "yolo" | "unet" = "unet";
+                      const hasUnet = Boolean(hasCrack && (img.hasUnet || unetSeg || modelFallback));
+                      const defaultMode: "orig" | "proc" | "rfdetr" | "yolo" | "unet" = hasCrack ? "unet" : "proc";
                       const mode = viewMode[img.id] || defaultMode;
                       const tok = getAuthToken();
                       const tokQuery = tok ? `?token=${encodeURIComponent(tok)}` : "";
@@ -1326,12 +1328,14 @@ export function InspectionDetailPage() {
                               {aiPred && (
                                 <span
                                   className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold border shadow-xs ${
-                                    aiPred.has_crack
+                                    hasCrack
                                       ? "bg-rose-950/90 text-rose-300 border-rose-500/40"
                                       : "bg-emerald-950/90 text-emerald-300 border-emerald-500/40"
                                   }`}
                                 >
-                                  {aiPred.has_crack ? `Crack Detected (${(aiPred.crack_probability * 100).toFixed(0)}%)` : `No Crack (${(aiPred.uncracked_probability * 100).toFixed(0)}%)`}
+                                  {hasCrack
+                                    ? `Crack Detected (${(((crackProb ?? aiPred.crack_probability ?? 1)) * 100).toFixed(0)}%)`
+                                    : `Sound Surface (${(((aiPred.uncracked_probability ?? (1 - (crackProb ?? aiPred.crack_probability ?? 0)))) * 100).toFixed(0)}%)`}
                                 </span>
                               )}
                               {isCalibrated ? (

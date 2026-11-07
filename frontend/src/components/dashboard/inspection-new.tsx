@@ -611,31 +611,24 @@ export function InspectionNewPage() {
         const processedUrl = result.preview_url || result.processedUrl || (result.processed_path ? `/api/v1/images/${result.id}/file?variant=processed` : null);
         const yoloDetection = result.yoloDetection || result.yolo_detection || result.quality_report?.yolo_detection || result.qualityReport?.yolo_detection;
 
-        const isCrack = Boolean(
-          result.ai_classification?.has_crack ||
-          result.ai_classification?.predicted_class === "Cracked" ||
-          (result.ai_classification?.crack_probability ?? 0) >= 0.80 ||
-          result.aiClassification?.has_crack ||
-          result.aiClassification?.predicted_class === "Cracked" ||
-          (result.aiClassification?.crack_probability ?? 0) >= 0.80 ||
-          rfdetrDetection?.has_defect ||
-          Boolean(rfdetrDetection?.num_detections && rfdetrDetection.num_detections > 0) ||
-          unetSegmentation?.has_crack ||
-          (unetSegmentation?.crack_area_pct !== undefined && unetSegmentation.crack_area_pct > 0) ||
-          result.is_cracked
-        );
+        const aiCls = result.ai_classification || result.aiClassification || result.quality_report?.ai_classification || result.qualityReport?.ai_classification;
+        const pCrack = typeof aiCls?.crack_probability === "number" ? aiCls.crack_probability : null;
+        const pThresh = typeof aiCls?.threshold === "number" ? aiCls.threshold : 0.80;
+        const isCrack = pCrack !== null ? pCrack >= pThresh : Boolean(aiCls?.has_crack);
 
         const token = getAuthToken();
         const tokenParam = token ? `token=${encodeURIComponent(token)}` : "";
-        const baseUnetCandidate = unetUrl || (result.id ? `/api/v1/images/${result.id}/file?variant=unet` : null);
+        const baseUnetCandidate = isCrack && (unetUrl || (result.id ? `/api/v1/images/${result.id}/file?variant=unet` : null));
         const unetCandidateUrl = baseUnetCandidate
           ? (baseUnetCandidate.includes("token=")
               ? baseUnetCandidate
               : `${baseUnetCandidate}${baseUnetCandidate.includes("?") ? "&" : "?"}${tokenParam}`)
           : null;
 
-        // Result image to display on dashboard: U-Net segmentation thumbnail unconditionally
-        const displayUrl = unetCandidateUrl || ((!modelFallback && rfdetrUrl) || unetUrl || processedUrl || originalUrl);
+        // Result image to display: if crack defect detected, show UNet/RF-DETR overlay; if sound (<80%), show clean processed image
+        const displayUrl = isCrack
+          ? (unetCandidateUrl || ((!modelFallback && rfdetrUrl) || unetUrl || processedUrl || originalUrl))
+          : (processedUrl || originalUrl);
 
         setPhotos((prev) =>
           prev.map((p) => {
@@ -809,10 +802,19 @@ export function InspectionNewPage() {
       const res = await api.confirmImageWarning(id);
       const token = getAuthToken();
       const tokenParam = token ? `token=${encodeURIComponent(token)}` : "";
+      const bust = `?v=${Date.now()}${tokenParam ? `&${tokenParam}` : ""}`;
+
+      const aiCls = res.aiClassification || res.ai_classification;
+      const pCrack = typeof aiCls?.crack_probability === "number" ? aiCls.crack_probability : null;
+      const pThresh = typeof aiCls?.threshold === "number" ? aiCls.threshold : 0.80;
+      const isCrackDefect = pCrack !== null ? pCrack >= pThresh : Boolean(aiCls?.has_crack);
+
       const baseUnet = res.unetUrl || `/api/v1/images/${id}/file?variant=unet`;
       const sep = baseUnet.includes("?") ? "&" : "?";
       const unetBusted = `${baseUnet}${sep}v=${Date.now()}${tokenParam ? `&${tokenParam}` : ""}`;
-      const bust = `?v=${Date.now()}${tokenParam ? `&${tokenParam}` : ""}`;
+      const defaultDisplay = isCrackDefect
+        ? (res.previewUrl ? `${res.previewUrl}${res.previewUrl.includes("?") ? "&" : "?"}v=${Date.now()}${tokenParam ? `&${tokenParam}` : ""}` : unetBusted)
+        : (res.processedUrl ? `${res.processedUrl}${res.processedUrl.includes("?") ? "&" : "?"}v=${Date.now()}${tokenParam ? `&${tokenParam}` : ""}` : `/api/v1/images/${id}/file?variant=processed${bust}`);
 
       setPhotos((prev) =>
         prev.map((p) =>
@@ -823,27 +825,28 @@ export function InspectionNewPage() {
                 quality_status: "accepted",
                 processing_status: "complete",
                 warningConfirmed: true,
-                thumbnailUrl: unetBusted,
-                previewUrl: unetBusted,
-                annotatedUrl: unetBusted,
-                unetUrl: unetBusted,
-                hasUnet: true,
-                has_unet: true,
-                yoloUrl: res.yoloUrl ? `${res.yoloUrl}${tokenParam ? `&${tokenParam}` : ""}` : (p.yoloUrl || `/api/v1/images/${id}/file?variant=yolo${bust}`),
-                hasYolo: Boolean(res.hasYolo ?? p.hasYolo ?? true),
-                yoloDetection: res.yoloDetection || p.yoloDetection,
-                unetMaskUrl: res.unetMaskUrl ? `${res.unetMaskUrl}${tokenParam ? `&${tokenParam}` : ""}` : `/api/v1/images/${id}/file?variant=mask${bust}`,
-                unetSegmentation: res.unetSegmentation || res.unet_segmentation || p.unetSegmentation,
+                thumbnailUrl: defaultDisplay,
+                previewUrl: defaultDisplay,
+                annotatedUrl: defaultDisplay,
+                unetUrl: isCrackDefect ? unetBusted : null,
+                hasUnet: isCrackDefect && Boolean(res.hasUnet),
+                has_unet: isCrackDefect && Boolean(res.has_unet),
+                hasCrack: isCrackDefect,
+                yoloUrl: isCrackDefect && res.yoloUrl ? `${res.yoloUrl}${tokenParam ? `&${tokenParam}` : ""}` : null,
+                hasYolo: isCrackDefect && Boolean(res.hasYolo ?? p.hasYolo),
+                yoloDetection: isCrackDefect ? (res.yoloDetection || p.yoloDetection) : null,
+                unetMaskUrl: isCrackDefect && res.unetMaskUrl ? `${res.unetMaskUrl}${tokenParam ? `&${tokenParam}` : ""}` : null,
+                unetSegmentation: isCrackDefect ? (res.unetSegmentation || res.unet_segmentation || p.unetSegmentation) : null,
                 aiClassification: res.aiClassification || res.ai_classification || p.aiClassification,
-                hasGeometry: Boolean(res.hasGeometry || res.has_geometry || res.crackGeometry || res.crack_geometry || p.hasGeometry),
-                has_geometry: Boolean(res.hasGeometry || res.has_geometry || res.crackGeometry || res.crack_geometry || p.hasGeometry),
-                crackGeometry: res.crackGeometry || res.crack_geometry || p.crackGeometry,
-                crack_geometry: res.crackGeometry || res.crack_geometry || p.crackGeometry,
+                hasGeometry: isCrackDefect && Boolean(res.hasGeometry || res.has_geometry || res.crackGeometry || res.crack_geometry || p.hasGeometry),
+                has_geometry: isCrackDefect && Boolean(res.hasGeometry || res.has_geometry || res.crackGeometry || res.crack_geometry || p.hasGeometry),
+                crackGeometry: isCrackDefect ? (res.crackGeometry || res.crack_geometry || p.crackGeometry) : null,
+                crack_geometry: isCrackDefect ? (res.crackGeometry || res.crack_geometry || p.crackGeometry) : null,
                 damageAssessment: res.damageAssessment || res.damage_assessment || p.damageAssessment,
                 damage_assessment: res.damageAssessment || res.damage_assessment || p.damageAssessment,
                 calibration: res.calibration || p.calibration,
-                geometryUrl: res.geometryUrl || p.geometryUrl,
-                processedUrl: unetBusted, // Unconditionally keep U-Net model output image, NEVER revert to raw photo
+                geometryUrl: isCrackDefect ? (res.geometryUrl || p.geometryUrl) : null,
+                processedUrl: defaultDisplay,
                 processingRun: res.processing_run || p.processingRun,
               }
             : p

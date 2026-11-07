@@ -235,10 +235,10 @@ def get_recent_ai_classifications(db: Session, org_id: str, limit: int = 8) -> L
         if pred and (pred.get("predicted_class") or "has_crack" in pred):
             insp = img.inspection
             asset = insp.asset if insp else None
-            has_crack = bool(pred.get("has_crack"))
-            prob = pred.get("crack_probability" if has_crack else "uncracked_probability")
-            if prob is None:
-                prob = 0.95
+            p_crack = float(pred.get("crack_probability", 0.0))
+            thresh = float(pred.get("threshold", 0.80))
+            has_crack = bool(p_crack >= thresh)
+            prob = p_crack if has_crack else float(pred.get("uncracked_probability", 1.0 - p_crack))
             qr = img.quality_report or {}
             yolo_det = qr.get("yolo_detection") if isinstance(qr, dict) else None
             unet_seg = qr.get("unet_segmentation") if isinstance(qr, dict) else None
