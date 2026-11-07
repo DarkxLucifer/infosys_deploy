@@ -16,6 +16,7 @@ import {
   Cpu,
   Activity,
   HeartPulse,
+  BarChart3,
 } from "lucide-react";
 import { SidebarToggleIcon } from "./icons";
 import { useTheme } from "./theme-provider";
@@ -70,12 +71,14 @@ export function DashboardSidebar() {
     navItems.push(
       { name: "Inspections", href: "/app/inspections", icon: ClipboardList },
       { name: "Assets", href: "/app/assets", icon: Building },
+      { name: "Damage Analytics", href: "/app/analytics", icon: BarChart3 },
       ...(FEATURES.damageMap ? [{ name: "Damage Map", href: "/app/map", icon: MapPin }] : []),
       { name: "Notifications", href: "/app/notifications", icon: Bell },
     );
   } else if (currentRole === "engineer") {
     navItems.push(
       { name: "Review Queue", href: "/app/review", icon: CheckSquare },
+      { name: "Damage Analytics", href: "/app/analytics", icon: BarChart3 },
       { name: "Inspections", href: "/app/inspections", icon: ClipboardList },
       { name: "Assets", href: "/app/assets", icon: Building },
       ...(FEATURES.damageMap ? [{ name: "Damage Map", href: "/app/map", icon: MapPin }] : []),
@@ -85,12 +88,14 @@ export function DashboardSidebar() {
   } else if (currentRole === "maintenance") {
     navItems.push(
       ...(FEATURES.maintenanceRoute ? [{ name: "Maintenance", href: "/app/maintenance", icon: Wrench }] : []),
+      { name: "Damage Analytics", href: "/app/analytics", icon: BarChart3 },
       { name: "Assets", href: "/app/assets", icon: Building },
       ...(FEATURES.damageMap ? [{ name: "Damage Map", href: "/app/map", icon: MapPin }] : []),
       { name: "Notifications", href: "/app/notifications", icon: Bell },
     );
   } else if (currentRole === "manager") {
     navItems.push(
+      { name: "Damage Analytics", href: "/app/analytics", icon: BarChart3 },
       { name: "Assets", href: "/app/assets", icon: Building },
       { name: "Inspections", href: "/app/inspections", icon: ClipboardList },
       ...(FEATURES.damageMap ? [{ name: "Damage Map", href: "/app/map", icon: MapPin }] : []),
@@ -102,6 +107,7 @@ export function DashboardSidebar() {
     navItems.push(
       ...(FEATURES.adminUsersRoute ? [{ name: "Users", href: "/app/admin/users", icon: Users }] : []),
       ...(FEATURES.adminModelsRoute ? [{ name: "Models", href: "/app/admin/models", icon: Cpu }] : []),
+      { name: "Damage Analytics", href: "/app/analytics", icon: BarChart3 },
       ...(FEATURES.adminAuditRoute ? [{ name: "Audit log", href: "/app/admin/audit", icon: Activity }] : []),
       ...(FEATURES.adminHealthRoute ? [{ name: "Platform health", href: "/app/admin/health", icon: HeartPulse }] : []),
       { name: "Assets", href: "/app/assets", icon: Building },

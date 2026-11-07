@@ -707,9 +707,12 @@ export function InspectionDetailPage() {
                   variant="outline"
                   onClick={async () => {
                     try {
-                      await api.generateReports(inspection.id, "all");
-                      window.open(`/api/v1/inspections/${inspection.id}/reports/download?format=pdf`, "_blank");
+                      toast.loading("Generating certified report...", { id: "report-dl" });
+                      const blob = await api.downloadInspectionReport(inspection.id, "pdf");
+                      triggerDownload(blob, `infrascan_report_${inspection.id}.pdf`);
+                      toast.success("Inspection report downloaded", { id: "report-dl" });
                     } catch {
+                      toast.dismiss("report-dl");
                       downloadCertificateNow();
                     }
                   }}

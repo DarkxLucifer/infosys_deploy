@@ -32,6 +32,8 @@ import {
 } from "@/store/app";
 import { dateRangeOptions, type DateRange } from "../../data";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
+import { buildReportBlob, reportFilename, triggerDownload } from "@/lib/report-download";
 
 const dayMs = 24 * 60 * 60 * 1000;
 
@@ -161,7 +163,22 @@ function OverviewSection() {
   ];
 
   function handleExport() {
-    generateReport("maintenance");
+    try {
+      const report = generateReport("maintenance");
+      const blob = buildReportBlob(report, {
+        assets: state.assets,
+        inspections: state.inspections,
+        workOrders: state.workOrders,
+        settings: state.settings,
+        userName: state.session?.name ?? "Civil Engineer",
+      });
+      triggerDownload(blob, reportFilename(report));
+      toast.success("Maintenance Report Exported", {
+        description: `${report.title} downloaded successfully.`,
+      });
+    } catch {
+      toast.error("Failed to generate export report.");
+    }
   }
 
   return (

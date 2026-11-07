@@ -1815,8 +1815,89 @@ export const apiService = {
     if (from) params.append("from", from);
     if (to) params.append("to", to);
     params.append("format", "csv");
-    const res = await fetch(`${API_BASE_URL}/exports/dashboard/${role}?${params}`);
+    const res = await fetch(`${API_BASE_URL}/exports/dashboard/${role}?${params}`, {
+      headers: authHeaders(),
+      credentials: "include",
+    });
+    if (!res.ok) {
+      throw new Error(`Failed to export dashboard CSV for ${role}`);
+    }
     return res.text();
+  },
+
+  /* ------------------------------------------------------------------ */
+  /* Damage Analytics Engine API (§9 & §10)                             */
+  /* ------------------------------------------------------------------ */
+  async getAnalyticsOverview(range: string = "30d", assetType?: string): Promise<any> {
+    const params = new URLSearchParams({ range });
+    if (assetType && assetType !== "all") params.append("asset_type", assetType);
+    const res = await fetch(`${API_BASE_URL}/analytics/overview?${params}`, {
+      headers: authHeaders(),
+      credentials: "include",
+    });
+    if (!res.ok) throw new Error("Failed to fetch analytics overview");
+    return res.json();
+  },
+
+  async getDamageDistribution(range: string = "30d", assetType?: string): Promise<any> {
+    const params = new URLSearchParams({ range });
+    if (assetType && assetType !== "all") params.append("asset_type", assetType);
+    const res = await fetch(`${API_BASE_URL}/analytics/damage-distribution?${params}`, {
+      headers: authHeaders(),
+      credentials: "include",
+    });
+    if (!res.ok) throw new Error("Failed to fetch damage distribution");
+    return res.json();
+  },
+
+  async getCrackProgression(assetId?: string): Promise<any> {
+    const params = new URLSearchParams();
+    if (assetId && assetId !== "all") params.append("asset_id", assetId);
+    const res = await fetch(`${API_BASE_URL}/analytics/crack-progression?${params}`, {
+      headers: authHeaders(),
+      credentials: "include",
+    });
+    if (!res.ok) throw new Error("Failed to fetch crack progression");
+    return res.json();
+  },
+
+  async getRiskMatrix(range: string = "30d"): Promise<any> {
+    const params = new URLSearchParams({ range });
+    const res = await fetch(`${API_BASE_URL}/analytics/risk-matrix?${params}`, {
+      headers: authHeaders(),
+      credentials: "include",
+    });
+    if (!res.ok) throw new Error("Failed to fetch risk matrix");
+    return res.json();
+  },
+
+  async getMaintenanceVelocity(): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/analytics/maintenance-velocity`, {
+      headers: authHeaders(),
+      credentials: "include",
+    });
+    if (!res.ok) throw new Error("Failed to fetch maintenance velocity");
+    return res.json();
+  },
+
+  async exportDamageAnalyticsCsv(range: string = "30d"): Promise<string> {
+    const res = await fetch(`${API_BASE_URL}/analytics/export?range=${range}`, {
+      headers: authHeaders(),
+      credentials: "include",
+    });
+    if (!res.ok) throw new Error("Failed to export damage analytics CSV");
+    return res.text();
+  },
+
+  async downloadInspectionReport(inspectionId: string, format: string = "pdf"): Promise<Blob> {
+    const res = await fetch(`${API_BASE_URL}/inspections/${inspectionId}/reports/download?format=${format}`, {
+      headers: authHeaders(),
+      credentials: "include",
+    });
+    if (!res.ok) {
+      throw new Error("Failed to download inspection report");
+    }
+    return res.blob();
   },
 
   /* ------------------------------------------------------------------ */

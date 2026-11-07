@@ -217,3 +217,80 @@ def download_report(
         filename=filename,
         media_type=media_type
     )
+
+
+@router.get("/inspections/{inspection_id}/reports/download")
+def download_inspection_report(
+    inspection_id: str,
+    format: str = "pdf",
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Downloads or dynamically generates certified engineering report for an inspection.
+    Supports formats: pdf, csv, xlsx, json.
+    """
+    inspection = db.query(Inspection).filter(
+        Inspection.id == inspection_id,
+        Inspection.organization_id == current_user.organization_id
+    ).first()
+    if not inspection:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection not found")
+
+    fmt = format.lower().strip()
+    if fmt not in ("pdf", "csv", "xlsx", "json"):
+        fmt = "pdf"
+
+    # Look for existing report file on disk
+    report = db.query(Report).filter(
+        Report.inspection_id == inspection.id,
+        Report.file_format == fmt
+    ).order_by(Report.version.desc()).first()
+
+    if report and report.file_path and os.path.exists(report.file_path):
+        target_path = report.file_path
+        filename = os.path.basename(target_path)
+    else:
+        # Generate on the fly
+        insp_data, findings_data, priority_data = prepare_inspection_report_payload(inspection, db)
+        existing_ver = db.query(Report).filter(Report.inspection_id == inspection.id).count()
+        next_ver = existing_ver + 1
+
+        if fmt == "pdf":
+            res = generate_inspection_pdf_report(insp_data, findings_data, priority_data)
+        elif fmt == "csv":
+            res = generate_inspection_csv_report(insp_data, findings_data)
+        elif fmt == "xlsx":
+            res = generate_inspection_xlsx_report(insp_data, findings_data)
+        elif fmt == "json":
+            res = generate_inspection_json_report(insp_data, findings_data, priority_data)
+        else:
+            res = generate_inspection_pdf_report(insp_data, findings_data, priority_data)
+
+        report_row = Report(
+            inspection_id=inspection.id,
+            version=next_ver,
+            checksum=res["checksum"],
+            file_format=res["format"],
+            file_path=res["path"],
+            generated_by=current_user.id
+        )
+        db.add(report_row)
+        db.commit()
+        target_path = res["path"]
+        filename = os.path.basename(target_path)
+
+    media_types = {
+        "pdf": "application/pdf",
+        "csv": "text/csv",
+        "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "json": "application/json"
+    }
+    media_type = media_types.get(fmt, "application/octet-stream")
+
+    return FileResponse(
+        path=target_path,
+        filename=filename,
+        media_type=media_type
+    )
+

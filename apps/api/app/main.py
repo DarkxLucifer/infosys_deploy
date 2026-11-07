@@ -23,6 +23,7 @@ from app.routers.dashboards import router as dashboards_router
 from app.routers.detections import router as detections_router
 from app.routers.work_orders import router as work_orders_router
 from app.routers.reports import router as reports_router
+from app.routers.analytics import router as analytics_router
 
 
 logging.basicConfig(
@@ -164,6 +165,7 @@ app.include_router(dashboards_router, prefix=api_v1_prefix)
 app.include_router(detections_router, prefix=api_v1_prefix)
 app.include_router(work_orders_router, prefix=api_v1_prefix)
 app.include_router(reports_router, prefix=api_v1_prefix)
+app.include_router(analytics_router, prefix=api_v1_prefix)
 
 
 @app.get("/")
