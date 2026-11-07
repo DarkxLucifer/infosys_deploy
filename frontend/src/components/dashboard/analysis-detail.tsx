@@ -352,6 +352,24 @@ export function AnalysisDetailPage() {
     }
   }, [requestedFinding, inspection]);
 
+  // Real-time Maintenance Priority preview (§16)
+  useEffect(() => {
+    if (!signOffOpen || !id || id === "new") return;
+    let active = true;
+    setLoadingPreview(true);
+    api.getPriorityPreview(id, signOffSeverity)
+      .then((data) => {
+        if (active && data) {
+          setPriorityPreview(data);
+        }
+      })
+      .catch((err) => console.warn("Failed to load priority preview:", err))
+      .finally(() => {
+        if (active) setLoadingPreview(false);
+      });
+    return () => { active = false; };
+  }, [signOffOpen, signOffSeverity, id]);
+
   if (loadingDb) {
     return (
       <PageShell wide>
@@ -421,23 +439,6 @@ export function AnalysisDetailPage() {
       deleteFinding(inspection.id, findingId);
     }
   };
-
-  useEffect(() => {
-    if (!signOffOpen || !id || id === "new") return;
-    let active = true;
-    setLoadingPreview(true);
-    api.getPriorityPreview(id, signOffSeverity)
-      .then((data) => {
-        if (active && data) {
-          setPriorityPreview(data);
-        }
-      })
-      .catch((err) => console.warn("Failed to load priority preview:", err))
-      .finally(() => {
-        if (active) setLoadingPreview(false);
-      });
-    return () => { active = false; };
-  }, [signOffOpen, signOffSeverity, id]);
 
   const handleSignOffSubmit = async () => {
     setSubmittingSignOff(true);
