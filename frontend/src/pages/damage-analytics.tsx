@@ -1,18 +1,6 @@
 import { useEffect, useRef, useState, useMemo } from "react";
 import { Link } from "react-router-dom";
-import {
-  Chart,
-  ArcElement,
-  Tooltip,
-  Legend,
-  CategoryScale,
-  LinearScale,
-  BarElement,
-  PointElement,
-  LineElement,
-  Title,
-  Filler,
-} from "chart.js";
+import { Chart, registerables } from "chart.js";
 import {
   Activity,
   AlertTriangle,
@@ -53,18 +41,7 @@ import {
 import { PageShell } from "@/components/dashboard/page-shell";
 
 // Register Chart.js components
-Chart.register(
-  ArcElement,
-  Tooltip,
-  Legend,
-  CategoryScale,
-  LinearScale,
-  BarElement,
-  PointElement,
-  LineElement,
-  Title,
-  Filler
-);
+Chart.register(...registerables);
 
 export function DamageAnalyticsPage() {
   const [range, setRange] = useState<string>("30d");
