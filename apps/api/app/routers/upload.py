@@ -2455,6 +2455,142 @@ def confirm_warning_endpoint(
     }
 
 
+# ─── Sound Concrete Surface Confirmation & Verification ───────────────────────
+
+@router.post("/inspections/{inspection_id}/images/{image_id}/confirm-sound")
+@router.post("/images/{image_id}/confirm-sound")
+def confirm_sound_surface_endpoint(
+    image_id: str,
+    inspection_id: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Certified confirmation that an image has a sound, defect-free concrete surface.
+    Records engineering verification metadata in image quality report and registers a clean finding.
+    """
+    image = db.query(InspectionImage).filter(
+        InspectionImage.id == image_id,
+        InspectionImage.organization_id == current_user.organization_id,
+        InspectionImage.is_deleted == False
+    ).first()
+    if not image:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image not found")
+
+    inspection = db.query(Inspection).filter(Inspection.id == image.inspection_id).first()
+    if inspection and inspection.status in ("reported", "closed"):
+        raise HTTPException(
+            status_code=status.HTTP_423_LOCKED,
+            detail={"code": "IMAGE_SET_LOCKED", "message": f"Inspection {inspection.id} is finalized and locked."}
+        )
+
+    user_role = (current_user.role or "").lower()
+    allowed_roles = {
+        "admin", "administrator",
+        "manager", "infrastructure-manager", "infrastructure_manager",
+        "engineer", "civil-engineer", "civil_engineer",
+        "inspector", "field-inspector", "field_inspector", "lead_inspector"
+    }
+    if user_role not in allowed_roles:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "ACCESS_DENIED", "message": "Only engineers, managers, inspectors, and administrators can confirm sound surface."}
+        )
+
+    qr = dict(image.quality_report or {})
+    verified_at = datetime.now(timezone.utc)
+    verified_by_name = current_user.name or current_user.email
+    qr["sound_surface_verified"] = {
+        "verified": True,
+        "verified_by": current_user.id,
+        "reviewer_name": verified_by_name,
+        "verified_at": verified_at.isoformat(),
+        "notes": f"Sound concrete surface confirmed by {verified_by_name} (no crack defects)."
+    }
+    image.quality_report = qr
+    image.quality_status = "accepted"
+    image.status = "valid"
+
+    # Also register clean detection if none exists for this image
+    existing_clean = db.query(Detection).filter(
+        Detection.image_id == image.id,
+        Detection.defect_type.in_(["sound_concrete", "no_visible_damage"])
+    ).first()
+    if not existing_clean:
+        clean_det = Detection(
+            inspection_id=image.inspection_id,
+            image_id=image.id,
+            source="engineer_verified",
+            defect_type="sound_concrete",
+            geometry={"type": "sound_concrete_surface", "verified": True, "predicted_class": "Uncracked"},
+            confidence=1.0,
+            severity="no_visible_damage",
+            created_by=current_user.id,
+            verified_by=current_user.id,
+            verified_at=verified_at,
+            notes=f"Certified sound concrete surface verified on photo {image.filename}"
+        )
+        db.add(clean_det)
+
+    audit = AuditLog(
+        user_id=current_user.id,
+        actor_email=current_user.email,
+        action="SOUND_SURFACE_CONFIRMED",
+        entity_type="inspection_image",
+        entity_id=image.id,
+        details={"inspection_id": image.inspection_id, "reviewer": verified_by_name}
+    )
+    db.add(audit)
+    db.commit()
+
+    return {
+        "status": "confirmed",
+        "imageId": image.id,
+        "inspectionId": image.inspection_id,
+        "verifiedBy": verified_by_name,
+        "verifiedAt": verified_at.isoformat(),
+        "soundSurfaceVerified": qr["sound_surface_verified"]
+    }
+
+
+@router.delete("/inspections/{inspection_id}/images/{image_id}/confirm-sound")
+@router.delete("/images/{image_id}/confirm-sound")
+def unconfirm_sound_surface_endpoint(
+    image_id: str,
+    inspection_id: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    image = db.query(InspectionImage).filter(
+        InspectionImage.id == image_id,
+        InspectionImage.organization_id == current_user.organization_id,
+        InspectionImage.is_deleted == False
+    ).first()
+    if not image:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image not found")
+
+    inspection = db.query(Inspection).filter(Inspection.id == image.inspection_id).first()
+    if inspection and inspection.status in ("reported", "closed", "reviewed"):
+        raise HTTPException(
+            status_code=status.HTTP_423_LOCKED,
+            detail={"code": "IMAGE_SET_LOCKED", "message": f"Inspection {inspection.id} is finalized and locked."}
+        )
+
+    qr = dict(image.quality_report or {})
+    if "sound_surface_verified" in qr:
+        del qr["sound_surface_verified"]
+        image.quality_report = qr
+
+    # Remove sound_concrete detection if added
+    db.query(Detection).filter(
+        Detection.image_id == image.id,
+        Detection.defect_type.in_(["sound_concrete", "no_visible_damage"])
+    ).delete()
+
+    db.commit()
+    return {"status": "unconfirmed", "imageId": image.id}
+
+
 # ─── Preprocessing Retry Endpoint ─────────────────────────────────────────────
 
 @router.post("/images/{image_id}/processing/retry")

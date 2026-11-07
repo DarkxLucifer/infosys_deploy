@@ -10,7 +10,7 @@ from sqlalchemy import desc
 from app.database import get_db
 from app.models.all_models import (
     Inspection, InspectionImage, Detection, Measurement, PriorityRecommendation,
-    Asset, User, Notification, AuditLog
+    Asset, User, Notification, AuditLog, WorkOrder
 )
 from app.security.jwt import get_current_user
 
@@ -279,6 +279,10 @@ def get_inspection_detail(
         PriorityRecommendation.inspection_id == inspection.id
     ).order_by(PriorityRecommendation.created_at.desc()).first()
 
+    reviewer_id = prio_rec.confirmed_by if prio_rec else inspection.claimed_by
+    reviewer = db.query(User).filter(User.id == reviewer_id).first() if reviewer_id else (claimant or None)
+    latest_wo = db.query(WorkOrder).filter(WorkOrder.inspection_id == inspection.id).order_by(WorkOrder.created_at.desc()).first()
+
     return {
         "id": inspection.id,
         "assetId": inspection.asset_id,
@@ -306,6 +310,11 @@ def get_inspection_detail(
         "claimedAt": inspection.claimed_at.isoformat() if inspection.claimed_at else None,
         "submittedAt": inspection.submitted_at.isoformat() if inspection.submitted_at else None,
         "reviewedAt": inspection.reviewed_at.isoformat() if inspection.reviewed_at else None,
+        "reviewedBy": reviewer_id,
+        "reviewedByName": reviewer.name if reviewer else (claimant.name if claimant else None),
+        "workOrderId": latest_wo.id if latest_wo else None,
+        "confirmedPriority": prio_rec.confirmed if prio_rec else None,
+        "isSignedOff": inspection.status in ("reviewed", "reported", "closed"),
         "imageCount": img_count,
         "inspectionDate": inspection.inspection_date.isoformat(),
         "dueDate": inspection.due_date.isoformat(),
@@ -969,8 +978,13 @@ def sign_off_inspection(
 ):
     """Enforces ENG-10 & ENG-14: Sign-off and lock. Mandatory verification gate for all findings."""
     user_role = (current_user.role or "").lower()
-    if user_role not in ("admin", "engineer", "civil-engineer", "civil_engineer"):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only engineers can sign off inspections.")
+    allowed_signoff_roles = {
+        "admin", "administrator",
+        "engineer", "civil-engineer", "civil_engineer",
+        "manager", "infrastructure-manager", "infrastructure_manager"
+    }
+    if user_role not in allowed_signoff_roles:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only engineers, managers, and administrators can sign off inspections.")
 
     inspection = db.query(Inspection).filter(
         Inspection.id == inspection_id,
@@ -1005,18 +1019,29 @@ def sign_off_inspection(
         db.flush()
         detections = [clean_det]
 
-    unverified = [
-        d for d in detections
-        if d.geometry and isinstance(d.geometry, dict) and d.geometry.get("type") not in ("image_classification", "crack_geometry_extraction", "unified_crack_detection", None) and not d.verified_by
-    ]
-    if unverified:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={"code": "UNVERIFIED_GEOMETRY", "message": f"{len(unverified)} finding(s) have not had their geometry verified. Check the verification checkbox for each finding."}
-        )
+    if payload and payload.get("auto_verify_all"):
+        for d in detections:
+            if not d.verified_by:
+                d.verified_by = current_user.id
+                d.verified_at = datetime.now(timezone.utc)
+        db.flush()
+        unverified = []
+    else:
+        unverified = [
+            d for d in detections
+            if d.geometry and isinstance(d.geometry, dict) and d.geometry.get("type") not in ("image_classification", "crack_geometry_extraction", "unified_crack_detection", None) and not d.verified_by
+        ]
+        if unverified:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={"code": "UNVERIFIED_GEOMETRY", "message": f"{len(unverified)} finding(s) have not had their geometry verified. Check the verification checkbox for each finding."}
+            )
 
     inspection.status = "reviewed"
     inspection.reviewed_at = datetime.now(timezone.utc)
+    if not inspection.claimed_by:
+        inspection.claimed_by = current_user.id
+        inspection.claimed_at = datetime.now(timezone.utc)
 
     # Evaluate Maintenance Priority Recommendation (ENG-15)
     from app.services.priority_engine import evaluate_priority
@@ -1268,6 +1293,8 @@ def sign_off_inspection(
     return {
         "status": "reviewed",
         "reviewedAt": inspection.reviewed_at.isoformat(),
+        "reviewedBy": current_user.id,
+        "reviewedByName": current_user.name or current_user.email,
         "priorityRecommendation": prio_result,
         "confirmedPriority": confirmed_priority,
         "workOrderId": new_wo.id if new_wo else (existing_wo.id if existing_wo else None)

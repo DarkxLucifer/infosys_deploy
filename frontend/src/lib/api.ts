@@ -3024,6 +3024,32 @@ export const apiService = {
     return res.json();
   },
 
+  async confirmSoundSurface(inspectionId: string, imageId: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/inspections/${inspectionId}/images/${imageId}/confirm-sound`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      credentials: "include",
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail?.message || err.detail || "Failed to confirm sound surface");
+    }
+    return res.json();
+  },
+
+  async unconfirmSoundSurface(inspectionId: string, imageId: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/inspections/${inspectionId}/images/${imageId}/confirm-sound`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      credentials: "include",
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail?.message || err.detail || "Failed to reset sound surface confirmation");
+    }
+    return res.json();
+  },
+
   async compareInspections(inspectionId: string, otherId: string): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/inspections/${inspectionId}/compare/${otherId}`, {
       headers: authHeaders(),

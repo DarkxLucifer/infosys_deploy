@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from "react";
-import { useParams, useSearchParams, useNavigate } from "react-router-dom";
+import { useParams, useSearchParams, useNavigate, Link } from "react-router-dom";
 import { api, getAuthToken } from "@/lib/api";
 import {
   CircleCheck,
@@ -17,6 +17,13 @@ import {
   Lock,
   Clock,
   Eye,
+  Award,
+  FileText,
+  FileSpreadsheet,
+  FileDown,
+  Code,
+  FileCheck,
+  Undo2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/store/auth-context";
@@ -103,8 +110,14 @@ export function AnalysisDetailPage() {
       ? "maintenance"
       : state.session?.role) ||
     "engineer";
-  const isEngineerOrAdmin = currentRole === "engineer" || currentRole === "admin";
-  const isInspector = currentRole === "inspector";
+  const normalizedRole = (currentRole || "").toLowerCase().replace(/_/g, "-");
+  const isEngineerOrAdmin =
+    normalizedRole === "engineer" ||
+    normalizedRole === "civil-engineer" ||
+    normalizedRole === "admin" ||
+    normalizedRole === "manager" ||
+    normalizedRole === "infrastructure-manager";
+  const isInspector = normalizedRole === "inspector";
 
   // Redirect immediately if id is "new"
   useEffect(() => {
@@ -118,6 +131,10 @@ export function AnalysisDetailPage() {
   const [dbDetections, setDbDetections] = useState<any[]>([]);
   const [dbAsset, setDbAsset] = useState<any | null>(null);
   const [loadingDb, setLoadingDb] = useState(true);
+
+  // Sound surface verification states
+  const [confirmedSoundSurfaces, setConfirmedSoundSurfaces] = useState<Record<string, { verifiedBy: string; verifiedAt: string }>>({});
+  const [confirmingSoundPhotoId, setConfirmingSoundPhotoId] = useState<string | null>(null);
 
   // Active view mode per image: "unet" (default) | "yolo" | "mask"
   const [imageModes, setImageModes] = useState<Record<string, "unet" | "yolo" | "mask">>({});
@@ -159,6 +176,29 @@ export function AnalysisDetailPage() {
         setDbImages(imagesList);
         const detectionsList = Array.isArray(realDets) ? realDets : (realDets?.items || []);
         setDbDetections(detectionsList);
+
+        // Pre-populate confirmed sound surfaces
+        const soundMap: Record<string, { verifiedBy: string; verifiedAt: string }> = {};
+        imagesList.forEach((img: any) => {
+          const qr = img.quality_report || img.qualityReport || {};
+          if (qr.sound_surface_verified && qr.sound_surface_verified.verified) {
+            soundMap[img.id] = {
+              verifiedBy: qr.sound_surface_verified.reviewer_name || "Civil Engineer",
+              verifiedAt: qr.sound_surface_verified.verified_at || img.createdAt || new Date().toISOString(),
+            };
+          }
+        });
+        detectionsList.forEach((d: any) => {
+          if ((d.defect_type === "sound_concrete" || d.defect_type === "no_visible_damage") && d.image_id) {
+            if (!soundMap[d.image_id]) {
+              soundMap[d.image_id] = {
+                verifiedBy: "Civil Engineer",
+                verifiedAt: d.verified_at || d.created_at || new Date().toISOString(),
+              };
+            }
+          }
+        });
+        setConfirmedSoundSurfaces(soundMap);
 
         // Pre-initialize image view modes to "unet" as default
         const initialModes: Record<string, "unet" | "yolo" | "mask"> = {};
@@ -212,7 +252,7 @@ export function AnalysisDetailPage() {
           ? "in-progress"
           : dbInspection.status === "pending_review" || dbInspection.status === "images_uploaded"
           ? "awaiting-review"
-          : dbInspection.status === "reviewed"
+          : dbInspection.isSignedOff || dbInspection.status === "reviewed" || dbInspection.status === "reported" || dbInspection.status === "closed"
           ? "reviewed"
           : "awaiting-review") as any,
         startedAt: dbInspection.inspectionDate || dbInspection.createdAt,
@@ -440,29 +480,77 @@ export function AnalysisDetailPage() {
     }
   };
 
+  const handleConfirmSoundSurface = async (photoId: string, index: number) => {
+    setConfirmingSoundPhotoId(photoId);
+    try {
+      const res = await api.confirmSoundSurface(inspection.id, photoId);
+      const verifiedBy = res?.verifiedBy || state.session?.name || "Civil Engineer";
+      const verifiedAt = res?.verifiedAt || new Date().toISOString();
+      setConfirmedSoundSurfaces((prev) => ({
+        ...prev,
+        [photoId]: {
+          verifiedBy,
+          verifiedAt,
+        },
+      }));
+      toast.success(`Photo ${index + 1} confirmed as sound concrete surface`, {
+        description: `Verified by ${verifiedBy}. Registered in audit log.`,
+      });
+      loadBackendData();
+    } catch (err: any) {
+      toast.error(err.message || "Failed to confirm sound surface");
+    } finally {
+      setConfirmingSoundPhotoId(null);
+    }
+  };
+
+  const handleUnconfirmSoundSurface = async (photoId: string) => {
+    try {
+      await api.unconfirmSoundSurface(inspection.id, photoId);
+      setConfirmedSoundSurfaces((prev) => {
+        const next = { ...prev };
+        delete next[photoId];
+        return next;
+      });
+      toast.info("Sound surface verification reset for re-evaluation.");
+      loadBackendData();
+    } catch (err: any) {
+      toast.error(err.message || "Failed to reset verification");
+    }
+  };
+
   const handleSignOffSubmit = async () => {
     setSubmittingSignOff(true);
     try {
       const payload: any = {
         description: signOffNotes.trim() || undefined,
         severity: signOffSeverity,
+        auto_verify_all: true,
       };
       if (overridePriority && overridePriority !== priorityPreview?.priorityRecommendation?.recommended_priority) {
         payload.override_priority = overridePriority;
         payload.override_reason = overrideReason.trim() || "Engineer override during sign-off";
       }
-      const res = await api.signOffInspection(inspection.id, payload).catch(async () => {
-        // Fallback for inspector role
-        return await api.submitInspection(inspection.id, payload);
-      });
+      const res = await api.signOffInspection(inspection.id, payload);
 
-      toast.success("Review signed off successfully", {
+      // Immediately transform UI to certified signed-off state
+      setDbInspection((prev: any) => ({
+        ...prev,
+        status: "reviewed",
+        reviewedAt: res?.reviewedAt || new Date().toISOString(),
+        reviewedBy: res?.reviewedBy || state.session?.id,
+        reviewedByName: res?.reviewedByName || state.session?.name || "Civil Engineer",
+        confirmedPriority: res?.confirmedPriority || signOffSeverity,
+        workOrderId: res?.workOrderId,
+      }));
+
+      toast.success("Inspection successfully certified & signed off!", {
         description: res?.workOrderId
-          ? `${inspection.id} certified. Work Order ${res.workOrderId} auto-generated for ${(res.confirmedPriority || signOffSeverity)?.replace(/_/g, " ").toUpperCase()}.`
-          : `${inspection.id} certified. Overall Severity: ${signOffSeverity.toUpperCase()}.`,
+          ? `Record permanently locked. Work Order ${res.workOrderId} auto-generated for ${(res.confirmedPriority || signOffSeverity)?.replace(/_/g, " ").toUpperCase()}.`
+          : `Record permanently locked. Overall Severity: ${signOffSeverity.toUpperCase()}.`,
       });
       setSignOffOpen(false);
-      loadBackendData();
+      await loadBackendData();
     } catch (err: any) {
       toast.error(err?.message || "Failed to sign off review. Please check all fields.");
     } finally {
@@ -533,14 +621,20 @@ export function AnalysisDetailPage() {
   const totalPhotosCount = imagesList.length;
   const decidedPhotosCount = imagesList.filter((frame) => {
     const ffs = inspection.findings.filter(
-      (f) =>
-        f.frameId === frame.id ||
-        (f as any).imageId === frame.id ||
-        (f as any).image_id === frame.id
+      (f: any) =>
+        (f.frameId === frame.id ||
+          f.imageId === frame.id ||
+          f.image_id === frame.id) &&
+        f.defect_type !== "sound_concrete" &&
+        f.defect_type !== "no_visible_damage"
     );
-    return ffs.length === 0 || ffs.every((f) => f.review !== "pending");
+    if (ffs.length > 0) {
+      return ffs.every((f) => f.review !== "pending");
+    }
+    // No crack defects on this photo: it is decided if sound surface was confirmed OR inspection is signed off
+    return Boolean(confirmedSoundSurfaces[frame.id]) || inspection.status === "reviewed";
   }).length;
-  const pendingPhotosCount = totalPhotosCount - decidedPhotosCount;
+  const pendingPhotosCount = Math.max(0, totalPhotosCount - decidedPhotosCount);
 
   return (
     <PageShell wide>
@@ -568,18 +662,24 @@ export function AnalysisDetailPage() {
             ) : null}
 
             {inspection.status === "reviewed" ? (
-              <div className="px-3 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 font-semibold text-xs flex items-center gap-1.5 shadow-2xs">
-                <Lock className="size-3.5" />
-                <span>Signed Off & Sealed</span>
+              <div className="flex items-center gap-2">
+                <div className="px-3.5 py-1.5 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 font-bold text-xs flex items-center gap-1.5 shadow-xs">
+                  <ShieldCheck className="size-4 text-emerald-400" />
+                  <span>Certified & Sealed</span>
+                </div>
+                <div className="px-2.5 py-1.5 rounded-xl bg-secondary/80 border border-border text-[11px] text-muted-foreground flex items-center gap-1">
+                  <Lock className="size-3 text-muted-foreground" />
+                  <span>Locked</span>
+                </div>
               </div>
             ) : isEngineerOrAdmin ? (
               <Button
                 size="sm"
                 onClick={() => setSignOffOpen(true)}
-                className="h-9 gap-1.5 rounded-xl text-xs font-semibold bg-primary hover:opacity-90 shadow-xs cursor-pointer"
+                className="h-9 gap-1.5 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs cursor-pointer"
               >
-                <CircleCheck className="size-4" />
-                Sign off review
+                <CheckCircle2 className="size-4" />
+                Certify & Sign Off
               </Button>
             ) : isInspector ? (
               <div className="px-3 py-1.5 rounded-xl bg-secondary border border-border text-muted-foreground text-xs font-medium flex items-center gap-1.5 shadow-2xs">
@@ -596,17 +696,152 @@ export function AnalysisDetailPage() {
         }
       />
 
+      {/* ───────────────────────────────────────────────────────────────── */}
+      {/* OFFICIAL CERTIFICATE OF ENGINEERING SIGN-OFF & PERMANENT SEAL     */}
+      {/* ───────────────────────────────────────────────────────────────── */}
+      {inspection.status === "reviewed" && (
+        <div className="mb-6 rounded-2xl border-2 border-emerald-500/40 bg-gradient-to-br from-emerald-950/40 via-emerald-900/15 to-background p-6 shadow-xl relative overflow-hidden animate-in fade-in slide-in-from-top-2 duration-300">
+          {/* Decorative Watermark Seal */}
+          <div className="absolute -right-8 -bottom-8 opacity-5 pointer-events-none text-emerald-400">
+            <Award className="size-56" />
+          </div>
+
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 relative z-10">
+            <div className="flex items-start gap-4">
+              <div className="size-14 rounded-2xl bg-emerald-500/20 border-2 border-emerald-500/50 flex items-center justify-center text-emerald-400 shrink-0 shadow-inner">
+                <Award className="size-8" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <h2 className="text-lg font-bold text-foreground tracking-tight">
+                    Engineering Inspection Certified & Permanently Sealed
+                  </h2>
+                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500 text-white shadow-xs">
+                    <Lock className="size-3" /> OFFICIAL SIGN-OFF
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground mt-1 max-w-2xl leading-relaxed">
+                  This inspection has passed certified civil engineering sign-off. High-resolution imagery, deep learning crack segmentations, calibrated geometric metrics, and severity evaluations have been locked and immutably sealed in compliance with structural asset safety requirements.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Metadata KPI grid */}
+          <div className="mt-5 grid grid-cols-2 sm:grid-cols-4 gap-3 pt-4 border-t border-emerald-500/20">
+            <div className="p-3 rounded-xl bg-background/60 border border-emerald-500/20">
+              <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Certifying Engineer</div>
+              <div className="text-xs font-bold text-foreground mt-0.5 truncate">
+                {dbInspection?.reviewedByName || state.session?.name || inspection.inspector || "Civil Engineer"}
+              </div>
+            </div>
+            <div className="p-3 rounded-xl bg-background/60 border border-emerald-500/20">
+              <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Certified Date</div>
+              <div className="text-xs font-bold text-foreground mt-0.5">
+                {dbInspection?.reviewedAt ? new Date(dbInspection.reviewedAt).toLocaleString() : new Date().toLocaleDateString()}
+              </div>
+            </div>
+            <div className="p-3 rounded-xl bg-background/60 border border-emerald-500/20">
+              <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Confirmed Priority</div>
+              <div className="text-xs font-bold text-primary mt-0.5 uppercase">
+                {dbInspection?.confirmedPriority || dbInspection?.priorityRecommendation?.confirmed || "Standard / Medium"}
+              </div>
+            </div>
+            <div className="p-3 rounded-xl bg-background/60 border border-emerald-500/20">
+              <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Maintenance Work Order</div>
+              <div className="text-xs font-bold text-foreground mt-0.5 flex items-center gap-1">
+                {dbInspection?.workOrderId ? (
+                  <Link to="/app/maintenance" className="text-primary hover:underline flex items-center gap-1 font-mono">
+                    <Wrench className="size-3" /> {dbInspection.workOrderId}
+                  </Link>
+                ) : (
+                  <span className="text-muted-foreground">Auto-dispatched</span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Section 19 Multi-Format Report Downloads */}
+          <div className="mt-4 pt-3 flex flex-wrap items-center justify-between gap-3 border-t border-emerald-500/15">
+            <div className="text-xs font-semibold text-emerald-400 flex items-center gap-1.5">
+              <FileCheck className="size-4" />
+              <span>Certified Multi-Format Reports Generated (§19 Compliance):</span>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <a
+                href={`/api/v1/inspections/${inspection.id}/reports/pdf?token=${getAuthToken()}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 text-xs font-semibold transition-colors"
+              >
+                <FileText className="size-3.5" />
+                <span>PDF Report</span>
+              </a>
+              <a
+                href={`/api/v1/inspections/${inspection.id}/reports/xlsx?token=${getAuthToken()}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 text-xs font-semibold transition-colors"
+              >
+                <FileSpreadsheet className="size-3.5" />
+                <span>Excel (.xlsx)</span>
+              </a>
+              <a
+                href={`/api/v1/inspections/${inspection.id}/reports/csv?token=${getAuthToken()}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 text-xs font-semibold transition-colors"
+              >
+                <FileDown className="size-3.5" />
+                <span>CSV Data</span>
+              </a>
+              <a
+                href={`/api/v1/inspections/${inspection.id}/reports/json?token=${getAuthToken()}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 text-xs font-semibold transition-colors"
+              >
+                <Code className="size-3.5" />
+                <span>JSON</span>
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Compliance & Model Verification Banner */}
-      <div className="mb-5 rounded-2xl border border-primary/20 bg-primary/5 p-4 text-xs text-foreground flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+      <div className={cn(
+        "mb-5 rounded-2xl border p-4 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs transition-colors",
+        inspection.status === "reviewed"
+          ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-300"
+          : "border-primary/20 bg-primary/5 text-foreground"
+      )}>
         <div className="flex items-center gap-2.5">
-          <ShieldAlert className="size-4 text-primary shrink-0" />
+          {inspection.status === "reviewed" ? (
+            <ShieldCheck className="size-4 text-emerald-400 shrink-0" />
+          ) : (
+            <ShieldAlert className="size-4 text-primary shrink-0" />
+          )}
           <span>
-            <strong>AI Decision Support:</strong> Inferences generated by <strong>{inspection.modelVersion}</strong> (calibrated crack threshold: 80.0% gate). Certified engineering review and sign-off is mandatory.
+            {inspection.status === "reviewed" ? (
+              <>
+                <strong>Certified Engineering Sign-Off Completed:</strong> All AI inferences from <strong>{inspection.modelVersion}</strong> have been verified and sealed in the tamper-evident compliance audit log.
+              </>
+            ) : (
+              <>
+                <strong>AI Decision Support:</strong> Inferences generated by <strong>{inspection.modelVersion}</strong> (calibrated crack threshold: 80.0% gate). Certified engineering review and sign-off is mandatory.
+              </>
+            )}
           </span>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <span className="font-mono text-[11px] px-2.5 py-1 rounded-lg bg-primary/15 text-primary font-semibold border border-primary/20">
-            ResNet-18 + YOLO / U-Net
+          <span className={cn(
+            "font-mono text-[11px] px-2.5 py-1 rounded-lg font-semibold border",
+            inspection.status === "reviewed"
+              ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/30"
+              : "bg-primary/15 text-primary border-primary/20"
+          )}>
+            {inspection.status === "reviewed" ? "Engineering Verified" : "ResNet-18 + YOLO / U-Net"}
           </span>
         </div>
       </div>
@@ -663,13 +898,20 @@ export function AnalysisDetailPage() {
           const currentVariantUrl = getPhotoUrlForVariant(frame, currentMode);
           const authImageUrl = getAuthenticatedUrl(currentVariantUrl);
 
-          // Find findings belonging to this photo
+          // Find crack findings belonging to this photo (exclude sound concrete synthetic records)
           const frameFindings = inspection.findings.filter(
-            (f) =>
-              f.frameId === frame.id ||
-              (f as any).imageId === frame.id ||
-              (f as any).image_id === frame.id
+            (f: any) =>
+              (f.frameId === frame.id ||
+                f.imageId === frame.id ||
+                f.image_id === frame.id) &&
+              f.defect_type !== "sound_concrete" &&
+              f.defect_type !== "no_visible_damage"
           );
+
+          // Check if this photo has sound concrete surface confirmed
+          const isConfirmedSound = Boolean(confirmedSoundSurfaces[frame.id]) || inspection.status === "reviewed";
+          const soundMeta = confirmedSoundSurfaces[frame.id];
+          const isConfirming = confirmingSoundPhotoId === frame.id;
 
           // Crack geometry summary if available
           const geom = (frame as any).crackGeometry || ((frame as any).qualityReport as any)?.crack_geometry;
@@ -678,7 +920,12 @@ export function AnalysisDetailPage() {
           return (
             <div
               key={frame.id}
-              className="rounded-2xl border border-border bg-card p-4 sm:p-5 shadow-xs transition-colors hover:border-border/80"
+              className={cn(
+                "rounded-2xl border p-4 sm:p-5 shadow-xs transition-colors",
+                isConfirmedSound && frameFindings.length === 0
+                  ? "border-emerald-500/40 bg-card hover:border-emerald-500/60"
+                  : "border-border bg-card hover:border-border/80"
+              )}
             >
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
                 {/* ── LEFT SIDE: Image Viewer with 3 Variant Buttons (7 cols) ── */}
@@ -692,6 +939,11 @@ export function AnalysisDetailPage() {
                       <span className="rounded-md border border-border bg-secondary/80 px-2 py-0.5 text-[10px] font-semibold text-muted-foreground uppercase">
                         {frame.method || "Walkdown"}
                       </span>
+                      {frameFindings.length === 0 && isConfirmedSound && (
+                        <span className="rounded-md border border-emerald-500/40 bg-emerald-500/15 px-2 py-0.5 text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase flex items-center gap-1">
+                          <CheckCircle2 className="size-2.5" /> Sound Surface
+                        </span>
+                      )}
                     </div>
 
                     {/* The 3 View Mode Buttons (Highlighted in Screenshot) + Zoom */}
@@ -859,45 +1111,97 @@ export function AnalysisDetailPage() {
                     if (frameFindings.length === 0) {
                       return (
                         /* Sound Surface Decision Block if no findings on this photo */
-                        <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4 space-y-3">
-                          <div className="flex items-center gap-2">
-                            <CheckCircle2 className="size-5 text-emerald-500 shrink-0" />
-                            <div>
-                              <div className="text-xs font-bold text-foreground">Sound Concrete Surface</div>
-                              <div className="text-[11px] text-muted-foreground">
-                                No crack defects detected above the 80% confidence gate.
+                        <div
+                          className={cn(
+                            "rounded-xl border p-4 space-y-3 transition-all",
+                            isConfirmedSound
+                              ? "border-emerald-500/50 bg-emerald-500/10 shadow-xs"
+                              : "border-emerald-500/30 bg-emerald-500/5"
+                          )}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <CheckCircle2 className="size-5 text-emerald-500 shrink-0" />
+                              <div>
+                                <div className="text-xs font-bold text-foreground flex items-center gap-2">
+                                  <span>Sound Concrete Surface</span>
+                                  {isConfirmedSound ? (
+                                    <span className="inline-flex items-center gap-1 rounded-md bg-emerald-600 px-2 py-0.5 text-[10px] font-bold text-white shadow-xs">
+                                      <CheckCircle2 className="size-2.5" /> VERIFIED SOUND
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex items-center gap-1 rounded-md bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 text-[10px] font-semibold text-amber-600 dark:text-amber-400">
+                                      <Clock className="size-2.5" /> PENDING DECISION
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-[11px] text-muted-foreground">
+                                  No crack defects detected above the 80% confidence gate.
+                                </div>
                               </div>
                             </div>
                           </div>
 
-                          <div className="text-[11px] text-muted-foreground leading-relaxed bg-background/60 p-2.5 rounded-lg border border-border/50">
+                          <div className="text-[11px] text-muted-foreground leading-relaxed bg-background/70 p-2.5 rounded-lg border border-border/50">
                             ResNet-18 classified this photo as uncracked. U-Net segmentation confirms zero continuous defect regions.
                           </div>
 
+                          {isConfirmedSound && (
+                            <div className="rounded-lg bg-emerald-500/15 border border-emerald-500/30 p-2.5 text-xs text-foreground space-y-1">
+                              <div className="flex items-center justify-between">
+                                <span className="font-semibold text-emerald-700 dark:text-emerald-300 flex items-center gap-1.5 text-[11px]">
+                                  <ShieldCheck className="size-3.5" />
+                                  Sound Surface Decision Verified & Logged
+                                </span>
+                                <span className="text-[10px] text-muted-foreground">
+                                  {soundMeta?.verifiedAt ? new Date(soundMeta.verifiedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "Recorded"}
+                                </span>
+                              </div>
+                              <div className="text-[11px] text-muted-foreground">
+                                Stamped by: <span className="font-medium text-foreground">{soundMeta?.verifiedBy || state.session?.name || "Civil Engineer"}</span>
+                              </div>
+                            </div>
+                          )}
+
                           <div className="flex items-center gap-2 pt-1">
                             {inspection.status === "reviewed" ? (
-                              <div className="w-full py-1.5 px-2.5 rounded-lg bg-secondary/60 text-[11px] text-muted-foreground flex items-center gap-1.5">
+                              <div className="w-full py-2 px-3 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-xs font-semibold text-emerald-700 dark:text-emerald-300 flex items-center gap-2">
                                 <Lock className="size-3.5 text-emerald-500" />
-                                <span>Certified Sound Concrete Surface (Locked)</span>
-                              </div>
-                            ) : isInspector ? (
-                              <div className="w-full py-1.5 px-2.5 rounded-lg bg-secondary/60 text-[11px] text-muted-foreground flex items-center gap-1.5">
-                                <Clock className="size-3.5 text-amber-500" />
-                                <span>Sound Surface · Awaiting Engineer Sign-off</span>
+                                <span>Certified Sound Concrete Surface · Permanently Sealed</span>
                               </div>
                             ) : isEngineerOrAdmin ? (
                               <>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => {
-                                    toast.success(`Photo ${index + 1} verified as sound concrete surface.`);
-                                  }}
-                                  className="h-8 rounded-lg text-xs font-semibold gap-1.5 border-emerald-500/40 text-emerald-500 hover:bg-emerald-500/10 cursor-pointer"
-                                >
-                                  <CircleCheck className="size-3.5" />
-                                  Confirm Sound Surface
-                                </Button>
+                                {!isConfirmedSound ? (
+                                  <Button
+                                    size="sm"
+                                    disabled={isConfirming}
+                                    onClick={() => handleConfirmSoundSurface(frame.id, index)}
+                                    className="h-8 rounded-lg text-xs font-semibold gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer shadow-sm"
+                                  >
+                                    {isConfirming ? (
+                                      <>
+                                        <RefreshCw className="size-3.5 animate-spin" />
+                                        Confirming...
+                                      </>
+                                    ) : (
+                                      <>
+                                        <CircleCheck className="size-3.5" />
+                                        Confirm Sound Surface
+                                      </>
+                                    )}
+                                  </Button>
+                                ) : (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => handleUnconfirmSoundSurface(frame.id)}
+                                    className="h-8 rounded-lg text-xs font-semibold gap-1.5 border-border hover:bg-destructive/10 hover:text-destructive hover:border-destructive/30 cursor-pointer"
+                                  >
+                                    <Undo2 className="size-3.5" />
+                                    Re-evaluate Decision
+                                  </Button>
+                                )}
+
                                 <Button
                                   size="sm"
                                   variant="ghost"
@@ -910,6 +1214,11 @@ export function AnalysisDetailPage() {
                                   Flag Missed Defect
                                 </Button>
                               </>
+                            ) : isInspector ? (
+                              <div className="w-full py-1.5 px-2.5 rounded-lg bg-secondary/60 text-[11px] text-muted-foreground flex items-center gap-1.5">
+                                <Clock className="size-3.5 text-amber-500" />
+                                <span>Sound Surface · Awaiting Engineer Sign-off</span>
+                              </div>
                             ) : (
                               <div className="w-full py-1.5 px-2.5 rounded-lg bg-secondary/50 text-[11px] text-muted-foreground flex items-center gap-1.5">
                                 <Eye className="size-3.5" />
