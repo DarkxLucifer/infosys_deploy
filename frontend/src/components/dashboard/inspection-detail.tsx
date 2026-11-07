@@ -193,7 +193,14 @@ export function InspectionDetailPage() {
 
   const isImageSetLocked = ["pending_review", "in_review", "reviewed", "reported", "closed"].includes(
     (dbInspection?.status || "").toLowerCase()
-  );
+  ) || Boolean(dbInspection?.submittedAt);
+
+  const isAlreadySubmitted =
+    isImageSetLocked ||
+    Boolean(dbInspection?.submittedAt) ||
+    ["pending_review", "in_review", "reviewed", "reported", "closed"].includes(
+      (dbInspection?.status || "").toLowerCase()
+    );
   const isInspector = ["inspector", "lead_inspector"].includes(userRole);
   const isEngineerOrAdmin = ["engineer", "civil-engineer", "civil_engineer", "admin"].includes(userRole);
 
@@ -439,6 +446,11 @@ export function InspectionDetailPage() {
     if (!id) return;
     try {
       await api.submitInspection(id);
+      setDbInspection((prev: any) => ({
+        ...prev,
+        status: "pending_review",
+        submittedAt: new Date().toISOString(),
+      }));
       toast.success("Submitted for review", {
         description: "Image set locked and routed to Civil Engineer review queue.",
       });
@@ -537,13 +549,13 @@ export function InspectionDetailPage() {
         assetId: dbInspection.assetId,
         inspector: dbInspection.inspector?.name || dbInspection.inspectorId || "Assigned Inspector",
         method: (dbInspection.method || "walkdown") as any,
-        status: (dbInspection.status === "in_progress" || dbInspection.status === "images_uploaded" || dbInspection.status === "draft"
-          ? "in-progress"
-          : dbInspection.status === "pending_review" || dbInspection.status === "submitted"
-          ? "awaiting-review"
-          : dbInspection.status === "reviewed"
-          ? "reviewed"
-          : "in-progress") as any,
+        status: (
+          Boolean(dbInspection.isSignedOff) || ["reviewed", "reported", "closed"].includes((dbInspection.status || "").toLowerCase())
+            ? "reviewed"
+            : ["pending_review", "in_review", "submitted"].includes((dbInspection.status || "").toLowerCase()) || Boolean(dbInspection.submittedAt)
+            ? "awaiting-review"
+            : "in-progress"
+        ) as any,
         startedAt: dbInspection.inspectionDate || dbInspection.createdAt,
         completedAt: dbInspection.status === "closed" ? dbInspection.createdAt : undefined,
         modelVersion: dbInspection.analysisStatus === "completed" || dbDetections.length > 0
@@ -776,7 +788,7 @@ export function InspectionDetailPage() {
         description={`${(inspectionMethodLabels as any)[inspection.method] || inspection.method} · inspector ${inspection.inspector} · ${inspection.frames.length} frame${inspection.frames.length === 1 ? "" : "s"} · model ${inspection.modelVersion}`}
         actions={
           <>
-            {inspection.status === "in-progress" ? (
+            {!isAlreadySubmitted && inspection.status === "in-progress" ? (
               <div className="flex items-center gap-2">
                 <Button onClick={handleSubmitForReview} className="cursor-pointer">
                   <CheckCheck className="size-4" />
@@ -1498,7 +1510,7 @@ export function InspectionDetailPage() {
                 })}
               </div>
 
-              {inspection.status === "in-progress" ? (
+              {!isAlreadySubmitted && inspection.status === "in-progress" ? (
                 <div className="mt-6 p-4 rounded-xl border border-primary/20 bg-primary/5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div>
                     <h4 className="text-sm font-semibold text-foreground">Ready to hand off to engineering?</h4>

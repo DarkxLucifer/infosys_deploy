@@ -227,7 +227,7 @@ export default function ReviewQueuePage() {
                           className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline"
                         >
                           <Eye className="size-3.5" />
-                          <span>Review</span>
+                          <span>{row.status === "reviewed" ? "View Certified" : "Review"}</span>
                         </Link>
                       </td>
                     )}

@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.all_models import (
     WorkOrder, WorkOrderEvent, Asset, Inspection, Detection,
-    InspectionImage, Measurement, RepairTaskTemplate, User, AuditLog
+    InspectionImage, Measurement, RepairTaskTemplate, User, AuditLog, Notification
 )
 from app.security.jwt import get_current_user
 
@@ -165,6 +165,29 @@ def create_work_order(
         note="Work order created"
     )
     db.add(evt)
+
+    now_utc = datetime.now(timezone.utc)
+    now_str = now_utc.strftime('%b %d, %Y at %I:%M %p UTC')
+    asset = db.query(Asset).filter(Asset.id == req.asset_id).first()
+    asset_name = asset.name if asset else "Asset"
+
+    maint_users = db.query(User).filter(
+        User.organization_id == current_user.organization_id,
+        User.role.in_(["maintenance", "maintenance-engineer", "maintenance_engineer"]),
+        User.status == "active"
+    ).all()
+    for mu in maint_users:
+        db.add(Notification(
+            user_id=mu.id,
+            organization_id=current_user.organization_id,
+            title=f"Work Order Dispatched: {wo.id}",
+            message=f"Work Order {wo.id} created for {asset_name} by {current_user.name or current_user.email} on {now_str}. Action: {wo.action} · Priority: {wo.priority.title()}.",
+            link="/app/maintenance",
+            event_type="maintenance_task_assigned",
+            alert_level="high" if wo.priority in ("urgent_engineering_review", "high") else "medium",
+            entity_type="work_order",
+            entity_id=wo.id
+        ))
 
     audit = AuditLog(
         user_id=current_user.id,
@@ -338,6 +361,50 @@ def transition_work_order(
         note=req.note
     )
     db.add(evt)
+
+    now_utc = datetime.now(timezone.utc)
+    now_str = now_utc.strftime('%b %d, %Y at %I:%M %p UTC')
+    asset = wo.asset
+    asset_name = asset.name if asset else "Asset"
+
+    if req.to_status == "closed":
+        mgr_eng_users = db.query(User).filter(
+            User.organization_id == current_user.organization_id,
+            User.role.in_(["manager", "infrastructure-manager", "infrastructure_manager", "admin", "engineer", "civil-engineer", "civil_engineer"]),
+            User.status == "active"
+        ).all()
+        for u in mgr_eng_users:
+            if u.id != current_user.id:
+                db.add(Notification(
+                    user_id=u.id,
+                    organization_id=current_user.organization_id,
+                    title=f"Maintenance Completed: Work Order {wo.id}",
+                    message=f"Work Order {wo.id} for {asset_name} was completed and resolved by {current_user.name or current_user.email} on {now_str}. Resolution Note: {req.note}.",
+                    link="/app/maintenance",
+                    event_type="maintenance_completed",
+                    alert_level="informational",
+                    entity_type="work_order",
+                    entity_id=wo.id
+                ))
+    elif req.to_status == "in_progress":
+        mgr_users = db.query(User).filter(
+            User.organization_id == current_user.organization_id,
+            User.role.in_(["manager", "infrastructure-manager", "infrastructure_manager", "admin"]),
+            User.status == "active"
+        ).all()
+        for u in mgr_users:
+            if u.id != current_user.id:
+                db.add(Notification(
+                    user_id=u.id,
+                    organization_id=current_user.organization_id,
+                    title=f"Maintenance In Progress: Work Order {wo.id}",
+                    message=f"Work Order {wo.id} for {asset_name} was marked In Progress by {current_user.name or current_user.email} on {now_str}.",
+                    link="/app/maintenance",
+                    event_type="maintenance_task_assigned",
+                    alert_level="informational",
+                    entity_type="work_order",
+                    entity_id=wo.id
+                ))
 
     audit = AuditLog(
         user_id=current_user.id,

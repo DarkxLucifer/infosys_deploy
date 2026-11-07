@@ -95,6 +95,7 @@ def list_notifications(
     unread_only: bool = False,
     level: Optional[str] = Query(None, description="Filter by alert level: informational, low, medium, high, critical"),
     event_type: Optional[str] = Query(None, description="Filter by event type"),
+    role: Optional[str] = Query(None, description="Filter by active role perspective"),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=100),
     current_user: User = Depends(get_current_user),
@@ -104,12 +105,54 @@ def list_notifications(
     Lists real notifications for current user with full Section 20 fields and filtering.
     Dynamically checks approaching deadlines for active maintenance roles.
     """
+    from sqlalchemy import or_
+
     try:
         sync_approaching_deadlines(db, current_user)
     except Exception:
         pass
 
-    query = db.query(Notification).filter(Notification.user_id == current_user.id)
+    active_role = (role or current_user.role or "").lower()
+
+    # 1. Notifications addressed directly to this user
+    user_filter = Notification.user_id == current_user.id
+
+    # 2. In addition, role-routed events for the active role within the user's organization
+    role_events = []
+    if active_role in ("civil-engineer", "civil_engineer", "engineer"):
+        role_events = [
+            "engineering_review_required", "damage_detected",
+            "inspection_in_review", "inspection_report_generated",
+            "maintenance_completed"
+        ]
+    elif active_role in ("manager", "infrastructure-manager", "infrastructure_manager", "admin", "administrator"):
+        role_events = [
+            "inspection_submitted", "severe_damage_identified",
+            "inspection_completed", "inspection_assigned",
+            "maintenance_completed", "maintenance_task_assigned"
+        ]
+    elif active_role in ("maintenance", "maintenance-engineer", "maintenance_engineer"):
+        role_events = [
+            "maintenance_task_assigned", "maintenance_deadline_approaching",
+            "maintenance_completed"
+        ]
+    elif active_role in ("inspector", "field-inspector", "field_inspector", "lead_inspector"):
+        role_events = [
+            "inspection_assigned", "inspection_completed",
+            "inspection_in_review"
+        ]
+
+    if role_events:
+        query = db.query(Notification).filter(
+            Notification.organization_id == current_user.organization_id,
+            or_(user_filter, Notification.event_type.in_(role_events))
+        )
+    else:
+        query = db.query(Notification).filter(
+            Notification.organization_id == current_user.organization_id,
+            user_filter
+        )
+
     if unread_only:
         query = query.filter(Notification.is_read == False)
     if level and level.lower() != "all":
@@ -118,10 +161,7 @@ def list_notifications(
         query = query.filter(Notification.event_type == event_type.lower())
 
     total = query.count()
-    unread_count = db.query(Notification).filter(
-        Notification.user_id == current_user.id,
-        Notification.is_read == False
-    ).count()
+    unread_count = query.filter(Notification.is_read == False).count()
 
     items = query.order_by(desc(Notification.created_at)).offset((page - 1) * page_size).limit(page_size).all()
 

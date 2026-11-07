@@ -16,13 +16,14 @@ export function NotificationsCenter() {
 
   const loadNotifications = async () => {
     try {
-      const data = await apiService.getNotifications();
+      const data = await apiService.getNotifications(
+        undefined,
+        undefined,
+        unreadOnly,
+        user?.role
+      );
       const list = Array.isArray(data) ? data : [];
-      // Filter by user role if target specified
-      const filtered = user?.role === "admin"
-        ? list
-        : list.filter((item) => !item.role_target || item.role_target.includes(user?.role || "inspector"));
-      setNotifications(filtered);
+      setNotifications(list);
     } catch {
       setNotifications([]);
     } finally {
@@ -32,7 +33,7 @@ export function NotificationsCenter() {
 
   useEffect(() => {
     loadNotifications();
-  }, [user]);
+  }, [user?.role, unreadOnly]);
 
   const handleMarkRead = async (id: string) => {
     await apiService.markNotificationRead(id);
@@ -98,7 +99,7 @@ export function NotificationsCenter() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-border/60">
         <div>
           <div className="flex items-center gap-2">
-            <Bell className="size-5 text-emerald-500" />
+            <Bell className="size-5 text-primary" />
             <h1 className="text-xl font-bold tracking-tight text-foreground">Notification & Alert Center</h1>
           </div>
           <p className="text-xs text-muted-foreground mt-0.5">
@@ -131,7 +132,7 @@ export function NotificationsCenter() {
               onClick={() => setLevelFilter(lvl)}
               className={`px-2.5 py-1 rounded-md capitalize transition-colors ${
                 levelFilter === lvl
-                  ? "bg-emerald-600 text-white font-medium"
+                  ? "bg-primary text-primary-foreground font-medium"
                   : "bg-card border border-border text-muted-foreground hover:text-foreground"
               }`}
             >
@@ -156,12 +157,12 @@ export function NotificationsCenter() {
         {loading ? (
           <div className="space-y-3 animate-pulse">
             {[1, 2, 3].map((i) => (
-              <div key={i} className="h-20 rounded-xl bg-slate-800/60" />
+              <div key={i} className="h-20 rounded-xl bg-muted/60" />
             ))}
           </div>
         ) : displayedList.length === 0 ? (
           <div className="text-center py-12 rounded-xl border border-dashed border-border bg-card/40 p-8 space-y-2">
-            <CheckCircle2 className="mx-auto size-8 text-emerald-400/80" />
+            <CheckCircle2 className="mx-auto size-8 text-muted-foreground" />
             <h3 className="text-sm font-semibold text-foreground">No active notifications matching criteria</h3>
             <p className="text-xs text-muted-foreground">All alerts for your role have been acknowledged.</p>
           </div>
@@ -188,7 +189,7 @@ export function NotificationsCenter() {
                         {badge.label}
                       </span>
                       {isUnread && (
-                        <span className="size-2 rounded-full bg-emerald-500" title="Unread" />
+                        <span className="size-2 rounded-full bg-primary" title="Unread" />
                       )}
                     </div>
                     <p className="text-muted-foreground leading-relaxed">{notif.body}</p>
@@ -210,13 +211,14 @@ export function NotificationsCenter() {
                   )}
                   <Link
                     to={
-                      notif.entity_type === "inspection"
+                      notif.link ||
+                      (notif.entity_type === "inspection"
                         ? `/dashboard/inspections/${notif.entity_id}`
                         : notif.entity_type === "work_order"
                         ? "/dashboard/maintenance"
-                        : "/dashboard/reports"
+                        : "/dashboard/reports")
                     }
-                    className="h-7 px-2.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-medium flex items-center gap-1 transition-colors"
+                    className="h-7 px-2.5 rounded bg-primary hover:bg-primary/90 text-primary-foreground text-[11px] font-medium flex items-center gap-1 transition-colors"
                   >
                     View
                     <ArrowRight className="size-3" />

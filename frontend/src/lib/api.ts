@@ -198,6 +198,7 @@ export interface NotificationItem {
     | "followup_inspection_required";
   title: string;
   body: string;
+  link?: string;
   entity_type: "inspection" | "asset" | "work_order" | "report";
   entity_id: string;
   created_at: string;
@@ -1520,7 +1521,7 @@ export const apiService = {
     };
   },
 
-  async getNotifications(level?: string, type?: string, unreadOnly?: boolean): Promise<NotificationItem[]> {
+  async getNotifications(level?: string, type?: string, unreadOnly?: boolean, role?: string): Promise<NotificationItem[]> {
     if (USE_MOCKS) {
       let list = [...MOCK_NOTIFICATIONS];
       if (level) list = list.filter((n) => n.level === level);
@@ -1533,6 +1534,7 @@ export const apiService = {
       if (level) params.append("level", level);
       if (type) params.append("type", type);
       if (unreadOnly) params.append("unread_only", "true");
+      if (role) params.append("role", role);
       const res = await fetch(`${API_BASE_URL}/notifications?${params}`, {
         headers: authHeaders(),
         credentials: "include",
@@ -1543,10 +1545,11 @@ export const apiService = {
       return rawList.map((item: any) => ({
         id: item.id || `notif-${Math.random()}`,
         organization_id: item.organization_id || "org-1",
-        level: item.level || (item.eventType === "critical_defect" ? "critical" : "informational"),
+        level: item.level || item.alertLevel || (item.eventType === "critical_defect" ? "critical" : "informational"),
         type: item.type || item.eventType || "inspection_assigned",
         title: item.title || "Notification",
         body: item.body || item.message || "",
+        link: item.link || (item.entity_type === "inspection" ? `/app/inspections/${item.entity_id}` : undefined),
         entity_type: item.entity_type || (item.link ? "inspection" : "asset"),
         entity_id: item.entity_id || item.link || "",
         created_at: item.createdAt || item.created_at || new Date().toISOString(),

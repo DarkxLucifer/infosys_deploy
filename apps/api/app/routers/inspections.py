@@ -107,18 +107,44 @@ def create_inspection(
         db.add(inspection)
         db.flush()
 
+        now_utc = datetime.now(timezone.utc)
+        now_str = now_utc.strftime('%b %d, %Y at %I:%M %p UTC')
+        insp_date_str = insp_date.strftime('%b %d, %Y')
+        due_date_str = d_date.strftime('%b %d, %Y')
+
+        # 1. Notify assigned inspector
         notif = Notification(
             user_id=inspector.id,
             organization_id=current_user.organization_id,
-            title="Inspection Assigned",
-            message=f"You have been assigned inspection for asset {asset.name} ({asset.id}).",
-            link=f"/dashboard/inspections/{inspection.id}",
+            title=f"New Inspection Assigned: {asset.name}",
+            message=f"Inspection {inspection.id} assigned to you on {now_str}. Target: {asset.name} ({asset.id}) · Scheduled: {insp_date_str} · Due: {due_date_str} · Method: {(inspection.method or 'walkdown').title()}.",
+            link=f"/app/inspections/{inspection.id}",
             event_type="inspection_assigned",
             alert_level="informational",
             entity_type="inspection",
             entity_id=inspection.id
         )
         db.add(notif)
+
+        # 2. Notify managers
+        managers = db.query(User).filter(
+            User.organization_id == current_user.organization_id,
+            User.role.in_(["manager", "infrastructure-manager", "infrastructure_manager", "admin", "administrator"]),
+            User.status == "active"
+        ).all()
+        for mgr in managers:
+            if mgr.id != inspector.id:
+                db.add(Notification(
+                    user_id=mgr.id,
+                    organization_id=current_user.organization_id,
+                    title=f"Inspection Scheduled: {asset.name}",
+                    message=f"Inspection {inspection.id} for {asset.name} ({asset.id}) scheduled by {current_user.name or current_user.email} on {now_str}. Assigned Inspector: {inspector.name or inspector.email} · Due: {due_date_str}.",
+                    link=f"/app/inspections/{inspection.id}",
+                    event_type="inspection_assigned",
+                    alert_level="informational",
+                    entity_type="inspection",
+                    entity_id=inspection.id
+                ))
 
         audit = AuditLog(
             user_id=current_user.id,
@@ -651,41 +677,63 @@ def submit_inspection_for_review(
     inspection.submitted_at = datetime.now(timezone.utc)
     inspection.analysis_status = "completed"
 
-    # Notify civil engineers
+    now_utc = datetime.now(timezone.utc)
+    now_str = now_utc.strftime('%b %d, %Y at %I:%M %p UTC')
+    asset = db.query(Asset).filter(Asset.id == inspection.asset_id).first()
+    asset_name = asset.name if asset else "Asset"
+    cracks_found = analysis_summary.get("cracks_found", 0)
+    has_cracks = cracks_found > 0
+    sub_level = "high" if has_cracks else "medium"
+
+    # 1. Notify Civil Engineers
     engineers = db.query(User).filter(
         User.organization_id == current_user.organization_id,
-        User.role.in_(["civil-engineer", "engineer"]),
+        User.role.in_(["civil-engineer", "engineer", "civil_engineer"]),
         User.status == "active"
     ).all()
-    asset = db.query(Asset).filter(Asset.id == inspection.asset_id).first()
-    has_cracks = analysis_summary.get("cracks_found", 0) > 0
-    sub_level = "high" if has_cracks else "low"
     for eng in engineers:
-        notif = Notification(
+        db.add(Notification(
             user_id=eng.id,
             organization_id=current_user.organization_id,
-            title="Inspection Ready for Engineering Review",
-            message=f"Inspection {inspection.id} submitted with AI analysis ({analysis_summary['cracks_found']} crack detections). Awaiting review.",
-            link=f"/dashboard/inspections/{inspection.id}",
+            title=f"Inspection Ready for Engineering Review: {asset_name}",
+            message=f"Inspection {inspection.id} for {asset_name} was submitted by Inspector {current_user.name or current_user.email} on {now_str}. InfraScan Two-Stage AI screened {analysis_summary.get('images_analysed', 0)} photo(s) and flagged {cracks_found} potential crack defect(s). Verification and sign-off required.",
+            link=f"/app/review/{inspection.id}",
             event_type="engineering_review_required",
             alert_level=sub_level,
             entity_type="inspection",
             entity_id=inspection.id
-        )
-        db.add(notif)
+        ))
         if has_cracks:
-            dmg_notif = Notification(
+            db.add(Notification(
                 user_id=eng.id,
                 organization_id=current_user.organization_id,
-                title="Damage Detected: Exceeds Baseline",
-                message=f"Automated AI screening flagged {analysis_summary['cracks_found']} potential defect(s) on asset {asset.name if asset else 'asset'} for inspection {inspection.id}.",
-                link=f"/dashboard/inspections/{inspection.id}",
+                title=f"Damage Detected: Exceeds Baseline — {asset_name}",
+                message=f"Automated AI screening flagged {cracks_found} potential defect(s) on asset {asset_name} during inspection {inspection.id} on {now_str}. Maximum confidence: {int(analysis_summary.get('max_confidence', 0.89) * 100)}%.",
+                link=f"/app/review/{inspection.id}",
                 event_type="damage_detected",
-                alert_level="medium",
+                alert_level="high",
                 entity_type="inspection",
                 entity_id=inspection.id
-            )
-            db.add(dmg_notif)
+            ))
+
+    # 2. Notify Infrastructure Managers
+    managers = db.query(User).filter(
+        User.organization_id == current_user.organization_id,
+        User.role.in_(["manager", "infrastructure-manager", "infrastructure_manager", "admin", "administrator"]),
+        User.status == "active"
+    ).all()
+    for mgr in managers:
+        db.add(Notification(
+            user_id=mgr.id,
+            organization_id=current_user.organization_id,
+            title=f"Inspection Submitted for Review: {asset_name}",
+            message=f"Inspection {inspection.id} for {asset_name} was submitted by Inspector {current_user.name or current_user.email} on {now_str} ({analysis_summary.get('images_analysed', 0)} photos, {cracks_found} defects detected). Routed to Civil Engineer review queue.",
+            link=f"/app/inspections/{inspection.id}",
+            event_type="inspection_submitted",
+            alert_level="informational",
+            entity_type="inspection",
+            entity_id=inspection.id
+        ))
 
     audit = AuditLog(
         user_id=current_user.id,
@@ -821,6 +869,24 @@ def claim_inspection(
     inspection.claimed_by = current_user.id
     inspection.claimed_at = datetime.now(timezone.utc)
     inspection.status = "in_review"
+
+    now_utc = datetime.now(timezone.utc)
+    now_str = now_utc.strftime('%b %d, %Y at %I:%M %p UTC')
+    asset = inspection.asset
+    asset_name = asset.name if asset else "Asset"
+
+    if inspection.inspector_id and inspection.inspector_id != current_user.id:
+        db.add(Notification(
+            user_id=inspection.inspector_id,
+            organization_id=current_user.organization_id,
+            title=f"Inspection Under Review: {asset_name}",
+            message=f"Civil Engineer {current_user.name or current_user.email} claimed inspection {inspection.id} for {asset_name} on {now_str} and commenced engineering verification.",
+            link=f"/app/inspections/{inspection.id}",
+            event_type="inspection_in_review",
+            alert_level="informational",
+            entity_type="inspection",
+            entity_id=inspection.id
+        ))
 
     audit = AuditLog(
         user_id=current_user.id,
@@ -993,12 +1059,12 @@ def sign_off_inspection(
     if not inspection:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection not found")
 
-    if inspection.status in ("reviewed", "reported", "closed"):
+    if inspection.status in ("reviewed", "reported", "closed") or inspection.reviewed_at is not None:
         raise HTTPException(
             status_code=status.HTTP_423_LOCKED,
             detail={
                 "code": "ALREADY_SIGNED_OFF",
-                "message": f"Inspection {inspection.id} has already been reviewed and signed off. Its record is permanently locked."
+                "message": f"Inspection {inspection.id} has already been certified and signed off. A civil engineer can only sign off an inspection once. Record is permanently locked."
             }
         )
 
@@ -1197,13 +1263,19 @@ def sign_off_inspection(
             ))
         inspection.status = "reported"
 
+        now_utc = datetime.now(timezone.utc)
+        now_str = now_utc.strftime('%b %d, %Y at %I:%M %p UTC')
+        asset_name = asset.name if asset else "Asset"
+        certifier_name = current_user.name or current_user.email
+        prio_str = confirmed_priority.replace('_', ' ').title()
+
         # Section 20.1 #8: Report generated notification
         rep_notif = Notification(
             user_id=current_user.id,
             organization_id=current_user.organization_id,
-            title="Inspection Report Generated",
-            message=f"Official multi-format certified report v{next_ver} (PDF, Excel, CSV, JSON) generated for inspection {inspection.id}.",
-            link=f"/dashboard/inspections/{inspection.id}",
+            title=f"Certified Inspection Reports Generated: {asset_name}",
+            message=f"Official multi-format engineering report package v{next_ver} (PDF, Excel, CSV, JSON) generated for inspection {inspection.id} on {now_str}. Section 19 compliance certified.",
+            link=f"/app/review/{inspection.id}",
             event_type="inspection_report_generated",
             alert_level="informational",
             entity_type="report",
@@ -1214,14 +1286,20 @@ def sign_off_inspection(
         pass
 
     # Notifications (Section 20: Event Triggers & 5 Alert Levels)
+    now_utc = datetime.now(timezone.utc)
+    now_str = now_utc.strftime('%b %d, %Y at %I:%M %p UTC')
+    asset_name = asset.name if asset else "Asset"
+    certifier_name = current_user.name or current_user.email
+    prio_str = confirmed_priority.replace('_', ' ').title()
+
     inspector = inspection.inspector
     if inspector:
         notif = Notification(
             user_id=inspector.id,
             organization_id=current_user.organization_id,
-            title="Inspection Review Complete",
-            message=f"Inspection {inspection.id} for {asset.name if asset else 'asset'} has been reviewed and signed off.",
-            link=f"/dashboard/inspections/{inspection.id}",
+            title=f"Inspection Certified & Signed Off: {asset_name}",
+            message=f"Inspection {inspection.id} for {asset_name} was certified and signed off by Civil Engineer {certifier_name} on {now_str}. Confirmed Priority: {prio_str}. Engineering seal applied and records permanently locked.",
+            link=f"/app/review/{inspection.id}",
             event_type="inspection_completed",
             alert_level="informational",
             entity_type="inspection",
@@ -1233,14 +1311,14 @@ def sign_off_inspection(
     mgr_alert_level = "critical" if is_critical_severe else "high" if confirmed_priority == "high" else "informational"
     mgr_event_type = "severe_damage_identified" if is_critical_severe else "inspection_completed"
     mgr_title = (
-        "Severe damage identified — Qualified engineering review required"
+        f"Severe Structural Damage Identified: {asset_name}"
         if is_critical_severe
-        else "Engineering Review Signed Off"
+        else f"Engineering Review Signed Off: {asset_name}"
     )
 
     managers = db.query(User).filter(
         User.organization_id == current_user.organization_id,
-        User.role == "manager",
+        User.role.in_(["manager", "infrastructure-manager", "infrastructure_manager", "admin", "administrator"]),
         User.status == "active"
     ).all()
     for mgr in managers:
@@ -1248,8 +1326,8 @@ def sign_off_inspection(
             user_id=mgr.id,
             organization_id=current_user.organization_id,
             title=mgr_title,
-            message=f"Inspection {inspection.id} signed off for {asset.name if asset else 'asset'}. Confirmed Priority: {confirmed_priority.replace('_', ' ').title()}.",
-            link=f"/dashboard/inspections/{inspection.id}",
+            message=f"Inspection {inspection.id} for {asset_name} certified and locked by Civil Engineer {certifier_name} on {now_str}. Confirmed Priority: {prio_str} · Remediation: {sugg_action}.",
+            link=f"/app/review/{inspection.id}",
             event_type=mgr_event_type,
             alert_level=mgr_alert_level,
             entity_type="inspection",
@@ -1261,7 +1339,7 @@ def sign_off_inspection(
     if new_wo:
         maint_users = db.query(User).filter(
             User.organization_id == current_user.organization_id,
-            User.role == "maintenance",
+            User.role.in_(["maintenance", "maintenance-engineer", "maintenance_engineer"]),
             User.status == "active"
         ).all()
         wo_alert_lvl = "critical" if confirmed_priority == "urgent_engineering_review" else "high" if confirmed_priority == "high" else "medium"
@@ -1269,14 +1347,15 @@ def sign_off_inspection(
             wo_notif = Notification(
                 user_id=mu.id,
                 organization_id=current_user.organization_id,
-                title="Maintenance Task Assigned",
-                message=f"Work Order {new_wo.id} generated for {asset.name if asset else 'asset'}: {sugg_action} (Target: {new_wo.repair_window}).",
-                link="/dashboard/maintenance",
+                title=f"New Maintenance Task Dispatched: Work Order {new_wo.id}",
+                message=f"Maintenance Work Order {new_wo.id} dispatched for {asset_name} ({asset.id if asset else ''}) following engineering sign-off on {now_str}. Prescribed Remediation: {sugg_action} · Confirmed Priority: {prio_str} · Target SLA Window: {new_wo.repair_window or 'Standard SLA'}.",
+                link="/app/maintenance",
                 event_type="maintenance_task_assigned",
                 alert_level=wo_alert_lvl,
                 entity_type="work_order",
                 entity_id=new_wo.id
             )
+            db.add(wo_notif)
             db.add(wo_notif)
 
     audit = AuditLog(

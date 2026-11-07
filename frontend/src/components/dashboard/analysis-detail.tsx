@@ -520,6 +520,16 @@ export function AnalysisDetailPage() {
   };
 
   const handleSignOffSubmit = async () => {
+    if (
+      inspection.status === "reviewed" ||
+      dbInspection?.status === "reviewed" ||
+      dbInspection?.status === "reported" ||
+      Boolean(dbInspection?.isSignedOff)
+    ) {
+      toast.error("This inspection has already been certified and signed off. A civil engineer can only sign off an inspection once.");
+      setSignOffOpen(false);
+      return;
+    }
     setSubmittingSignOff(true);
     try {
       const payload: any = {
@@ -663,11 +673,11 @@ export function AnalysisDetailPage() {
 
             {inspection.status === "reviewed" ? (
               <div className="flex items-center gap-2">
-                <div className="px-3.5 py-1.5 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 font-bold text-xs flex items-center gap-1.5 shadow-xs">
-                  <ShieldCheck className="size-4 text-emerald-400" />
+                <div className="px-3 py-1.5 rounded-xl bg-primary/10 border border-primary/25 text-primary font-bold text-xs flex items-center gap-1.5 shadow-2xs">
+                  <ShieldCheck className="size-4" />
                   <span>Certified & Sealed</span>
                 </div>
-                <div className="px-2.5 py-1.5 rounded-xl bg-secondary/80 border border-border text-[11px] text-muted-foreground flex items-center gap-1">
+                <div className="px-2.5 py-1.5 rounded-xl bg-secondary border border-border text-[11px] text-muted-foreground flex items-center gap-1">
                   <Lock className="size-3 text-muted-foreground" />
                   <span>Locked</span>
                 </div>
@@ -676,7 +686,7 @@ export function AnalysisDetailPage() {
               <Button
                 size="sm"
                 onClick={() => setSignOffOpen(true)}
-                className="h-9 gap-1.5 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs cursor-pointer"
+                className="h-9 gap-1.5 rounded-xl text-xs font-semibold bg-primary hover:bg-primary/90 text-primary-foreground shadow-xs cursor-pointer"
               >
                 <CheckCircle2 className="size-4" />
                 Certify & Sign Off
@@ -700,23 +710,18 @@ export function AnalysisDetailPage() {
       {/* OFFICIAL CERTIFICATE OF ENGINEERING SIGN-OFF & PERMANENT SEAL     */}
       {/* ───────────────────────────────────────────────────────────────── */}
       {inspection.status === "reviewed" && (
-        <div className="mb-6 rounded-2xl border-2 border-emerald-500/40 bg-gradient-to-br from-emerald-950/40 via-emerald-900/15 to-background p-6 shadow-xl relative overflow-hidden animate-in fade-in slide-in-from-top-2 duration-300">
-          {/* Decorative Watermark Seal */}
-          <div className="absolute -right-8 -bottom-8 opacity-5 pointer-events-none text-emerald-400">
-            <Award className="size-56" />
-          </div>
-
+        <div className="mb-6 rounded-2xl border border-border bg-card p-5 sm:p-6 shadow-xs relative overflow-hidden animate-in fade-in duration-200">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 relative z-10">
             <div className="flex items-start gap-4">
-              <div className="size-14 rounded-2xl bg-emerald-500/20 border-2 border-emerald-500/50 flex items-center justify-center text-emerald-400 shrink-0 shadow-inner">
-                <Award className="size-8" />
+              <div className="size-11 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary shrink-0 shadow-2xs">
+                <Award className="size-6" />
               </div>
               <div>
                 <div className="flex items-center gap-2.5 flex-wrap">
-                  <h2 className="text-lg font-bold text-foreground tracking-tight">
+                  <h2 className="text-base sm:text-lg font-bold text-foreground tracking-tight">
                     Engineering Inspection Certified & Permanently Sealed
                   </h2>
-                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500 text-white shadow-xs">
+                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-primary/10 text-primary border border-primary/20">
                     <Lock className="size-3" /> OFFICIAL SIGN-OFF
                   </span>
                 </div>
@@ -727,52 +732,52 @@ export function AnalysisDetailPage() {
             </div>
           </div>
 
-          {/* Metadata KPI grid */}
-          <div className="mt-5 grid grid-cols-2 sm:grid-cols-4 gap-3 pt-4 border-t border-emerald-500/20">
-            <div className="p-3 rounded-xl bg-background/60 border border-emerald-500/20">
-              <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Certifying Engineer</div>
+          {/* Metadata KPI grid with clean black text */}
+          <div className="mt-5 grid grid-cols-2 sm:grid-cols-4 gap-3 pt-4 border-t border-border">
+            <div className="p-3 rounded-xl bg-muted/40 border border-border">
+              <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Certifying Engineer</div>
               <div className="text-xs font-bold text-foreground mt-0.5 truncate">
                 {dbInspection?.reviewedByName || state.session?.name || inspection.inspector || "Civil Engineer"}
               </div>
             </div>
-            <div className="p-3 rounded-xl bg-background/60 border border-emerald-500/20">
-              <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Certified Date</div>
+            <div className="p-3 rounded-xl bg-muted/40 border border-border">
+              <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Certified Date</div>
               <div className="text-xs font-bold text-foreground mt-0.5">
                 {dbInspection?.reviewedAt ? new Date(dbInspection.reviewedAt).toLocaleString() : new Date().toLocaleDateString()}
               </div>
             </div>
-            <div className="p-3 rounded-xl bg-background/60 border border-emerald-500/20">
-              <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Confirmed Priority</div>
-              <div className="text-xs font-bold text-primary mt-0.5 uppercase">
+            <div className="p-3 rounded-xl bg-muted/40 border border-border">
+              <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Confirmed Priority</div>
+              <div className="text-xs font-bold text-foreground mt-0.5 uppercase">
                 {dbInspection?.confirmedPriority || dbInspection?.priorityRecommendation?.confirmed || "Standard / Medium"}
               </div>
             </div>
-            <div className="p-3 rounded-xl bg-background/60 border border-emerald-500/20">
-              <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Maintenance Work Order</div>
+            <div className="p-3 rounded-xl bg-muted/40 border border-border">
+              <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Maintenance Work Order</div>
               <div className="text-xs font-bold text-foreground mt-0.5 flex items-center gap-1">
                 {dbInspection?.workOrderId ? (
                   <Link to="/app/maintenance" className="text-primary hover:underline flex items-center gap-1 font-mono">
                     <Wrench className="size-3" /> {dbInspection.workOrderId}
                   </Link>
                 ) : (
-                  <span className="text-muted-foreground">Auto-dispatched</span>
+                  <span className="text-muted-foreground font-normal">Auto-dispatched</span>
                 )}
               </div>
             </div>
           </div>
 
-          {/* Section 19 Multi-Format Report Downloads */}
-          <div className="mt-4 pt-3 flex flex-wrap items-center justify-between gap-3 border-t border-emerald-500/15">
-            <div className="text-xs font-semibold text-emerald-400 flex items-center gap-1.5">
-              <FileCheck className="size-4" />
-              <span>Certified Multi-Format Reports Generated (§19 Compliance):</span>
+          {/* Section 19 Multi-Format Report Downloads with standard blue buttons */}
+          <div className="mt-4 pt-3 flex flex-wrap items-center justify-between gap-3 border-t border-border">
+            <div className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+              <FileCheck className="size-4 text-primary" />
+              <span>Official Certified Reports (§19 Compliance):</span>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <a
                 href={`/api/v1/inspections/${inspection.id}/reports/pdf?token=${getAuthToken()}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 text-xs font-semibold transition-colors"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-semibold shadow-xs transition-colors cursor-pointer"
               >
                 <FileText className="size-3.5" />
                 <span>PDF Report</span>
@@ -781,7 +786,7 @@ export function AnalysisDetailPage() {
                 href={`/api/v1/inspections/${inspection.id}/reports/xlsx?token=${getAuthToken()}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 text-xs font-semibold transition-colors"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-semibold shadow-xs transition-colors cursor-pointer"
               >
                 <FileSpreadsheet className="size-3.5" />
                 <span>Excel (.xlsx)</span>
@@ -790,7 +795,7 @@ export function AnalysisDetailPage() {
                 href={`/api/v1/inspections/${inspection.id}/reports/csv?token=${getAuthToken()}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 text-xs font-semibold transition-colors"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-semibold shadow-xs transition-colors cursor-pointer"
               >
                 <FileDown className="size-3.5" />
                 <span>CSV Data</span>
@@ -799,7 +804,7 @@ export function AnalysisDetailPage() {
                 href={`/api/v1/inspections/${inspection.id}/reports/json?token=${getAuthToken()}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 text-xs font-semibold transition-colors"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-semibold shadow-xs transition-colors cursor-pointer"
               >
                 <Code className="size-3.5" />
                 <span>JSON</span>
@@ -809,39 +814,34 @@ export function AnalysisDetailPage() {
         </div>
       )}
 
-      {/* Compliance & Model Verification Banner */}
+      {/* Compliance & Model Verification Banner (clean, neutral, black text) */}
       <div className={cn(
-        "mb-5 rounded-2xl border p-4 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs transition-colors",
+        "mb-5 rounded-xl border border-border p-3.5 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs transition-colors",
         inspection.status === "reviewed"
-          ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-300"
-          : "border-primary/20 bg-primary/5 text-foreground"
+          ? "bg-muted/30 text-foreground"
+          : "bg-primary/5 text-foreground"
       )}>
         <div className="flex items-center gap-2.5">
           {inspection.status === "reviewed" ? (
-            <ShieldCheck className="size-4 text-emerald-400 shrink-0" />
+            <ShieldCheck className="size-4 text-primary shrink-0" />
           ) : (
             <ShieldAlert className="size-4 text-primary shrink-0" />
           )}
           <span>
             {inspection.status === "reviewed" ? (
               <>
-                <strong>Certified Engineering Sign-Off Completed:</strong> All AI inferences from <strong>{inspection.modelVersion}</strong> have been verified and sealed in the tamper-evident compliance audit log.
+                <strong className="text-foreground">Certified Engineering Sign-Off Completed:</strong> All AI inferences from <strong>{inspection.modelVersion}</strong> have been verified and sealed in the tamper-evident compliance audit log.
               </>
             ) : (
               <>
-                <strong>AI Decision Support:</strong> Inferences generated by <strong>{inspection.modelVersion}</strong> (calibrated crack threshold: 80.0% gate). Certified engineering review and sign-off is mandatory.
+                <strong className="text-foreground">AI Decision Support:</strong> Inferences generated by <strong>{inspection.modelVersion}</strong> (calibrated crack threshold: 80.0% gate). Certified engineering review and sign-off is mandatory.
               </>
             )}
           </span>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <span className={cn(
-            "font-mono text-[11px] px-2.5 py-1 rounded-lg font-semibold border",
-            inspection.status === "reviewed"
-              ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/30"
-              : "bg-primary/15 text-primary border-primary/20"
-          )}>
-            {inspection.status === "reviewed" ? "Engineering Verified" : "ResNet-18 + YOLO / U-Net"}
+          <span className="font-mono text-[11px] px-2.5 py-1 rounded-lg font-semibold border border-border bg-background text-foreground">
+            {inspection.status === "reviewed" ? "Engineering Certified" : "ResNet-18 + YOLO / U-Net"}
           </span>
         </div>
       </div>
@@ -1147,10 +1147,10 @@ export function AnalysisDetailPage() {
                           </div>
 
                           {isConfirmedSound && (
-                            <div className="rounded-lg bg-emerald-500/15 border border-emerald-500/30 p-2.5 text-xs text-foreground space-y-1">
+                            <div className="rounded-lg bg-muted/50 border border-border p-2.5 text-xs text-foreground space-y-1">
                               <div className="flex items-center justify-between">
-                                <span className="font-semibold text-emerald-700 dark:text-emerald-300 flex items-center gap-1.5 text-[11px]">
-                                  <ShieldCheck className="size-3.5" />
+                                <span className="font-semibold text-foreground flex items-center gap-1.5 text-[11px]">
+                                  <ShieldCheck className="size-3.5 text-primary" />
                                   Sound Surface Decision Verified & Logged
                                 </span>
                                 <span className="text-[10px] text-muted-foreground">
@@ -1165,8 +1165,8 @@ export function AnalysisDetailPage() {
 
                           <div className="flex items-center gap-2 pt-1">
                             {inspection.status === "reviewed" ? (
-                              <div className="w-full py-2 px-3 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-xs font-semibold text-emerald-700 dark:text-emerald-300 flex items-center gap-2">
-                                <Lock className="size-3.5 text-emerald-500" />
+                              <div className="w-full py-2 px-3 rounded-lg bg-muted/40 border border-border text-xs font-semibold text-foreground flex items-center gap-2">
+                                <Lock className="size-3.5 text-muted-foreground" />
                                 <span>Certified Sound Concrete Surface · Permanently Sealed</span>
                               </div>
                             ) : isEngineerOrAdmin ? (
@@ -1176,7 +1176,7 @@ export function AnalysisDetailPage() {
                                     size="sm"
                                     disabled={isConfirming}
                                     onClick={() => handleConfirmSoundSurface(frame.id, index)}
-                                    className="h-8 rounded-lg text-xs font-semibold gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer shadow-sm"
+                                    className="h-8 rounded-lg text-xs font-semibold gap-1.5 bg-primary hover:bg-primary/90 text-primary-foreground cursor-pointer shadow-xs"
                                   >
                                     {isConfirming ? (
                                       <>
