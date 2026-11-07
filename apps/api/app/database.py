@@ -85,6 +85,18 @@ def ensure_schema_upgrades(engine):
             except Exception:
                 pass
 
+            try:
+                cols = [row[1] for row in conn.execute(text("PRAGMA table_info(notifications)")).fetchall()]
+                if "alert_level" not in cols:
+                    conn.execute(text("ALTER TABLE notifications ADD COLUMN alert_level VARCHAR(32) DEFAULT 'informational'"))
+                if "entity_type" not in cols:
+                    conn.execute(text("ALTER TABLE notifications ADD COLUMN entity_type VARCHAR(64) DEFAULT NULL"))
+                if "entity_id" not in cols:
+                    conn.execute(text("ALTER TABLE notifications ADD COLUMN entity_id VARCHAR(64) DEFAULT NULL"))
+                conn.commit()
+            except Exception:
+                pass
+
     # Seed development defaults
     try:
         from app.models.all_models import SeverityRule, PriorityRule, RepairTaskTemplate

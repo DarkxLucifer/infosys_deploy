@@ -321,7 +321,10 @@ class Notification(Base):
     title = Column(String(255), nullable=False)
     message = Column(Text, nullable=False)
     link = Column(String(255), nullable=True)
-    event_type = Column(String(64), nullable=False)  # account_approved, access_request, inspection_assigned
+    event_type = Column(String(64), nullable=False)  # account_approved, access_request, inspection_assigned, severe_damage_identified, etc.
+    alert_level = Column(String(32), default="informational", nullable=True)  # informational, low, medium, high, critical
+    entity_type = Column(String(64), nullable=True)  # inspection, asset, work_order, report
+    entity_id = Column(String(64), nullable=True)
     is_read = Column(Boolean, default=False, index=True)
     created_at = Column(DateTime(timezone=True), default=utcnow, index=True)
 

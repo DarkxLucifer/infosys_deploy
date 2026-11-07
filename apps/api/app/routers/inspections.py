@@ -113,7 +113,10 @@ def create_inspection(
             title="Inspection Assigned",
             message=f"You have been assigned inspection for asset {asset.name} ({asset.id}).",
             link=f"/dashboard/inspections/{inspection.id}",
-            event_type="inspection_assigned"
+            event_type="inspection_assigned",
+            alert_level="informational",
+            entity_type="inspection",
+            entity_id=inspection.id
         )
         db.add(notif)
 
@@ -471,7 +474,10 @@ def reassign_inspection(
         title="Inspection Reassigned to You",
         message=f"{current_user.name or current_user.email} reassigned inspection {inspection.id} to you.",
         link=f"/app/inspections/{inspection.id}",
-        event_type="inspection_reassigned"
+        event_type="inspection_assigned",
+        alert_level="informational",
+        entity_type="inspection",
+        entity_id=inspection.id
     )
     db.add(notif)
 
@@ -642,16 +648,34 @@ def submit_inspection_for_review(
         User.role.in_(["civil-engineer", "engineer"]),
         User.status == "active"
     ).all()
+    has_cracks = analysis_summary.get("cracks_found", 0) > 0
+    sub_level = "high" if has_cracks else "low"
     for eng in engineers:
         notif = Notification(
             user_id=eng.id,
             organization_id=current_user.organization_id,
             title="Inspection Ready for Engineering Review",
             message=f"Inspection {inspection.id} submitted with AI analysis ({analysis_summary['cracks_found']} crack detections). Awaiting review.",
-            link=f"/app/review",
-            event_type="review_required"
+            link=f"/dashboard/inspections/{inspection.id}",
+            event_type="engineering_review_required",
+            alert_level=sub_level,
+            entity_type="inspection",
+            entity_id=inspection.id
         )
         db.add(notif)
+        if has_cracks:
+            dmg_notif = Notification(
+                user_id=eng.id,
+                organization_id=current_user.organization_id,
+                title="Damage Detected: Exceeds Baseline",
+                message=f"Automated AI screening flagged {analysis_summary['cracks_found']} potential defect(s) on asset {asset.name if asset else 'asset'} for inspection {inspection.id}.",
+                link=f"/dashboard/inspections/{inspection.id}",
+                event_type="damage_detected",
+                alert_level="medium",
+                entity_type="inspection",
+                entity_id=inspection.id
+            )
+            db.add(dmg_notif)
 
     audit = AuditLog(
         user_id=current_user.id,
@@ -1117,7 +1141,53 @@ def sign_off_inspection(
         )
         db.add(evt)
 
-    # Notifications
+    # Automated multi-format inspection report generation (Section 19: PDF, Excel, CSV, JSON)
+    try:
+        from app.routers.reports import prepare_inspection_report_payload
+        from app.services.reporting import (
+            generate_inspection_pdf_report,
+            generate_inspection_csv_report,
+            generate_inspection_xlsx_report,
+            generate_inspection_json_report
+        )
+        from app.models.all_models import Report
+        insp_data, findings_data, priority_data = prepare_inspection_report_payload(inspection, db)
+        cur_reports = db.query(Report).filter(Report.inspection_id == inspection.id).count()
+        next_ver = (cur_reports // 4) + 1 if cur_reports > 0 else 1
+
+        res_pdf = generate_inspection_pdf_report(insp_data, findings_data, priority_data)
+        res_csv = generate_inspection_csv_report(insp_data, findings_data)
+        res_xlsx = generate_inspection_xlsx_report(insp_data, findings_data)
+        res_json = generate_inspection_json_report(insp_data, findings_data, priority_data)
+
+        for res in (res_pdf, res_csv, res_xlsx, res_json):
+            db.add(Report(
+                inspection_id=inspection.id,
+                version=next_ver,
+                checksum=res["checksum"],
+                file_format=res["format"],
+                file_path=res["path"],
+                generated_by=current_user.id
+            ))
+        inspection.status = "reported"
+
+        # Section 20.1 #8: Report generated notification
+        rep_notif = Notification(
+            user_id=current_user.id,
+            organization_id=current_user.organization_id,
+            title="Inspection Report Generated",
+            message=f"Official multi-format certified report v{next_ver} (PDF, Excel, CSV, JSON) generated for inspection {inspection.id}.",
+            link=f"/dashboard/inspections/{inspection.id}",
+            event_type="inspection_report_generated",
+            alert_level="informational",
+            entity_type="report",
+            entity_id=inspection.id
+        )
+        db.add(rep_notif)
+    except Exception as report_err:
+        pass
+
+    # Notifications (Section 20: Event Triggers & 5 Alert Levels)
     inspector = inspection.inspector
     if inspector:
         notif = Notification(
@@ -1126,9 +1196,21 @@ def sign_off_inspection(
             title="Inspection Review Complete",
             message=f"Inspection {inspection.id} for {asset.name if asset else 'asset'} has been reviewed and signed off.",
             link=f"/dashboard/inspections/{inspection.id}",
-            event_type="inspection_completed"
+            event_type="inspection_completed",
+            alert_level="informational",
+            entity_type="inspection",
+            entity_id=inspection.id
         )
         db.add(notif)
+
+    is_critical_severe = max_sev in ("severe", "critical") or confirmed_priority == "urgent_engineering_review"
+    mgr_alert_level = "critical" if is_critical_severe else "high" if confirmed_priority == "high" else "informational"
+    mgr_event_type = "severe_damage_identified" if is_critical_severe else "inspection_completed"
+    mgr_title = (
+        "Severe damage identified — Qualified engineering review required"
+        if is_critical_severe
+        else "Engineering Review Signed Off"
+    )
 
     managers = db.query(User).filter(
         User.organization_id == current_user.organization_id,
@@ -1139,12 +1221,37 @@ def sign_off_inspection(
         notif = Notification(
             user_id=mgr.id,
             organization_id=current_user.organization_id,
-            title="Engineering Review Signed Off",
-            message=f"Inspection {inspection.id} signed off. Recommended Priority: {prio_result['recommended_priority'].replace('_', ' ').title()}.",
+            title=mgr_title,
+            message=f"Inspection {inspection.id} signed off for {asset.name if asset else 'asset'}. Confirmed Priority: {confirmed_priority.replace('_', ' ').title()}.",
             link=f"/dashboard/inspections/{inspection.id}",
-            event_type="severe_damage_identified" if max_sev in ("severe", "critical") else "inspection_completed"
+            event_type=mgr_event_type,
+            alert_level=mgr_alert_level,
+            entity_type="inspection",
+            entity_id=inspection.id
         )
         db.add(notif)
+
+    # If work order generated, notify maintenance crew (Section 20.1 #6)
+    if new_wo:
+        maint_users = db.query(User).filter(
+            User.organization_id == current_user.organization_id,
+            User.role == "maintenance",
+            User.status == "active"
+        ).all()
+        wo_alert_lvl = "critical" if confirmed_priority == "urgent_engineering_review" else "high" if confirmed_priority == "high" else "medium"
+        for mu in maint_users:
+            wo_notif = Notification(
+                user_id=mu.id,
+                organization_id=current_user.organization_id,
+                title="Maintenance Task Assigned",
+                message=f"Work Order {new_wo.id} generated for {asset.name if asset else 'asset'}: {sugg_action} (Target: {new_wo.repair_window}).",
+                link="/dashboard/maintenance",
+                event_type="maintenance_task_assigned",
+                alert_level=wo_alert_lvl,
+                entity_type="work_order",
+                entity_id=new_wo.id
+            )
+            db.add(wo_notif)
 
     audit = AuditLog(
         user_id=current_user.id,

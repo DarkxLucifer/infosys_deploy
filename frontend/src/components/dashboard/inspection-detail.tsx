@@ -28,6 +28,11 @@ import {
   Sparkles,
   Cpu,
   ScanSearch,
+  Download,
+  ChevronDown,
+  FileSpreadsheet,
+  FileCode,
+  ShieldCheck,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -44,6 +49,14 @@ import {
 } from "@/components/inspection/image-quality-components";
 import { OpticalCalibrationModal } from "@/components/inspection/optical-calibration-modal";
 
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuLabel,
+} from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -636,6 +649,89 @@ export function InspectionDetailPage() {
     });
   };
 
+  const handleDownloadReportFormat = async (format: "pdf" | "xlsx" | "csv" | "json") => {
+    try {
+      const extMap = { pdf: "pdf", xlsx: "xlsx", csv: "csv", json: "json" };
+      const ext = extMap[format];
+      toast.loading(`Generating certified ${format.toUpperCase()} report...`, { id: "report-dl" });
+      const blob = await api.downloadInspectionReport(inspection.id, format);
+      triggerDownload(blob, `infrascan_report_${inspection.id}.${ext}`);
+      toast.success(`${format.toUpperCase()} report downloaded successfully`, { id: "report-dl" });
+    } catch {
+      toast.dismiss("report-dl");
+      if (format === "pdf") {
+        downloadCertificateNow();
+      } else {
+        toast.error(`Failed to export ${format.toUpperCase()} report`);
+      }
+    }
+  };
+
+  const exportDropdownMenu = (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" className="gap-1.5 cursor-pointer">
+          <Download className="size-4" />
+          <span>Export Report</span>
+          <ChevronDown className="size-3.5 opacity-60" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-60">
+        <DropdownMenuLabel className="text-xs text-muted-foreground font-normal">
+          Automated Reports (PDF, Excel, CSV, JSON)
+        </DropdownMenuLabel>
+        <DropdownMenuItem
+          onClick={() => handleDownloadReportFormat("pdf")}
+          className="cursor-pointer gap-2 py-2"
+        >
+          <FileText className="size-4 text-red-500 shrink-0" />
+          <div className="flex flex-col">
+            <span className="font-medium text-xs">PDF Condition Report</span>
+            <span className="text-[10px] text-muted-foreground">Certified engineering document</span>
+          </div>
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={() => handleDownloadReportFormat("xlsx")}
+          className="cursor-pointer gap-2 py-2"
+        >
+          <FileSpreadsheet className="size-4 text-emerald-500 shrink-0" />
+          <div className="flex flex-col">
+            <span className="font-medium text-xs">Excel Workbook (.xlsx)</span>
+            <span className="text-[10px] text-muted-foreground">Multi-sheet findings & metrics</span>
+          </div>
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={() => handleDownloadReportFormat("csv")}
+          className="cursor-pointer gap-2 py-2"
+        >
+          <FileSpreadsheet className="size-4 text-blue-500 shrink-0" />
+          <div className="flex flex-col">
+            <span className="font-medium text-xs">Defect CSV (.csv)</span>
+            <span className="text-[10px] text-muted-foreground">Tabular raw measurements</span>
+          </div>
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={() => handleDownloadReportFormat("json")}
+          className="cursor-pointer gap-2 py-2"
+        >
+          <FileCode className="size-4 text-purple-500 shrink-0" />
+          <div className="flex flex-col">
+            <span className="font-medium text-xs">Inspection JSON</span>
+            <span className="text-[10px] text-muted-foreground">Machine-readable payload</span>
+          </div>
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={downloadCertificateNow} className="cursor-pointer gap-2 py-2">
+          <ShieldCheck className="size-4 text-primary shrink-0" />
+          <div className="flex flex-col">
+            <span className="font-medium text-xs">Integrity Certificate</span>
+            <span className="text-[10px] text-muted-foreground">Tamper-evident client certificate</span>
+          </div>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+
 
 
   const submitEscalation = () => {
@@ -689,37 +785,18 @@ export function InspectionDetailPage() {
               </div>
             ) : null}
             {inspection.status === "awaiting-review" ? (
-              <>
-                <Button variant="outline" onClick={downloadCertificateNow}>
-                  <FileText className="size-4" />
-                  Download certificate
-                </Button>
+              <div className="flex items-center gap-2">
+                {exportDropdownMenu}
                 <Button onClick={() => navigate(`/app/review/${inspection.id}`)}>
                   <ClipboardCheck className="size-4" />
                   Review findings
                 </Button>
                 {escalateButton}
-              </>
+              </div>
             ) : null}
-            {inspection.status === "reviewed" ? (
+            {inspection.status === "reviewed" || inspection.status === "reported" ? (
               <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  onClick={async () => {
-                    try {
-                      toast.loading("Generating certified report...", { id: "report-dl" });
-                      const blob = await api.downloadInspectionReport(inspection.id, "pdf");
-                      triggerDownload(blob, `infrascan_report_${inspection.id}.pdf`);
-                      toast.success("Inspection report downloaded", { id: "report-dl" });
-                    } catch {
-                      toast.dismiss("report-dl");
-                      downloadCertificateNow();
-                    }
-                  }}
-                >
-                  <FileText className="size-4" />
-                  Download report (PDF)
-                </Button>
+                {exportDropdownMenu}
                 <Button variant="secondary" onClick={() => navigate(`/app/review/${inspection.id}`)}>
                   <ClipboardCheck className="size-4" />
                   View review
@@ -727,16 +804,13 @@ export function InspectionDetailPage() {
               </div>
             ) : null}
             {inspection.status === "escalated" ? (
-              <>
-                <Button variant="outline" onClick={downloadCertificateNow}>
-                  <FileText className="size-4" />
-                  Download certificate
-                </Button>
+              <div className="flex items-center gap-2">
+                {exportDropdownMenu}
                 <Button onClick={() => navigate(`/app/review/${inspection.id}`)}>
                   <ClipboardCheck className="size-4" />
                   Open review
                 </Button>
-              </>
+              </div>
             ) : null}
           </>
         }
