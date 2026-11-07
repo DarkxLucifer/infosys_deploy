@@ -603,6 +603,47 @@ def get_role_dashboard_metrics(
                 "created_at": wo.created_at.strftime("%Y-%m-%d") if wo.created_at else now.strftime("%Y-%m-%d")
             })
 
+        # Build live deadline alerts for open work orders
+        deadline_alerts = []
+        for wo_item in formatted_wos:
+            if wo_item.get("status") == "closed":
+                continue
+            due_str = wo_item.get("due_date")
+            is_ov = False
+            days_rem = 0
+            if due_str:
+                try:
+                    dt = datetime.strptime(due_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                    days_rem = (dt.date() - now.date()).days
+                    is_ov = days_rem < 0
+                except Exception:
+                    pass
+            deadline_alerts.append({
+                "id": wo_item["id"],
+                "assetCode": wo_item["asset_code"],
+                "action": wo_item["action"],
+                "dueDate": due_str,
+                "isOverdue": is_ov,
+                "daysRemaining": days_rem
+            })
+
+        # Scheduled follow-up inspections
+        upcoming_insp = db.query(Inspection).filter(
+            Inspection.organization_id == org_id,
+            Inspection.status.in_(["assigned", "in_progress", "draft"])
+        ).order_by(Inspection.due_date.asc()).limit(5).all()
+
+        follow_ups = []
+        for ui in upcoming_insp:
+            u_asset = ui.asset
+            follow_ups.append({
+                "assetCode": u_asset.id if u_asset else "INF-000",
+                "assetName": u_asset.name if u_asset else "Asset",
+                "scheduledDate": ui.due_date.strftime("%Y-%m-%d") if ui.due_date else now.strftime("%Y-%m-%d"),
+                "reason": ui.notes or f"Follow-up verification survey ({ui.method or 'visual'})",
+                "assignedInspector": ui.inspector.name if ui.inspector else "Field Inspector"
+            })
+
         return {
             "role": "maintenance",
             "openOrdersCount": open_count,
@@ -619,21 +660,11 @@ def get_role_dashboard_metrics(
             "workOrders": formatted_wos,
             "urgentReviewBanner": {
                 "active": urgent_count > 0,
-                "message": f"{urgent_count} work order(s) marked for urgent review.",
+                "message": f"{urgent_count} work order(s) marked for urgent engineering review.",
                 "itemCount": urgent_count
             },
-            "followUpInspections": [],
-            "deadlineAlerts": [
-                {
-                    "id": wo["id"],
-                    "assetCode": wo["asset_code"],
-                    "action": wo["action"],
-                    "dueDate": wo["due_date"],
-                    "isOverdue": False,
-                    "daysRemaining": 7
-                }
-                for wo in formatted_wos[:4]
-            ],
+            "followUpInspections": follow_ups,
+            "deadlineAlerts": deadline_alerts[:6],
             "recentOrders": [
                 {
                     "id": wo.id,

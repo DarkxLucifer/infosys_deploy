@@ -844,6 +844,97 @@ def release_claim(
 
     return {"status": "pending_review", "claimedBy": None}
 
+
+@router.get("/{inspection_id}/priority-preview")
+def preview_inspection_priority(
+    inspection_id: str,
+    severity: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Computes real-time preview of Maintenance Priority score, factor breakdown,
+    suggested repair action template, and target SLA prior to sign-off (Section 16).
+    """
+    inspection = db.query(Inspection).filter(
+        Inspection.id == inspection_id,
+        Inspection.organization_id == current_user.organization_id
+    ).first()
+    if not inspection:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection not found")
+
+    detections = db.query(Detection).filter(Detection.inspection_id == inspection.id).all()
+
+    sev_rank = {"no_visible_damage": 0, "minor": 1, "moderate": 2, "severe": 3, "critical": 4}
+    max_sev = "minor"
+    for d in detections:
+        if sev_rank.get(d.severity, 1) > sev_rank.get(max_sev, 1):
+            max_sev = d.severity
+
+    if severity and severity.lower() in sev_rank:
+        max_sev = severity.lower()
+
+    asset = inspection.asset
+    from app.services.priority_engine import evaluate_priority
+    from app.models.all_models import PriorityRule, RepairTaskTemplate
+
+    active_prio_rule = db.query(PriorityRule).order_by(PriorityRule.created_at.desc()).first()
+    prio_rule_dict = {
+        "weights": active_prio_rule.weights if active_prio_rule else None,
+        "risk_factors": active_prio_rule.risk_factors if active_prio_rule else None,
+        "version": active_prio_rule.version if active_prio_rule else "v1.0-default"
+    } if active_prio_rule else None
+
+    first_defect_type = detections[0].defect_type if detections else "hairline"
+    template = db.query(RepairTaskTemplate).filter(RepairTaskTemplate.damage_type == first_defect_type).first()
+    sugg_action = template.suggested_action if template else "Scheduled periodic re-inspection and monitoring."
+
+    crew_map = {
+        "longitudinal": "Structural Injection Crew",
+        "transverse": "Bridge Maintenance Specialists",
+        "alligator": "Pavement & Road Crew",
+        "spalling": "Concrete Repair Team",
+        "exposed_reinforcement": "Heavy Structural Crew",
+        "corrosion": "Durability Specialists",
+        "potholes": "Road Maintenance Crew",
+        "water_leakage": "Waterproofing Specialists",
+        "hairline": "Routine Survey Crew"
+    }
+    suggested_team = crew_map.get(first_defect_type, "Civil Maintenance Crew")
+
+    days_map = {
+        "urgent_engineering_review": 2,
+        "high": 14,
+        "medium": 60,
+        "low": 180,
+        "routine_monitoring": 365
+    }
+
+    prio_result = evaluate_priority(
+        severity=max_sev,
+        asset_importance=asset.importance if asset else "medium",
+        asset_type=asset.asset_type if asset else "bridge",
+        suggested_action=sugg_action,
+        rule=prio_rule_dict
+    )
+
+    rec_prio = prio_result["recommended_priority"]
+    sla_days = days_map.get(rec_prio, 30)
+
+    return {
+        "inspectionId": inspection.id,
+        "assetId": inspection.asset_id,
+        "assetName": asset.name if asset else "Asset",
+        "severity": max_sev,
+        "defectType": first_defect_type,
+        "priorityRecommendation": prio_result,
+        "suggestedAction": sugg_action,
+        "suggestedTeam": suggested_team,
+        "slaDays": sla_days,
+        "repairWindow": f"Within {sla_days} days" if sla_days > 2 else "Within 48 hours (Urgent)"
+    }
+
+
 @router.post("/{inspection_id}/sign-off")
 def sign_off_inspection(
     inspection_id: str,
@@ -952,20 +1043,29 @@ def sign_off_inspection(
         rule=prio_rule_dict
     )
 
+    confirmed_priority = prio_result["recommended_priority"]
+    override_reason = "Initial sign-off recommendation generated"
+    if payload and payload.get("override_priority"):
+        op = str(payload.get("override_priority")).lower().strip()
+        if op in ("urgent_engineering_review", "high", "medium", "low", "routine_monitoring"):
+            confirmed_priority = op
+            override_reason = payload.get("override_reason") or "Engineer override during sign-off"
+
     prio_rec = PriorityRecommendation(
         inspection_id=inspection.id,
         finding_id=detections[0].id if detections else None,
         factors=prio_result,
         recommended=prio_result["recommended_priority"],
-        confirmed=prio_result["recommended_priority"],
+        confirmed=confirmed_priority,
         confirmed_by=current_user.id,
-        reason="Initial sign-off recommendation generated"
+        reason=override_reason
     )
     db.add(prio_rec)
 
     # Auto-generate or link Work Order if defects exist and no WO exists yet (Section 16)
     from app.models.all_models import WorkOrder, WorkOrderEvent
     existing_wo = db.query(WorkOrder).filter(WorkOrder.inspection_id == inspection.id).first()
+    new_wo = None
     if not existing_wo and max_sev != "no_visible_damage":
         days_map = {
             "urgent_engineering_review": 2,
@@ -974,7 +1074,7 @@ def sign_off_inspection(
             "low": 180,
             "routine_monitoring": 365
         }
-        sla_days = days_map.get(prio_result["recommended_priority"], 30)
+        sla_days = days_map.get(confirmed_priority, 30)
         due_dt = datetime.now(timezone.utc) + timedelta(days=sla_days)
 
         crew_map = {
@@ -998,7 +1098,7 @@ def sign_off_inspection(
             inspection_id=inspection.id,
             finding_id=detections[0].id if detections else None,
             action=sugg_action,
-            priority=prio_result["recommended_priority"],
+            priority=confirmed_priority,
             team=team_name,
             due_date=due_dt,
             repair_window=f"Within {sla_days} days" if sla_days > 2 else "Within 48 hours (Urgent)",
@@ -1013,7 +1113,7 @@ def sign_off_inspection(
             actor_id=current_user.id,
             from_status="none",
             to_status="open",
-            note=f"Work order auto-generated upon engineering sign-off with recommended priority: {prio_result['recommended_priority']}."
+            note=f"Work order auto-generated upon engineering sign-off with confirmed priority: {confirmed_priority}."
         )
         db.add(evt)
 
@@ -1060,7 +1160,9 @@ def sign_off_inspection(
     return {
         "status": "reviewed",
         "reviewedAt": inspection.reviewed_at.isoformat(),
-        "priorityRecommendation": prio_result
+        "priorityRecommendation": prio_result,
+        "confirmedPriority": confirmed_priority,
+        "workOrderId": new_wo.id if new_wo else (existing_wo.id if existing_wo else None)
     }
 
 @router.post("/{inspection_id}/confirm-priority")

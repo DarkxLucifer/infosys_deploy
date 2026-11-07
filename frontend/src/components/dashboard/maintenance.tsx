@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { CircleAlert, Plus, Search, CheckCircle2, AlertTriangle, ShieldCheck } from "lucide-react";
+import { CircleAlert, Plus, Search, CheckCircle2, AlertTriangle, ShieldCheck, LayoutGrid, List } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -121,6 +121,8 @@ export function MaintenancePage() {
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [priorityFilter, setPriorityFilter] = useState<string>("all");
+  const [viewMode, setViewMode] = useState<"table" | "kanban">("table");
   const [createOpen, setCreateOpen] = useState(false);
   const [closeDialogOpen, setCloseDialogOpen] = useState(false);
   const [selectedOrderToClose, setSelectedOrderToClose] = useState<LiveWorkOrder | null>(null);
@@ -158,6 +160,7 @@ export function MaintenancePage() {
     return workOrders
       .filter((order) => {
         const matchesStatus = statusFilter === "all" || order.status === statusFilter;
+        const matchesPriority = priorityFilter === "all" || order.priority === priorityFilter;
         const matchesText =
           text === "" ||
           order.id.toLowerCase().includes(text) ||
@@ -165,7 +168,7 @@ export function MaintenancePage() {
           order.assetId.toLowerCase().includes(text) ||
           (order.team && order.team.toLowerCase().includes(text)) ||
           (order.assigneeName && order.assigneeName.toLowerCase().includes(text));
-        return matchesStatus && matchesText;
+        return matchesStatus && matchesPriority && matchesText;
       })
       .sort((a, b) => {
         const priorityWeight: Record<string, number> = {
@@ -291,7 +294,7 @@ export function MaintenancePage() {
           value={statusFilter}
           onValueChange={(value) => setStatusFilter(value)}
         >
-          <SelectTrigger className="h-9 w-44 rounded-xl text-xs">
+          <SelectTrigger className="h-9 w-40 rounded-xl text-xs">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -302,6 +305,46 @@ export function MaintenancePage() {
             <SelectItem value="closed">Closed</SelectItem>
           </SelectContent>
         </Select>
+        <Select
+          value={priorityFilter}
+          onValueChange={(value) => setPriorityFilter(value)}
+        >
+          <SelectTrigger className="h-9 w-44 rounded-xl text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All priorities</SelectItem>
+            <SelectItem value="urgent_engineering_review">Urgent Review</SelectItem>
+            <SelectItem value="high">High Priority</SelectItem>
+            <SelectItem value="medium">Medium Priority</SelectItem>
+            <SelectItem value="low">Low Priority</SelectItem>
+            <SelectItem value="routine_monitoring">Routine</SelectItem>
+          </SelectContent>
+        </Select>
+
+        <div className="flex items-center rounded-xl border border-border bg-muted/40 p-0.5 ml-auto sm:ml-0">
+          <button
+            type="button"
+            onClick={() => setViewMode("table")}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors ${
+              viewMode === "table" ? "bg-card text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <List className="size-3.5" />
+            <span>Table</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode("kanban")}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors ${
+              viewMode === "kanban" ? "bg-card text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <LayoutGrid className="size-3.5" />
+            <span>Board</span>
+          </button>
+        </div>
+
         <span className="ml-auto text-xs text-muted-foreground">
           {rows.length} of {workOrders.length} orders
         </span>
@@ -316,6 +359,99 @@ export function MaintenancePage() {
           title="No work orders match"
           description="Sign off an inspection in the engineer review queue to automatically generate a prioritized repair work order."
         />
+      ) : viewMode === "kanban" ? (
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {(["unassigned", "open", "in_progress", "closed"] as const).map((colStatus) => {
+            const colOrders = rows.filter((o) => o.status === colStatus);
+            const colTitle = statusLabels[colStatus] || colStatus;
+            return (
+              <div key={colStatus} className="flex flex-col rounded-2xl border bg-muted/20 p-3">
+                <div className="flex items-center justify-between pb-2 mb-2 border-b border-border">
+                  <span className="text-xs font-bold text-foreground">{colTitle}</span>
+                  <span className="text-[11px] font-mono font-semibold px-2 py-0.5 rounded-full bg-secondary text-muted-foreground">
+                    {colOrders.length}
+                  </span>
+                </div>
+                <div className="space-y-2.5 overflow-y-auto max-h-[620px]">
+                  {colOrders.length === 0 ? (
+                    <div className="py-8 text-center text-[11px] text-muted-foreground border border-dashed rounded-xl bg-card/40">
+                      No {colTitle.toLowerCase()} orders
+                    </div>
+                  ) : (
+                    colOrders.map((order) => {
+                      const overdue = isOverdue(order);
+                      return (
+                        <div
+                          key={order.id}
+                          className="rounded-xl border bg-card p-3 space-y-2 shadow-xs hover:border-primary/40 transition-colors"
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="font-mono text-xs font-bold text-primary">{order.id}</span>
+                            {formatPriorityBadge(order.priority)}
+                          </div>
+                          <div className="text-xs font-semibold text-foreground">
+                            <button
+                              type="button"
+                              className="hover:text-primary hover:underline text-left"
+                              onClick={() => navigate(`/app/assets/${order.assetId}`)}
+                            >
+                              {order.assetName || order.assetId}
+                            </button>
+                          </div>
+                          <p className="text-xs text-muted-foreground line-clamp-2">{order.action}</p>
+                          <div className="pt-1 flex items-center justify-between text-[11px] text-muted-foreground border-t border-border/50">
+                            <span className="truncate max-w-[130px]" title={order.team || "Crew"}>
+                              {order.team || "Civil Crew"}
+                            </span>
+                            <span className={`font-mono tabular-nums ${overdue ? "text-destructive font-bold" : ""}`}>
+                              {order.dueDate ? new Date(order.dueDate).toLocaleDateString() : "TBD"}
+                            </span>
+                          </div>
+                          {colStatus !== "closed" ? (
+                            <div className="pt-1 flex items-center justify-end gap-1">
+                              {colStatus === "unassigned" ? (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-7 text-[11px] font-semibold"
+                                  onClick={() => handleStatusChange(order, "open")}
+                                >
+                                  Assign & Open
+                                </Button>
+                              ) : colStatus === "open" ? (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-7 text-[11px] font-semibold"
+                                  onClick={() => handleStatusChange(order, "in_progress")}
+                                >
+                                  Start Work
+                                </Button>
+                              ) : (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-7 text-[11px] font-semibold text-success hover:text-success"
+                                  onClick={() => handleStatusChange(order, "closed")}
+                                >
+                                  Resolve & Close
+                                </Button>
+                              )}
+                            </div>
+                          ) : order.closedNote ? (
+                            <p className="text-[10px] text-muted-foreground line-clamp-1 italic">
+                              Note: {order.closedNote}
+                            </p>
+                          ) : null}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
       ) : (
         <div className="overflow-hidden rounded-2xl border bg-card shadow-xs">
           <Table>
@@ -487,6 +623,24 @@ function CreateWorkOrderDialog({
   const [team, setTeam] = useState("Structural Injection Crew");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [assetsList, setAssetsList] = useState<any[]>(state.assets || []);
+  const [templates, setTemplates] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (open) {
+      api.getAssets()
+        .then((res) => {
+          if (Array.isArray(res) && res.length > 0) setAssetsList(res);
+        })
+        .catch(() => {});
+
+      api.getRepairTemplates()
+        .then((res) => {
+          if (Array.isArray(res) && res.length > 0) setTemplates(res);
+        })
+        .catch(() => {});
+    }
+  }, [open]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -498,6 +652,47 @@ function CreateWorkOrderDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-3.5 py-1 text-xs">
+          {templates.length > 0 ? (
+            <div className="grid gap-1">
+              <Label className="font-semibold text-muted-foreground flex items-center justify-between">
+                <span>Standard Repair Template (§16)</span>
+                <span className="font-normal text-[10px]">Autofills action & priority</span>
+              </Label>
+              <Select
+                onValueChange={(val) => {
+                  const tmpl = templates.find((t) => t.id === val || t.damageType === val);
+                  if (tmpl) {
+                    setAction(tmpl.suggestedAction);
+                    if (tmpl.priority) setPriority(tmpl.priority);
+                    const crewMap: Record<string, string> = {
+                      longitudinal: "Structural Injection Crew",
+                      transverse: "Bridge Maintenance Specialists",
+                      alligator: "Pavement & Road Crew",
+                      spalling: "Concrete Repair Team",
+                      exposed_reinforcement: "Heavy Structural Crew",
+                      corrosion: "Durability Specialists",
+                      potholes: "Road Maintenance Crew",
+                      water_leakage: "Waterproofing Specialists",
+                      hairline: "Routine Survey Crew",
+                    };
+                    if (crewMap[tmpl.damageType]) setTeam(crewMap[tmpl.damageType]);
+                  }
+                }}
+              >
+                <SelectTrigger className="rounded-lg h-8 text-xs">
+                  <SelectValue placeholder="Choose engineering template (e.g. Epoxy, Patching)…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {templates.map((t) => (
+                    <SelectItem key={t.id} value={t.id}>
+                      {t.damageType.toUpperCase()} · {t.suggestedAction.slice(0, 42)}…
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          ) : null}
+
           <div className="grid gap-1">
             <Label htmlFor="new-wo-action" className="font-semibold">Prescribed Repair Action</Label>
             <Input
@@ -515,7 +710,7 @@ function CreateWorkOrderDialog({
                 <SelectValue placeholder="Select infrastructure asset…" />
               </SelectTrigger>
               <SelectContent>
-                {state.assets.map((asset) => (
+                {assetsList.map((asset) => (
                   <SelectItem key={asset.id} value={asset.id}>
                     {asset.id} · {asset.name}
                   </SelectItem>

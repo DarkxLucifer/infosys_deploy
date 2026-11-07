@@ -134,6 +134,10 @@ export function AnalysisDetailPage() {
   const [signOffNotes, setSignOffNotes] = useState("");
   const [signOffSeverity, setSignOffSeverity] = useState<string>("minor");
   const [submittingSignOff, setSubmittingSignOff] = useState(false);
+  const [priorityPreview, setPriorityPreview] = useState<any | null>(null);
+  const [overridePriority, setOverridePriority] = useState<string>("");
+  const [overrideReason, setOverrideReason] = useState<string>("");
+  const [loadingPreview, setLoadingPreview] = useState<boolean>(false);
 
   // Zoom Modal
   const [zoomedImage, setZoomedImage] = useState<{ url: string; label: string; mode: string } | null>(null);
@@ -418,20 +422,43 @@ export function AnalysisDetailPage() {
     }
   };
 
+  useEffect(() => {
+    if (!signOffOpen || !id || id === "new") return;
+    let active = true;
+    setLoadingPreview(true);
+    api.getPriorityPreview(id, signOffSeverity)
+      .then((data) => {
+        if (active && data) {
+          setPriorityPreview(data);
+        }
+      })
+      .catch((err) => console.warn("Failed to load priority preview:", err))
+      .finally(() => {
+        if (active) setLoadingPreview(false);
+      });
+    return () => { active = false; };
+  }, [signOffOpen, signOffSeverity, id]);
+
   const handleSignOffSubmit = async () => {
     setSubmittingSignOff(true);
     try {
-      const payload = {
+      const payload: any = {
         description: signOffNotes.trim() || undefined,
         severity: signOffSeverity,
       };
-      await api.signOffInspection(inspection.id, payload).catch(async () => {
+      if (overridePriority && overridePriority !== priorityPreview?.priorityRecommendation?.recommended_priority) {
+        payload.override_priority = overridePriority;
+        payload.override_reason = overrideReason.trim() || "Engineer override during sign-off";
+      }
+      const res = await api.signOffInspection(inspection.id, payload).catch(async () => {
         // Fallback for inspector role
         return await api.submitInspection(inspection.id, payload);
       });
 
       toast.success("Review signed off successfully", {
-        description: `${inspection.id} certified. Overall Severity: ${signOffSeverity.toUpperCase()}.`,
+        description: res?.workOrderId
+          ? `${inspection.id} certified. Work Order ${res.workOrderId} auto-generated for ${(res.confirmedPriority || signOffSeverity)?.replace(/_/g, " ").toUpperCase()}.`
+          : `${inspection.id} certified. Overall Severity: ${signOffSeverity.toUpperCase()}.`,
       });
       setSignOffOpen(false);
       loadBackendData();
@@ -1215,6 +1242,89 @@ export function AnalysisDetailPage() {
               <p className="text-[11px] text-muted-foreground">
                 Governed by AASHTO / ASTM crack width thresholds and computed surface area density.
               </p>
+            </div>
+
+            {/* Input 3: Maintenance Prioritization & Work Order Preview (Section 16) */}
+            <div className="rounded-xl border border-primary/25 bg-primary/5 p-3.5 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5 font-semibold text-xs text-foreground">
+                  <Wrench className="size-3.5 text-primary" />
+                  <span>Maintenance Prioritization (§16 Engine)</span>
+                </div>
+                {priorityPreview?.priorityRecommendation ? (
+                  <span className="text-[11px] font-mono font-bold text-primary">
+                    Score: {priorityPreview.priorityRecommendation.score} / 4.0
+                  </span>
+                ) : null}
+              </div>
+
+              {loadingPreview ? (
+                <div className="text-xs text-muted-foreground animate-pulse py-2 text-center">
+                  Calculating multi-factor maintenance priority...
+                </div>
+              ) : priorityPreview ? (
+                <div className="space-y-2 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Recommended Priority:</span>
+                    <span className="font-bold text-foreground">
+                      {priorityPreview.priorityRecommendation?.recommended_priority?.replace(/_/g, " ").toUpperCase()}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Remediation Action:</span>
+                    <span className="font-medium text-foreground text-right max-w-[260px] truncate" title={priorityPreview.suggestedAction}>
+                      {priorityPreview.suggestedAction}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Target SLA & Crew:</span>
+                    <span className="font-medium text-foreground">
+                      {priorityPreview.repairWindow} · {priorityPreview.suggestedTeam}
+                    </span>
+                  </div>
+
+                  {/* Engineer Priority Confirmation / Override */}
+                  <div className="pt-2 border-t border-border/60">
+                    <div className="flex items-center justify-between mb-1">
+                      <Label className="text-[11px] font-semibold text-foreground">
+                        Confirm or Override Maintenance Priority
+                      </Label>
+                    </div>
+                    <Select
+                      value={overridePriority || priorityPreview.priorityRecommendation?.recommended_priority || "medium"}
+                      onValueChange={(val) => setOverridePriority(val)}
+                    >
+                      <SelectTrigger className="h-8 rounded-lg text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="urgent_engineering_review">Urgent Engineering Review (SLA 48h)</SelectItem>
+                        <SelectItem value="high">High Priority (SLA 14d)</SelectItem>
+                        <SelectItem value="medium">Medium Priority (SLA 60d)</SelectItem>
+                        <SelectItem value="low">Low Priority (SLA 180d)</SelectItem>
+                        <SelectItem value="routine_monitoring">Routine Monitoring (SLA 365d)</SelectItem>
+                      </SelectContent>
+                    </Select>
+
+                    {overridePriority && overridePriority !== priorityPreview.priorityRecommendation?.recommended_priority ? (
+                      <div className="mt-2 space-y-1">
+                        <Label className="text-[10px] text-muted-foreground font-semibold">
+                          Override Justification (Audit Required)
+                        </Label>
+                        <Input
+                          value={overrideReason}
+                          onChange={(e) => setOverrideReason(e.target.value)}
+                          placeholder="Reason for modifying automated priority recommendation..."
+                          className="h-8 rounded-lg text-xs"
+                        />
+                      </div>
+                    ) : null}
+                  </div>
+                  <p className="text-[10px] text-muted-foreground italic">
+                    Certified sign-off will auto-generate a trackable Work Order for field maintenance.
+                  </p>
+                </div>
+              ) : null}
             </div>
           </div>
 

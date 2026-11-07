@@ -2467,6 +2467,16 @@ export const apiService = {
     return res.json();
   },
 
+  async getPriorityPreview(inspectionId: string, severity?: string): Promise<any> {
+    const params = severity ? `?severity=${encodeURIComponent(severity)}` : "";
+    const res = await fetch(`${API_BASE_URL}/inspections/${inspectionId}/priority-preview${params}`, {
+      headers: authHeaders(),
+      credentials: "include",
+    });
+    if (!res.ok) return null;
+    return res.json();
+  },
+
   async getImageLimits(): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/config/image-limits`, {
       headers: authHeaders(),
