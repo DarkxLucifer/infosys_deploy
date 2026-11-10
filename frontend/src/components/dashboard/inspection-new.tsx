@@ -731,10 +731,9 @@ export function InspectionNewPage() {
   const handleFileInput = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const files = Array.from(e.target.files ?? []);
-      for (const file of files) {
-        await uploadPhoto(file, "upload");
-      }
       e.target.value = "";
+      if (files.length === 0) return;
+      await Promise.all(files.map((file) => uploadPhoto(file, "upload")));
     },
     [uploadPhoto]
   );
@@ -798,6 +797,9 @@ export function InspectionNewPage() {
   }, []);
 
   const handleConfirmWarning = useCallback(async (id: string) => {
+    setPhotos((prev) =>
+      prev.map((p) => (p.id === id ? { ...p, processing_status: "running" } : p))
+    );
     try {
       const res = await api.confirmImageWarning(id);
       const token = getAuthToken();
@@ -854,6 +856,9 @@ export function InspectionNewPage() {
       );
       toast.success("Warning confirmed. Preprocessing complete.");
     } catch (err: any) {
+      setPhotos((prev) =>
+        prev.map((p) => (p.id === id ? { ...p, processing_status: "failed" } : p))
+      );
       toast.error(`Failed to confirm warning: ${err.message}`);
     }
   }, []);

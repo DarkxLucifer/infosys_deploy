@@ -721,7 +721,7 @@ async def assess_image_endpoint(
 
 @router.post("/images/upload", status_code=status.HTTP_201_CREATED)
 @router.post("/inspections/{inspection_id}/images", status_code=status.HTTP_201_CREATED)
-async def upload_image_endpoint(
+def upload_image_endpoint(
     inspection_id: Optional[str] = None,
     file: UploadFile = File(...),
     source: str = Form("upload"),
@@ -757,7 +757,8 @@ async def upload_image_endpoint(
 
     require_upload_permission(current_user, inspection)
 
-    file_bytes = await file.read()
+    file.file.seek(0)
+    file_bytes = file.file.read()
     filename = file.filename or "uploaded_photo.jpg"
 
     if ".." in filename or "/" in filename or "\\" in filename:
@@ -870,80 +871,79 @@ async def upload_image_endpoint(
     )
     db.add(quality_report_row)
 
-    # Step 2: Automatic Preprocessing (Profile: general_v1) - for accepted and warning images
+    # Step 2: Automatic Preprocessing (Profile: general_v1)
     is_blur_warn = any(c["key"] == "blur" and c["status"] == "warn" for c in report["checks"])
     proc_path = None
-    if quality_status in ("accepted", "warning") and overall != "rejected":
-        try:
-            img_record.processing_status = "running"
-            db.flush()
+    try:
+        img_record.processing_status = "running"
+        db.flush()
 
-            proc_bytes, thumb_bytes, run_record = preprocess_image(
-                file_bytes,
-                profile_name="general_v1",
-                blur_warning=is_blur_warn
-            )
+        proc_bytes, thumb_bytes, run_record = preprocess_image(
+            file_bytes,
+            profile_name="general_v1",
+            blur_warning=is_blur_warn
+        )
 
-            proc_filename = f"proc_{img_record.id}_general_v1_{run_record['processed_sha256'][:10]}.png"
-            proc_path = os.path.join(PROCESSED_DIR, proc_filename)
-            with open(proc_path, "wb") as f:
-                f.write(proc_bytes)
+        proc_filename = f"proc_{img_record.id}_general_v1_{run_record['processed_sha256'][:10]}.png"
+        proc_path = os.path.join(PROCESSED_DIR, proc_filename)
+        with open(proc_path, "wb") as f:
+            f.write(proc_bytes)
 
-            thumb_filename = f"thumb_{img_record.id}_{sha_hash[:10]}.jpg"
-            thumb_path = os.path.join(THUMBNAIL_DIR, thumb_filename)
-            with open(thumb_path, "wb") as f:
-                f.write(thumb_bytes)
+        thumb_filename = f"thumb_{img_record.id}_{sha_hash[:10]}.jpg"
+        thumb_path = os.path.join(THUMBNAIL_DIR, thumb_filename)
+        with open(thumb_path, "wb") as f:
+            f.write(thumb_bytes)
 
-            img_record.processed_path = proc_path
-            img_record.thumbnail_path = thumb_path
-            img_record.processing_status = "complete"
+        img_record.processed_path = proc_path
+        img_record.thumbnail_path = thumb_path
+        img_record.processing_status = "complete"
 
-            # Record ImageProcessingRun
-            proc_run = ImageProcessingRun(
-                image_id=img_record.id,
-                profile="general_v1",
-                profile_version=run_record["profile_version"],
-                status="complete",
-                steps=run_record["steps"],
-                metrics_before=run_record["metrics_before"],
-                metrics_after=run_record["metrics_after"],
-                transform=run_record["transform"],
-                tiles=run_record["tiles"],
-                processed_path=proc_path,
-                thumbnail_path=thumb_path,
-                processed_sha256=run_record["processed_sha256"],
-                width=run_record["width"],
-                height=run_record["height"],
-                opencv_version=OPENCV_VERSION,
-                started_at=datetime.now(timezone.utc),
-                finished_at=datetime.now(timezone.utc),
-                retry_count=0
-            )
-            db.add(proc_run)
+        # Record ImageProcessingRun
+        proc_run = ImageProcessingRun(
+            image_id=img_record.id,
+            profile="general_v1",
+            profile_version=run_record["profile_version"],
+            status="complete",
+            steps=run_record["steps"],
+            metrics_before=run_record["metrics_before"],
+            metrics_after=run_record["metrics_after"],
+            transform=run_record["transform"],
+            tiles=run_record["tiles"],
+            processed_path=proc_path,
+            thumbnail_path=thumb_path,
+            processed_sha256=run_record["processed_sha256"],
+            width=run_record["width"],
+            height=run_record["height"],
+            opencv_version=OPENCV_VERSION,
+            started_at=datetime.now(timezone.utc),
+            finished_at=datetime.now(timezone.utc),
+            retry_count=0
+        )
+        db.add(proc_run)
 
-            # Also store in legacy ProcessedImage table for backwards compatibility
-            legacy_proc = ProcessedImage(
-                image_id=img_record.id,
-                profile_name="general_v1",
-                steps_applied=run_record["steps"],
-                output_path=proc_path,
-                checksum=run_record["processed_sha256"]
-            )
-            db.add(legacy_proc)
-        except Exception as exc:
-            logger.warning("Preprocessing failed for %s: %s", img_record.id, exc)
-            img_record.processing_status = "failed"
-            failed_run = ImageProcessingRun(
-                image_id=img_record.id,
-                profile="general_v1",
-                profile_version="1.0.0",
-                status="failed",
-                steps=[],
-                processed_path="",
-                processed_sha256="",
-                error_code=str(exc)
-            )
-            db.add(failed_run)
+        # Also store in legacy ProcessedImage table for backwards compatibility
+        legacy_proc = ProcessedImage(
+            image_id=img_record.id,
+            profile_name="general_v1",
+            steps_applied=run_record["steps"],
+            output_path=proc_path,
+            checksum=run_record["processed_sha256"]
+        )
+        db.add(legacy_proc)
+    except Exception as exc:
+        logger.warning("Preprocessing failed for %s: %s", img_record.id, exc)
+        img_record.processing_status = "failed"
+        failed_run = ImageProcessingRun(
+            image_id=img_record.id,
+            profile="general_v1",
+            profile_version="1.0.0",
+            status="failed",
+            steps=[],
+            processed_path="",
+            processed_sha256="",
+            error_code=str(exc)
+        )
+        db.add(failed_run)
 
     # Step 3: Run Multi-Stage AI classification & defect detection on uploaded image
     classify_target = proc_path if (proc_path and os.path.exists(proc_path)) else orig_path
@@ -2378,8 +2378,9 @@ def confirm_warning_endpoint(
                 c["reason"] = f"{c.get('reason', '')} (Confirmed by {current_user.name or current_user.email})".strip()
     image.quality_report = qr
 
-    # Start preprocessing after confirmation
-    if os.path.exists(image.original_path):
+    # Start preprocessing after confirmation if not already processed
+    need_preprocessing = not (image.processed_path and os.path.exists(image.processed_path))
+    if need_preprocessing and os.path.exists(image.original_path):
         try:
             with open(image.original_path, "rb") as f:
                 orig_bytes = f.read()
@@ -2426,6 +2427,8 @@ def confirm_warning_endpoint(
             db.add(proc_run)
         except Exception:
             image.processing_status = "failed"
+    elif image.processed_path and os.path.exists(image.processed_path):
+        image.processing_status = "complete"
 
     audit = AuditLog(
         user_id=current_user.id,
@@ -2437,9 +2440,11 @@ def confirm_warning_endpoint(
     )
     db.add(audit)
 
-    # Auto-run AI classification on confirmed image
-    target_to_classify = image.processed_path if (image.processed_path and os.path.exists(image.processed_path)) else image.original_path
-    run_and_persist_ai_classification(image, target_to_classify, db, current_user.id, image.inspection_id)
+    # Auto-run AI classification on confirmed image if not already classified
+    existing_ai = qr.get("ai_classification") if isinstance(qr, dict) else None
+    if not existing_ai or not existing_ai.get("success"):
+        target_to_classify = image.processed_path if (image.processed_path and os.path.exists(image.processed_path)) else image.original_path
+        run_and_persist_ai_classification(image, target_to_classify, db, current_user.id, image.inspection_id)
 
     db.commit()
     db.refresh(image)

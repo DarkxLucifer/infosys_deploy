@@ -3057,11 +3057,21 @@ export function ImageQualityCard({
             <Button
               type="button"
               size="sm"
+              disabled={photo.processing_status === "running"}
               onClick={() => onConfirmWarning?.(photo.id)}
               className="w-full h-7 text-[11px] bg-primary hover:bg-primary/90 text-primary-foreground font-semibold gap-1 mt-1"
             >
-              <AlertCircle className="size-3" />
-              <span>Continue anyway</span>
+              {photo.processing_status === "running" ? (
+                <>
+                  <RefreshCw className="size-3 animate-spin" />
+                  <span>Processing…</span>
+                </>
+              ) : (
+                <>
+                  <AlertCircle className="size-3" />
+                  <span>Continue anyway</span>
+                </>
+              )}
             </Button>
           )}
         </div>
