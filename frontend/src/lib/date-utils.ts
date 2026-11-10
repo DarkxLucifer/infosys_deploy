@@ -22,13 +22,24 @@ export function parseDateInput(dateInput: string | number | Date | null | undefi
     return new Date(`${str}T12:00:00Z`);
   }
 
-  // Replace whitespace separator with T
-  str = str.replace(" ", "T");
+  // If already contains IST or human-readable format
+  if (str.includes("IST") || str.includes("UTC")) {
+    const cleaned = str.replace(/\s*IST\s*$/i, "").replace(/\s*UTC\s*$/i, "");
+    const d = new Date(cleaned);
+    if (!isNaN(d.getTime())) return d;
+  }
+
+  // Replace whitespace separator with T for standard SQL timestamps "YYYY-MM-DD HH:MM:SS"
+  if (/^\d{4}-\d{2}-\d{2}\s/.test(str)) {
+    str = str.replace(" ", "T");
+  }
 
   // If there is no timezone offset at the end (e.g. no Z and no +HH:MM / -HH:MM),
   // treat the database naive timestamp as UTC (standard for backend SQLite / UTC storage)
-  if (!str.endsWith("Z") && !/[+-]\d{2}(?::?\d{2})?$/.test(str)) {
-    str += "Z";
+  if (/^\d{4}-\d{2}-\d{2}T/.test(str)) {
+    if (!str.endsWith("Z") && !/[+-]\d{2}(?::?\d{2})?$/.test(str)) {
+      str += "Z";
+    }
   }
 
   const parsed = new Date(str);

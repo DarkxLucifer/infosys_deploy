@@ -11,6 +11,15 @@ from app.database import get_db
 from app.models.all_models import Asset, Inspection, AuditLog, User, InspectionImage, Detection, WorkOrder, Notification
 from app.security.jwt import get_current_user
 
+def to_utc_iso(dt: Optional[datetime]) -> Optional[str]:
+    if not dt:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
+    return dt.isoformat()
+
 
 router = APIRouter(prefix="/assets", tags=["Assets"])
 
@@ -183,7 +192,7 @@ def create_asset(
         "inspectionFrequency": asset.inspection_frequency,
         "importance": asset.importance,
         "isActive": asset.is_active,
-        "createdAt": asset.created_at.isoformat() if asset.created_at else None
+        "createdAt": to_utc_iso(asset.created_at)
     }
 
 @router.get("")
@@ -282,12 +291,12 @@ def list_assets(
             "assignedInspectorId": insp_id,
             "assignedInspectorName": insp_user.name if insp_user else None,
             "assignedInspectorEmail": insp_user.email if insp_user else None,
-            "createdAt": a.created_at.isoformat() if a.created_at else None,
+            "createdAt": to_utc_iso(a.created_at),
             "inspectionsCount": len(inspections),
             "findingsCount": findings_count,
             "topSeverity": top_sev,
             "condition": condition,
-            "lastInspectionDate": latest_insp.inspection_date.isoformat() if (latest_insp and latest_insp.inspection_date) else None,
+            "lastInspectionDate": to_utc_iso(latest_insp.inspection_date) if latest_insp else None,
             "latestInspectionId": latest_insp.id if latest_insp else None,
             "latestInspectionStatus": latest_insp.status if latest_insp else None
         })
@@ -388,7 +397,7 @@ def get_assets_map_summary(
                 "id": latest_insp.id,
                 "status": latest_insp.status,
                 "reviewStatus": review_status,
-                "inspectionDate": latest_insp.inspection_date.isoformat() if latest_insp.inspection_date else None,
+                "inspectionDate": to_utc_iso(latest_insp.inspection_date) if latest_insp else None,
                 "inspectorName": inspector_user.name if inspector_user else (a.assigned_inspector.name if a.assigned_inspector else "Field Inspector"),
                 "inspectorEmail": inspector_user.email if inspector_user else (a.assigned_inspector.email if a.assigned_inspector else None)
             }
@@ -473,8 +482,8 @@ def get_asset_detail(
             "title": f"{asset.name} - {(i.method or 'walkdown').capitalize()} Survey",
             "status": i.status,
             "method": i.method or "walkdown",
-            "inspectionDate": i.inspection_date.isoformat(),
-            "dueDate": i.due_date.isoformat(),
+            "inspectionDate": to_utc_iso(i.inspection_date),
+            "dueDate": to_utc_iso(i.due_date),
             "inspectorId": i.inspector_id,
             "inspectorName": inspector.name if inspector else "Field Inspector",
             "imageCount": img_count,
@@ -497,8 +506,8 @@ def get_asset_detail(
             "priority": w.priority,
             "status": w.status,
             "team": w.team,
-            "dueDate": w.due_date.isoformat() if w.due_date else None,
-            "createdAt": w.created_at.isoformat() if w.created_at else None
+            "dueDate": to_utc_iso(w.due_date),
+            "createdAt": to_utc_iso(w.created_at)
         }
         for w in wos
     ]
@@ -523,7 +532,7 @@ def get_asset_detail(
         "assignedInspectorName": insp_user.name if insp_user else None,
         "assignedInspectorEmail": insp_user.email if insp_user else None,
         "notes": asset.notes,
-        "createdAt": asset.created_at.isoformat() if asset.created_at else None,
+        "createdAt": to_utc_iso(asset.created_at),
         "inspections": formatted_inspections,
         "maintenanceHistory": formatted_wos
     }
@@ -737,7 +746,7 @@ def assign_asset_to_inspector(
         "assetId": asset.id,
         "inspectorId": inspector.id,
         "inspectorName": inspector.name,
-        "dueDate": inspection.due_date.isoformat(),
+        "dueDate": to_utc_iso(inspection.due_date),
         "inspectionStatus": inspection.status
     }
 

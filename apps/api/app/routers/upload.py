@@ -3,6 +3,7 @@ import io
 import time
 import base64
 import logging
+import uuid
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, Request, status, Response, Body
@@ -15,6 +16,19 @@ from sqlalchemy import desc
 from PIL import Image
 import cv2
 import numpy as np
+import threading
+
+# GPU Semaphore to prevent multiple concurrent threads thrashing 4GB VRAM
+gpu_inference_lock = threading.Semaphore(1)
+
+def to_utc_iso(dt: Optional[datetime]) -> Optional[str]:
+    if not dt:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
+    return dt.isoformat()
 
 from app.config import settings
 from app.database import get_db
@@ -835,7 +849,9 @@ def upload_image_endpoint(
     if allow_warning and overall == "warning":
         quality_status = "accepted"
 
+    new_image_id = str(uuid.uuid4())
     img_record = InspectionImage(
+        id=new_image_id,
         organization_id=current_user.organization_id,
         inspection_id=inspection.id if inspection else "standalone",
         uploader_id=current_user.id,
@@ -860,24 +876,35 @@ def upload_image_endpoint(
         quality_report=report
     )
     db.add(img_record)
-    db.flush()
 
     # Record ImageQualityReport in separate table
     quality_report_row = ImageQualityReport(
-        image_id=img_record.id,
+        image_id=new_image_id,
         overall=overall,
         checks=report["checks"],
         config_snapshot=report["config_snapshot"]
     )
     db.add(quality_report_row)
 
+    if inspection and inspection.status in ("draft", "assigned", "in_progress"):
+        inspection.status = "images_uploaded"
+
+    audit = AuditLog(
+        user_id=current_user.id,
+        actor_email=current_user.email,
+        action="IMAGE_UPLOAD",
+        entity_type="inspection_image",
+        entity_id=img_record.id,
+        details={"filename": filename, "sha256": sha_hash, "quality": overall}
+    )
+    db.add(audit)
+    db.commit()
+    db.refresh(img_record)
+
     # Step 2: Automatic Preprocessing (Profile: general_v1)
     is_blur_warn = any(c["key"] == "blur" and c["status"] == "warn" for c in report["checks"])
     proc_path = None
     try:
-        img_record.processing_status = "running"
-        db.flush()
-
         proc_bytes, thumb_bytes, run_record = preprocess_image(
             file_bytes,
             profile_name="general_v1",
@@ -930,6 +957,7 @@ def upload_image_endpoint(
             checksum=run_record["processed_sha256"]
         )
         db.add(legacy_proc)
+        db.commit()
     except Exception as exc:
         logger.warning("Preprocessing failed for %s: %s", img_record.id, exc)
         img_record.processing_status = "failed"
@@ -944,16 +972,19 @@ def upload_image_endpoint(
             error_code=str(exc)
         )
         db.add(failed_run)
+        db.commit()
 
-    # Step 3: Run Multi-Stage AI classification & defect detection on uploaded image
+    # Step 3: Run Multi-Stage AI classification with GPU semaphore
     classify_target = proc_path if (proc_path and os.path.exists(proc_path)) else orig_path
-    pred = run_and_persist_ai_classification(
-        image=img_record,
-        target_path=classify_target,
-        db=db,
-        user_id=current_user.id,
-        inspection_id=inspection.id if inspection else None
-    )
+    with gpu_inference_lock:
+        pred = run_and_persist_ai_classification(
+            image=img_record,
+            target_path=classify_target,
+            db=db,
+            user_id=current_user.id,
+            inspection_id=inspection.id if inspection else None
+        )
+        db.commit()
     if pred:
         report["ai_classification"] = pred
         if pred.get("yolo_detection"):
@@ -964,21 +995,6 @@ def upload_image_endpoint(
             report["crack_geometry"] = pred["crack_geometry"]
         if pred.get("damage_assessment"):
             report["damage_assessment"] = pred["damage_assessment"]
-
-    if inspection and inspection.status in ("draft", "assigned", "in_progress"):
-        inspection.status = "images_uploaded"
-
-    audit = AuditLog(
-        user_id=current_user.id,
-        actor_email=current_user.email,
-        action="IMAGE_UPLOAD",
-        entity_type="inspection_image",
-        entity_id=img_record.id,
-        details={"filename": filename, "sha256": sha_hash, "quality": overall}
-    )
-    db.add(audit)
-    db.commit()
-    db.refresh(img_record)
 
     ai_clf = report.get("ai_classification") if isinstance(report, dict) else None
     rfdetr_det = (report.get("rfdetr_detection") if isinstance(report, dict) else None) or (ai_clf.get("rfdetr_detection") if isinstance(ai_clf, dict) else None)
@@ -1089,7 +1105,7 @@ def upload_image_endpoint(
         "annotatedUrl": default_preview,
         "unetUrl": (f"/api/v1/images/{img_record.id}/file?variant=unet") if (is_crack_defect and has_unet) else None,
         "unetMaskUrl": (f"/api/v1/images/{img_record.id}/file?variant=mask") if (is_crack_defect and has_unet) else None,
-        "createdAt": img_record.created_at.isoformat()
+        "createdAt": to_utc_iso(img_record.created_at)
     }
 
 
@@ -1190,7 +1206,7 @@ def list_inspection_images(
             "annotatedUrl": (f"/api/v1/images/{img.id}/file?variant=unet&v={img.sha256[:10] if img.sha256 else ''}") if item_is_crack else f"/api/v1/images/{img.id}/file?variant=processed&v={img.sha256[:10] if img.sha256 else ''}",
             "unetUrl": (f"/api/v1/images/{img.id}/file?variant=unet&v={img.sha256[:10] if img.sha256 else ''}") if item_is_crack else None,
             "unetMaskUrl": (f"/api/v1/images/{img.id}/file?variant=mask&v={img.sha256[:10] if img.sha256 else ''}") if item_is_crack else None,
-            "createdAt": img.created_at.isoformat()
+            "createdAt": to_utc_iso(img.created_at)
         }
 
         # Role isolation: Managers & Maintenance never see quality reports or intermediate processed copies
@@ -1538,14 +1554,14 @@ def get_image_details(
         "quality_status": image.quality_status or "accepted",
         "processing_status": image.processing_status or "complete",
         "warningConfirmed": bool(image.warning_confirmed_by),
-        "warningConfirmedAt": image.warning_confirmed_at.isoformat() if image.warning_confirmed_at else None,
+        "warningConfirmedAt": to_utc_iso(image.warning_confirmed_at),
         "calibration": image.calibration,
         "sha256": image.sha256,
         "phash": image.phash,
         "exif": {
             "lat": image.exif_lat,
             "lng": image.exif_lng,
-            "captured_at": image.exif_captured_at.isoformat() if image.exif_captured_at else None
+            "captured_at": to_utc_iso(image.exif_captured_at)
         },
         "hasRfdetr": has_rfdetr if is_crack_defect else False,
         "has_rfdetr": has_rfdetr if is_crack_defect else False,
@@ -1583,7 +1599,7 @@ def get_image_details(
         "geometryUrl": (f"/api/v1/images/{image.id}/file?variant=geometry&v={v_tag}") if (is_crack_defect and has_geo) else None,
         "damageAssessment": (image.quality_report.get("damage_assessment") if (image.quality_report and isinstance(image.quality_report, dict)) else None) or (crack_geo.get("summary", {}).get("damage_assessment") if (crack_geo and isinstance(crack_geo, dict)) else None),
         "damage_assessment": (image.quality_report.get("damage_assessment") if (image.quality_report and isinstance(image.quality_report, dict)) else None) or (crack_geo.get("summary", {}).get("damage_assessment") if (crack_geo and isinstance(crack_geo, dict)) else None),
-        "createdAt": image.created_at.isoformat()
+        "createdAt": to_utc_iso(image.created_at)
     }
 
     if not is_mgmt:
@@ -1607,7 +1623,7 @@ def get_image_details(
                 "modelId": ai_det.model_id,
                 "notes": ai_det.notes,
                 "geometry": ai_det.geometry,
-                "createdAt": ai_det.created_at.isoformat()
+                "createdAt": to_utc_iso(ai_det.created_at)
             }
             if "aiClassification" not in response and ai_det.geometry and isinstance(ai_det.geometry, dict) and "probabilities" in ai_det.geometry:
                 probs = ai_det.geometry.get("probabilities", {})
@@ -2369,7 +2385,7 @@ def confirm_warning_endpoint(
     qr["overall"] = "accepted"
     qr["warning_confirmed"] = True
     qr["warning_confirmed_by"] = current_user.id
-    qr["warning_confirmed_at"] = image.warning_confirmed_at.isoformat()
+    qr["warning_confirmed_at"] = to_utc_iso(image.warning_confirmed_at)
     if "checks" in qr and isinstance(qr["checks"], list):
         for c in qr["checks"]:
             if isinstance(c, dict) and c.get("status") == "warn":
@@ -2444,9 +2460,12 @@ def confirm_warning_endpoint(
     existing_ai = qr.get("ai_classification") if isinstance(qr, dict) else None
     if not existing_ai or not existing_ai.get("success"):
         target_to_classify = image.processed_path if (image.processed_path and os.path.exists(image.processed_path)) else image.original_path
-        run_and_persist_ai_classification(image, target_to_classify, db, current_user.id, image.inspection_id)
+        with gpu_inference_lock:
+            run_and_persist_ai_classification(image, target_to_classify, db, current_user.id, image.inspection_id)
+        db.commit()
+    else:
+        db.commit()
 
-    db.commit()
     db.refresh(image)
 
     rfdetr_file = find_stored_file("rfdetr", f"{image.id}.jpg") or os.path.join(RFDETR_DIR, f"{image.id}.jpg")
@@ -2473,13 +2492,14 @@ def confirm_warning_endpoint(
                 from app.services.unet_segmentor import get_unet_segmentor
                 segmentor = get_unet_segmentor()
                 mm_scale = image.calibration.get("mm_per_pixel") if (image.calibration and isinstance(image.calibration, dict)) else None
-                segmentor.segment(
-                    image_input=target_to_classify,
-                    threshold=0.5,
-                    save_overlay_path=unet_file,
-                    save_mask_path=unet_mask_file,
-                    mm_per_pixel=mm_scale
-                )
+                with gpu_inference_lock:
+                    segmentor.segment(
+                        image_input=target_to_classify,
+                        threshold=0.5,
+                        save_overlay_path=unet_file,
+                        save_mask_path=unet_mask_file,
+                        mm_per_pixel=mm_scale
+                    )
                 has_unet = os.path.exists(unet_file)
             except Exception as unet_e:
                 logger.warning("UNet on-demand error in confirm_warning: %s", unet_e)
@@ -2525,7 +2545,7 @@ def confirm_warning_endpoint(
         "quality_status": image.quality_status,
         "processing_status": image.processing_status,
         "warningConfirmed": True,
-        "warningConfirmedAt": image.warning_confirmed_at.isoformat() if image.warning_confirmed_at else None,
+        "warningConfirmedAt": to_utc_iso(image.warning_confirmed_at),
         "aiClassification": ai_clf,
         "ai_classification": ai_clf,
         "hasRfdetr": has_rfdetr,
@@ -2612,7 +2632,7 @@ def confirm_sound_surface_endpoint(
         "verified": True,
         "verified_by": current_user.id,
         "reviewer_name": verified_by_name,
-        "verified_at": verified_at.isoformat(),
+        "verified_at": to_utc_iso(verified_at),
         "notes": f"Sound concrete surface confirmed by {verified_by_name} (no crack defects)."
     }
     image.quality_report = qr
@@ -2656,7 +2676,7 @@ def confirm_sound_surface_endpoint(
         "imageId": image.id,
         "inspectionId": image.inspection_id,
         "verifiedBy": verified_by_name,
-        "verifiedAt": verified_at.isoformat(),
+        "verifiedAt": to_utc_iso(verified_at),
         "soundSurfaceVerified": qr["sound_surface_verified"]
     }
 
@@ -3058,7 +3078,7 @@ def calibrate_scale_endpoint(
         "reference_p2": req.reference_p2,
         "width_metric": chosen_metric,
         "user_id": current_user.id,
-        "timestamp": datetime.now(timezone.utc).isoformat()
+        "timestamp": to_utc_iso(datetime.now(timezone.utc))
     }
     image.calibration = calib_record
     flag_modified(image, "calibration")
@@ -3323,7 +3343,7 @@ def review_image_endpoint(
         "manual_classification": req.manual_classification,
         "override_reason": req.override_reason,
         "notes": req.notes,
-        "timestamp": datetime.now(timezone.utc).isoformat()
+        "timestamp": to_utc_iso(datetime.now(timezone.utc))
     }
     qr["manual_review"] = manual_entry
     image.quality_report = qr
@@ -3949,5 +3969,5 @@ async def import_dataset_sample_endpoint(
         "previewUrl": f"/api/v1/images/{img_record.id}/file?variant=processed",
         "originalUrl": f"/api/v1/images/{img_record.id}/file?variant=original",
         "thumbnailUrl": f"/api/v1/images/{img_record.id}/file?variant=thumbnail",
-        "createdAt": img_record.created_at.isoformat()
+        "createdAt": to_utc_iso(img_record.created_at)
     }

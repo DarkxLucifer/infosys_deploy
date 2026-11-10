@@ -13,6 +13,15 @@ from app.services.audit import log_audit_event
 
 router = APIRouter(prefix="/me", tags=["User Profile & Sessions"])
 
+def to_utc_iso(dt: Optional[datetime]) -> Optional[str]:
+    if not dt:
+        return ""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
+    return dt.isoformat()
+
 class UpdateProfileRequest(BaseModel):
     name: Optional[str] = None
     role: Optional[str] = None
@@ -33,7 +42,7 @@ def get_profile(user: User = Depends(get_current_user)):
         "organizationId": user.organization_id,
         "status": user.status,
         "emailVerified": user.email_verified_at is not None,
-        "createdAt": user.created_at.isoformat() if user.created_at else "",
+        "createdAt": to_utc_iso(user.created_at),
     }
 
 @router.patch("")
@@ -129,9 +138,9 @@ def get_active_sessions(
             "id": s.id,
             "ipAddress": s.ip_address or "Unknown IP",
             "userAgent": s.user_agent or "Unknown Client",
-            "createdAt": s.created_at.isoformat() if s.created_at else "",
-            "lastUsedAt": s.last_used_at.isoformat() if s.last_used_at else "",
-            "expiresAt": s.expires_at.isoformat() if s.expires_at else "",
+            "createdAt": to_utc_iso(s.created_at),
+            "lastUsedAt": to_utc_iso(s.last_used_at),
+            "expiresAt": to_utc_iso(s.expires_at),
         }
         for s in sessions
     ]

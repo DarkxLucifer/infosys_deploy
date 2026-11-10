@@ -285,10 +285,10 @@ def get_work_order(
         "assigneeId": wo.assignee_id,
         "assigneeName": wo.assignee.name if wo.assignee else None,
         "team": wo.team,
-        "dueDate": wo.due_date.isoformat() if wo.due_date else None,
+        "dueDate": to_utc_iso(wo.due_date),
         "repairWindow": wo.repair_window,
         "closedNote": wo.closed_note,
-        "createdAt": wo.created_at.isoformat(),
+        "createdAt": to_utc_iso(wo.created_at),
         "events": [
             {
                 "id": e.id,
@@ -296,7 +296,7 @@ def get_work_order(
                 "toStatus": e.to_status,
                 "actorName": e.actor.name if e.actor else "System",
                 "note": e.note,
-                "createdAt": e.created_at.isoformat()
+                "createdAt": to_utc_iso(e.created_at)
             }
             for e in events
         ]

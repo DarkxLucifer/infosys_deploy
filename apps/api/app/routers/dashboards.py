@@ -21,6 +21,8 @@ def to_utc_iso(dt: Optional[datetime]) -> Optional[str]:
         return None
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
     return dt.isoformat()
 
 @router.get("/pipeline/counts")
@@ -260,7 +262,7 @@ def get_recent_ai_classifications(db: Session, org_id: str, limit: int = 8) -> L
                 "confidence": round(float(prob), 4),
                 "threshold": round(float(pred.get("threshold", 0.80)), 4),
                 "modelName": pred.get("model_name", "InfraScan Model v1.0 (ResNet18)"),
-                "createdAt": img.created_at.isoformat() if img.created_at else datetime.now(timezone.utc).isoformat(),
+                "createdAt": to_utc_iso(img.created_at or datetime.now(timezone.utc)),
                 "thumbnailUrl": f"/api/v1/inspections/{img.inspection_id}/images/{img.id}/file?variant=thumbnail",
                 "previewUrl": f"/api/v1/inspections/{img.inspection_id}/images/{img.id}/file?variant=unet" if has_crack else f"/api/v1/inspections/{img.inspection_id}/images/{img.id}/file?variant=processed",
                 "unetUrl": f"/api/v1/inspections/{img.inspection_id}/images/{img.id}/file?variant=unet" if has_crack else None,
@@ -434,13 +436,13 @@ def get_role_dashboard_metrics(
                     "id": i.id,
                     "assetId": i.asset_id,
                     "status": i.status,
-                    "date": i.inspection_date.isoformat()
+                    "date": to_utc_iso(i.inspection_date)
                 }
                 for i in raw_inspections[:5]
             ],
             "recentAiClassifications": get_recent_ai_classifications(db, org_id, limit=8),
             "isLive": True,
-            "timestamp": now.isoformat()
+            "timestamp": to_utc_iso(now)
         }
 
     elif role in ("civil-engineer", "engineer"):
@@ -559,7 +561,7 @@ def get_role_dashboard_metrics(
             "aiPredictions": get_recent_ai_classifications(db, org_id, limit=8),
             "recentAiClassifications": get_recent_ai_classifications(db, org_id, limit=8),
             "isLive": True,
-            "timestamp": now.isoformat()
+            "timestamp": to_utc_iso(now)
         }
 
     elif role in ("maintenance", "maintenance-engineer"):
@@ -701,7 +703,7 @@ def get_role_dashboard_metrics(
                 for wo in all_work_orders[:5]
             ],
             "isLive": True,
-            "timestamp": now.isoformat()
+            "timestamp": to_utc_iso(now)
         }
 
     elif role == "manager":
@@ -867,7 +869,7 @@ def get_role_dashboard_metrics(
             },
             "regionsSummary": regions_summary,
             "isLive": True,
-            "timestamp": now.isoformat()
+            "timestamp": to_utc_iso(now)
         }
 
     elif role == "admin":
@@ -930,7 +932,7 @@ def get_role_dashboard_metrics(
                     "actor": getattr(l, "actor_email", None) or "System",
                     "action": getattr(l, "action", "ACTION"),
                     "entity": f"{getattr(l, 'entity_type', '')}:{getattr(l, 'entity_id', '')}".strip(":") or "system",
-                    "timestamp": l.timestamp.isoformat() if getattr(l, "timestamp", None) else now.isoformat(),
+                    "timestamp": to_utc_iso(l.timestamp if getattr(l, "timestamp", None) else now),
                     "ip": getattr(l, "ip_address", None) or "127.0.0.1",
                     "user_agent": "Browser",
                     "details": str(l.details) if getattr(l, "details", None) else ""
@@ -943,7 +945,7 @@ def get_role_dashboard_metrics(
                 "inferenceTimePerImageSec": 1.2
             },
             "isLive": True,
-            "timestamp": now.isoformat()
+            "timestamp": to_utc_iso(now)
         }
 
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown role: {role}")
@@ -1094,7 +1096,7 @@ def get_review_queue(
             "status": status_label,
             "claimedBy": insp.claimed_by,
             "claimedByName": insp.claimant.name if insp.claimant else None,
-            "submittedAt": insp.submitted_at.isoformat() if insp.submitted_at else insp.created_at.isoformat()
+            "submittedAt": to_utc_iso(insp.submitted_at or insp.created_at)
         })
 
     return {

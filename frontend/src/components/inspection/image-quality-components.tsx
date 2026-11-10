@@ -1459,12 +1459,15 @@ export function ImageDetailsDrawer({
                   className="w-full h-full object-cover"
                   onError={(e) => {
                     const target = e.currentTarget;
-                    if (photo.id && !photo.id.startsWith("client-")) {
+                    if (photo.id && !photo.id.startsWith("client-") && !target.dataset.retried) {
+                      target.dataset.retried = "true";
                       const retryUnet = getAuthenticatedUrl(`/api/v1/images/${photo.id}/file?variant=unet&retry=1`);
                       if (retryUnet && target.src !== retryUnet) {
                         target.src = retryUnet;
+                        return;
                       }
                     }
+                    target.onerror = null;
                   }}
                 />
                 {isCrackDetected && (
@@ -2920,12 +2923,15 @@ export function ImageQualityCard({
             onError={(e) => {
               // Never fallback to original raw photo on error!
               const target = e.currentTarget;
-              if (isRealServerId && hasCrackDefect) {
+              if (isRealServerId && hasCrackDefect && !target.dataset.retried) {
+                target.dataset.retried = "true";
                 const retryUnet = getAuthenticatedUrl(`/api/v1/images/${photo.id}/file?variant=unet&retry=1`);
                 if (retryUnet && target.src !== retryUnet) {
                   target.src = retryUnet;
+                  return;
                 }
               }
+              target.onerror = null;
             }}
           />
 

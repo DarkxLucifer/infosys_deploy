@@ -19,6 +19,15 @@ from app.services.audit import log_audit_event
 router = APIRouter(prefix="/admin", tags=["Administrator Management"])
 admin_guard = require_role(["admin"])
 
+def to_utc_iso(dt: Optional[datetime]) -> Optional[str]:
+    if not dt:
+        return ""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
+    return dt.isoformat()
+
 class ApproveUserRequest(BaseModel):
     role: Optional[str] = None
 
@@ -48,7 +57,7 @@ def get_pending_users(
             "requestedRole": u.requested_role or u.role,
             "organizationName": u.organization.name if u.organization else "Unassigned",
             "emailVerified": u.email_verified_at is not None,
-            "createdAt": u.created_at.isoformat() if u.created_at else "",
+            "createdAt": to_utc_iso(u.created_at),
             "signupMethod": "google" if u.sso_subject else "password",
         }
         for u in users
@@ -221,7 +230,7 @@ def get_audit_log(
             "entityId": e.entity_id,
             "details": e.details,
             "ipAddress": e.ip_address,
-            "timestamp": e.timestamp.isoformat() if e.timestamp else "",
+            "timestamp": to_utc_iso(e.timestamp),
         }
         for e in events
     ]
