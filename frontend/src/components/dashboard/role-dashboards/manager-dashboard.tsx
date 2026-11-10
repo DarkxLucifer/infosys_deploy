@@ -21,6 +21,7 @@ export function InfrastructureManagerDashboard() {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
   const [activeLayer, setActiveLayer] = useState<"all" | "severe">("all");
+  const [mapReady, setMapReady] = useState(false);
 
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
@@ -46,9 +47,18 @@ export function InfrastructureManagerDashboard() {
     loadData();
   }, [selectedRange]);
 
-  // Initialize and update Leaflet map
+  // Initialize and update Leaflet map once loading completes
   useEffect(() => {
-    if (!mapContainerRef.current || mapInstanceRef.current) return;
+    if (loading || !mapContainerRef.current) return;
+
+    if (mapInstanceRef.current) {
+      mapInstanceRef.current.remove();
+      mapInstanceRef.current = null;
+    }
+
+    if ((mapContainerRef.current as any)._leaflet_id) {
+      (mapContainerRef.current as any)._leaflet_id = null;
+    }
 
     const map = L.map(mapContainerRef.current, {
       zoomControl: true,
@@ -61,17 +71,24 @@ export function InfrastructureManagerDashboard() {
     }).addTo(map);
 
     mapInstanceRef.current = map;
+    setMapReady(true);
+
+    const timer = setTimeout(() => {
+      map.invalidateSize();
+    }, 200);
 
     return () => {
+      clearTimeout(timer);
+      setMapReady(false);
       map.remove();
       mapInstanceRef.current = null;
     };
-  }, []);
+  }, [loading]);
 
-  // Place markers on map
+  // Place markers on map and fit bounds to visible assets
   useEffect(() => {
     const map = mapInstanceRef.current;
-    if (!map) return;
+    if (!map || !mapReady) return;
 
     map.eachLayer((layer) => {
       if (layer instanceof L.CircleMarker) {
@@ -79,14 +96,22 @@ export function InfrastructureManagerDashboard() {
       }
     });
 
+    const latLngs: [number, number][] = [];
+
     assets.forEach((asset) => {
-      const lat = asset.latitude ?? (asset as any).lat ?? 40.7128;
-      const lng = asset.longitude ?? (asset as any).lng ?? -74.0060;
+      const lat = asset.latitude ?? (asset as any).lat;
+      const lng = asset.longitude ?? (asset as any).lng;
+      if (typeof lat !== "number" || typeof lng !== "number" || isNaN(lat) || isNaN(lng)) {
+        return;
+      }
+
       const sev = (asset as any).latest_severity || "minor";
       const sevMeta = getSeverityMeta(sev);
       if (activeLayer === "severe" && sevMeta.code !== "severe" && sevMeta.code !== "critical") {
         return;
       }
+
+      latLngs.push([lat, lng]);
 
       const marker = L.circleMarker([lat, lng], {
         radius: sevMeta.code === "critical" ? 10 : sevMeta.code === "severe" ? 8 : 6,
@@ -102,7 +127,19 @@ export function InfrastructureManagerDashboard() {
         setSelectedAsset(asset);
       });
     });
-  }, [activeLayer, assets]);
+
+    if (latLngs.length > 0) {
+      try {
+        if (latLngs.length === 1) {
+          map.setView(latLngs[0], 12);
+        } else {
+          map.fitBounds(L.latLngBounds(latLngs), { padding: [30, 30], maxZoom: 12 });
+        }
+      } catch {
+        // Fallback
+      }
+    }
+  }, [mapReady, activeLayer, assets]);
 
   const handleExportCsv = async () => {
     const csvContent = await api.exportDashboardCsv("manager", selectedRange);

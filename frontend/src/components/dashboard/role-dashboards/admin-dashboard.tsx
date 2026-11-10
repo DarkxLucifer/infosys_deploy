@@ -4,6 +4,7 @@ import {
   ChevronDown, CheckCircle2, HeartPulse
 } from "lucide-react";
 import { api, type AdminDashboardPayload, type User, type PendingUser } from "@/lib/api";
+import { formatISTTimeOnly } from "@/lib/date-utils";
 import { type RoleType } from "@/lib/rules";
 
 const DATE_RANGES = [
@@ -462,7 +463,7 @@ export function AdministratorDashboard() {
                 <div className="flex items-center justify-between font-semibold">
                   <span className="text-primary font-mono text-[11px]">{log.action}</span>
                   <span className="text-muted-foreground font-mono text-[10px]">
-                    {new Date(log.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                    {formatISTTimeOnly(log.timestamp)}
                   </span>
                 </div>
                 <p className="text-foreground text-[11px]">{log.details}</p>

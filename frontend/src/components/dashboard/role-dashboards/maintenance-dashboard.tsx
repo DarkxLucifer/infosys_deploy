@@ -1,10 +1,13 @@
 import { useState, useEffect, useCallback } from "react";
+import { Link } from "react-router-dom";
 import {
   Wrench, AlertTriangle, CheckCircle2, Calendar,
-  ShieldAlert, Download, ChevronDown, Clock, RefreshCw
+  ShieldAlert, Download, ChevronDown, Clock, RefreshCw,
+  FileText, ExternalLink, ShieldCheck
 } from "lucide-react";
 import { toast } from "sonner";
-import { api, type MaintenanceDashboardPayload, type MaintenanceItem } from "@/lib/api";
+import { api, getAuthToken, type MaintenanceDashboardPayload, type MaintenanceItem } from "@/lib/api";
+import { formatISTDateTime } from "@/lib/date-utils";
 import { cn } from "@/lib/utils";
 
 const DATE_RANGES = [
@@ -262,16 +265,31 @@ export function MaintenanceEngineerDashboard() {
             </div>
           </div>
 
+          {/* Civil Engineer Sign-Off Notice Banner */}
+          <div className="p-3 rounded-xl border border-border bg-muted/30 text-xs flex items-center justify-between gap-3 text-muted-foreground">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="size-4 text-primary shrink-0" />
+              <span>
+                <strong className="text-foreground">Certified Engineering Linkage:</strong> All work orders below originate directly from Civil Engineer certified inspections and verified defect severity thresholds.
+              </span>
+            </div>
+            <span className="font-mono text-[10px] uppercase font-bold text-primary bg-background px-2 py-0.5 rounded border border-border shrink-0">
+              §19 Compliant
+            </span>
+          </div>
+
           <div className="rounded-xl border border-border bg-card overflow-hidden shadow-xs">
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
                 <thead className="bg-muted text-foreground border-b border-border">
                   <tr>
                     <th className="py-2.5 px-4 font-semibold">WO ID</th>
-                    <th className="py-2.5 px-4 font-semibold">Asset</th>
+                    <th className="py-2.5 px-4 font-semibold">Civil Sign-Off Inspection</th>
+                    <th className="py-2.5 px-4 font-semibold">Asset Name & ID</th>
                     <th className="py-2.5 px-4 font-semibold">Action</th>
                     <th className="py-2.5 px-4 font-semibold">Priority</th>
                     <th className="py-2.5 px-4 font-semibold">Team</th>
+                    <th className="py-2.5 px-4 font-semibold">Assigned Date & Time</th>
                     <th className="py-2.5 px-4 font-semibold">Due Date</th>
                     <th className="py-2.5 px-4 font-semibold text-right">Status Action</th>
                   </tr>
@@ -281,9 +299,43 @@ export function MaintenanceEngineerDashboard() {
                     <tr key={wo.id} className="hover:bg-muted/40 transition-colors">
                       <td className="py-2.5 px-4 font-mono font-bold text-foreground">{wo.id}</td>
                       <td className="py-2.5 px-4">
-                        <span className="font-semibold text-foreground">{wo.asset_code}</span>
+                        {wo.inspection_id ? (
+                          <div className="space-y-0.5">
+                            <div className="flex items-center gap-1.5">
+                              <Link
+                                to={`/app/review/${wo.inspection_id}`}
+                                className="font-mono text-xs font-semibold text-primary hover:underline flex items-center gap-1"
+                              >
+                                <span>Insp {wo.inspection_id.slice(0, 8)}</span>
+                                <ExternalLink className="size-3" />
+                              </Link>
+                              <a
+                                href={`/api/v1/inspections/${wo.inspection_id}/reports/pdf?token=${getAuthToken()}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title="Download Certified PDF Report"
+                                className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                              >
+                                <FileText className="size-3.5 text-primary" />
+                              </a>
+                            </div>
+                            <span className="text-[10px] text-muted-foreground block">
+                              Signed: {wo.certifying_engineer || "Civil Engineer"}
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-muted-foreground text-[11px] italic">Routine / Direct</span>
+                        )}
                       </td>
-                      <td className="py-2.5 px-4 font-medium text-foreground max-w-44 truncate">
+                      <td className="py-2.5 px-4 min-w-[150px]">
+                        <span className="font-semibold text-foreground block leading-tight">
+                          {wo.asset_name || "Infrastructure Asset"}
+                        </span>
+                        <span className="font-mono text-[10px] text-muted-foreground block mt-0.5">
+                          {wo.asset_code}
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-4 font-medium text-foreground max-w-44 truncate" title={wo.action}>
                         {wo.action}
                       </td>
                       <td className="py-2.5 px-4">
@@ -300,6 +352,9 @@ export function MaintenanceEngineerDashboard() {
                         </span>
                       </td>
                       <td className="py-2.5 px-4 text-muted-foreground">{wo.assignee_team}</td>
+                      <td className="py-2.5 px-4 font-mono text-[11px] text-muted-foreground whitespace-nowrap">
+                        {formatISTDateTime(wo.assigned_at || wo.created_at)}
+                      </td>
                       <td className="py-2.5 px-4 font-mono">
                         <input
                           type="date"

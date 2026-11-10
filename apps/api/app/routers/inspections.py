@@ -17,6 +17,13 @@ from app.security.jwt import get_current_user
 # Indian Standard Time (UTC+05:30) helper for notifications & audit logs
 IST = timezone(timedelta(hours=5, minutes=30))
 
+def to_utc_iso(dt: Optional[datetime]) -> Optional[str]:
+    if not dt:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.isoformat()
+
 def get_now_ist_str() -> str:
     return datetime.now(IST).strftime('%b %d, %Y at %I:%M %p IST')
 
@@ -338,17 +345,17 @@ def get_inspection_detail(
         "analysisStatus": inspection.analysis_status or "skipped_no_model",
         "claimedBy": inspection.claimed_by,
         "claimedByName": claimant.name if claimant else None,
-        "claimedAt": inspection.claimed_at.isoformat() if inspection.claimed_at else None,
-        "submittedAt": inspection.submitted_at.isoformat() if inspection.submitted_at else None,
-        "reviewedAt": inspection.reviewed_at.isoformat() if inspection.reviewed_at else None,
+        "claimedAt": to_utc_iso(inspection.claimed_at),
+        "submittedAt": to_utc_iso(inspection.submitted_at),
+        "reviewedAt": to_utc_iso(inspection.reviewed_at),
         "reviewedBy": reviewer_id,
         "reviewedByName": reviewer.name if reviewer else (claimant.name if claimant else None),
         "workOrderId": latest_wo.id if latest_wo else None,
         "confirmedPriority": prio_rec.confirmed if prio_rec else None,
         "isSignedOff": inspection.status in ("reviewed", "reported", "closed"),
         "imageCount": img_count,
-        "inspectionDate": inspection.inspection_date.isoformat(),
-        "dueDate": inspection.due_date.isoformat(),
+        "inspectionDate": to_utc_iso(inspection.inspection_date),
+        "dueDate": to_utc_iso(inspection.due_date),
         "parentInspectionId": inspection.parent_inspection_id,
         "notes": inspection.notes,
         "priorityRecommendation": {
@@ -357,7 +364,7 @@ def get_inspection_detail(
             "factors": prio_rec.factors,
             "reason": prio_rec.reason
         } if prio_rec else None,
-        "createdAt": inspection.created_at.isoformat()
+        "createdAt": to_utc_iso(inspection.created_at)
     }
 
 
@@ -1373,7 +1380,7 @@ def sign_off_inspection(
 
     return {
         "status": "reviewed",
-        "reviewedAt": inspection.reviewed_at.isoformat(),
+        "reviewedAt": to_utc_iso(inspection.reviewed_at),
         "reviewedBy": current_user.id,
         "reviewedByName": current_user.name or current_user.email,
         "priorityRecommendation": prio_result,
@@ -1400,12 +1407,12 @@ def confirm_priority(
     if not inspection:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection not found")
 
-    if inspection.status in ("reviewed", "reported", "closed") or inspection.reviewed_at is not None:
+    if inspection.status == "closed":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
-                "code": "ALREADY_REVIEWED",
-                "message": f"Inspection {inspection.id} has already been certified and signed off. Inference cannot be re-run on sealed records."
+                "code": "ALREADY_CLOSED",
+                "message": f"Inspection {inspection.id} has already been closed. Priority cannot be updated on closed records."
             }
         )
 

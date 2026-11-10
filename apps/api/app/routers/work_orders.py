@@ -18,6 +18,13 @@ IST = timezone(timedelta(hours=5, minutes=30))
 def get_now_ist_str() -> str:
     return datetime.now(IST).strftime('%b %d, %Y at %I:%M %p IST')
 
+def to_utc_iso(dt: Optional[datetime]) -> Optional[str]:
+    if not dt:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.isoformat()
+
 router = APIRouter(prefix="", tags=["Maintenance & Work Orders"])
 
 ALLOWED_WO_ROLES = {"admin", "manager", "engineer", "civil-engineer", "maintenance"}
@@ -107,19 +114,29 @@ def list_work_orders(
         items.append({
             "id": wo.id,
             "assetId": wo.asset_id,
+            "asset_id": wo.asset_id,
             "assetName": wo.asset.name if wo.asset else "Unknown Asset",
+            "asset_name": wo.asset.name if wo.asset else "Unknown Asset",
             "inspectionId": wo.inspection_id,
+            "inspection_id": wo.inspection_id,
             "findingId": wo.finding_id,
+            "finding_id": wo.finding_id,
             "action": wo.action,
             "priority": wo.priority,
             "status": wo.status,
             "assigneeId": wo.assignee_id,
+            "assignee_id": wo.assignee_id,
             "assigneeName": wo.assignee.name if wo.assignee else None,
             "team": wo.team,
-            "dueDate": wo.due_date.isoformat() if wo.due_date else None,
+            "dueDate": to_utc_iso(wo.due_date),
+            "due_date": wo.due_date.strftime("%Y-%m-%d") if wo.due_date else None,
             "repairWindow": wo.repair_window,
+            "repair_window": wo.repair_window,
             "closedNote": wo.closed_note,
-            "createdAt": wo.created_at.isoformat()
+            "createdAt": to_utc_iso(wo.created_at),
+            "created_at": to_utc_iso(wo.created_at),
+            "assignedAt": to_utc_iso(wo.created_at),
+            "assigned_at": to_utc_iso(wo.created_at)
         })
 
     return items

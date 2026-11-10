@@ -28,7 +28,7 @@ import {
 import { toast } from "sonner";
 import { useAuth } from "@/store/auth-context";
 import { Button } from "@/components/ui/button";
-import { formatISTDateTime } from "@/lib/date-utils";
+import { formatISTDateTime, formatISTTimeOnly } from "@/lib/date-utils";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
@@ -1163,7 +1163,7 @@ export function AnalysisDetailPage() {
                                   Sound Surface Decision Verified & Logged
                                 </span>
                                 <span className="text-[10px] text-muted-foreground">
-                                  {soundMeta?.verifiedAt ? new Date(soundMeta.verifiedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "Recorded"}
+                                  {soundMeta?.verifiedAt ? formatISTTimeOnly(soundMeta.verifiedAt) : "Recorded"}
                                 </span>
                               </div>
                               <div className="text-[11px] text-muted-foreground">

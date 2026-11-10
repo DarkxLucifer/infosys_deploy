@@ -301,18 +301,20 @@ def get_crack_progression(
                     calibrated = True
                 qr = img.quality_report or {}
                 if isinstance(qr, dict):
-                    cg = qr.get("crack_geometry", {}).get("summary", {})
-                    if cg.get("is_calibrated"):
-                        calibrated = True
-                        if cg.get("maximum_crack_width_mm") and float(cg["maximum_crack_width_mm"]) > max_width:
-                            max_width = float(cg["maximum_crack_width_mm"])
-                        if cg.get("average_crack_width_mm"):
-                            avg_width_sum += float(cg["average_crack_width_mm"])
-                            meas_count += 1
-                        if cg.get("total_crack_length_mm"):
-                            total_length += float(cg["total_crack_length_mm"])
-                        if cg.get("total_crack_area_mm2"):
-                            total_area += float(cg["total_crack_area_mm2"])
+                    cg_obj = qr.get("crack_geometry") or {}
+                    if isinstance(cg_obj, dict):
+                        cg = cg_obj.get("summary") or {}
+                        if isinstance(cg, dict) and cg.get("is_calibrated"):
+                            calibrated = True
+                            if cg.get("maximum_crack_width_mm") and float(cg["maximum_crack_width_mm"]) > max_width:
+                                max_width = float(cg["maximum_crack_width_mm"])
+                            if cg.get("average_crack_width_mm"):
+                                avg_width_sum += float(cg["average_crack_width_mm"])
+                                meas_count += 1
+                            if cg.get("total_crack_length_mm"):
+                                total_length += float(cg["total_crack_length_mm"])
+                            if cg.get("total_crack_area_mm2"):
+                                total_area += float(cg["total_crack_area_mm2"])
 
             # If measurements were zeros, derive realistic values from severity
             if max_width == 0.0 and total_cracks > 0:

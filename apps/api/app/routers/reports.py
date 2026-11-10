@@ -1,7 +1,7 @@
 import os
 from datetime import datetime, timezone
 from typing import Optional, List
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -222,13 +222,13 @@ def download_report(
 @router.get("/inspections/{inspection_id}/reports/download")
 def download_inspection_report(
     inspection_id: str,
-    format: str = "pdf",
+    format: str = Query("pdf"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
     Downloads or dynamically generates certified engineering report for an inspection.
-    Supports formats: pdf, csv, xlsx, json.
+    Supports formats: pdf, csv, xlsx, json via query param (?format=pdf).
     """
     inspection = db.query(Inspection).filter(
         Inspection.id == inspection_id,
@@ -293,4 +293,15 @@ def download_inspection_report(
         filename=filename,
         media_type=media_type
     )
+
+
+@router.get("/inspections/{inspection_id}/reports/{fmt}")
+def download_inspection_report_by_fmt(
+    inspection_id: str,
+    fmt: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Alias to download inspection report directly by format in URL path: pdf, csv, xlsx, json"""
+    return download_inspection_report(inspection_id=inspection_id, format=fmt, current_user=current_user, db=db)
 

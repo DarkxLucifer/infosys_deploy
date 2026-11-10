@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Plus, Search, Loader2, RefreshCw, CheckCircle2, Clock, AlertTriangle, Camera, UserCheck } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
+import { formatISTDateOnly } from "@/lib/date-utils";
 import { useAuth } from "@/store/auth-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -307,11 +308,7 @@ export function InspectionsPage() {
 
                     <TableCell className="hidden sm:table-cell text-xs text-muted-foreground font-mono">
                       {insp.inspectionDate
-                        ? new Date(insp.inspectionDate).toLocaleDateString("en-US", {
-                            month: "short",
-                            day: "numeric",
-                            year: "numeric",
-                          })
+                        ? formatISTDateOnly(insp.inspectionDate)
                         : "—"}
                     </TableCell>
 

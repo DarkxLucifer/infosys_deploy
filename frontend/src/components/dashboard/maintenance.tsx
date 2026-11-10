@@ -39,6 +39,7 @@ import { WorkOrderStatusBadge } from "@/components/watermelon/astrix-dashboard/c
 import { useDashboardNavigation } from "@/components/watermelon/astrix-dashboard/components/astrix/navigation";
 import { useAppStore } from "@/store/app";
 import { api } from "@/lib/api";
+import { formatISTDateTime } from "@/lib/date-utils";
 import {
   ComplianceNote,
   EmptyState,
@@ -399,12 +400,15 @@ export function MaintenancePage() {
                             </button>
                           </div>
                           <p className="text-xs text-muted-foreground line-clamp-2">{order.action}</p>
+                          <div className="text-[10px] text-muted-foreground font-mono">
+                            Assigned: {formatISTDateTime(order.createdAt)}
+                          </div>
                           <div className="pt-1 flex items-center justify-between text-[11px] text-muted-foreground border-t border-border/50">
                             <span className="truncate max-w-[130px]" title={order.team || "Crew"}>
                               {order.team || "Civil Crew"}
                             </span>
                             <span className={`font-mono tabular-nums ${overdue ? "text-destructive font-bold" : ""}`}>
-                              {order.dueDate ? new Date(order.dueDate).toLocaleDateString() : "TBD"}
+                              {order.dueDate ? formatISTDateTime(order.dueDate).split(",")[0] : "TBD"}
                             </span>
                           </div>
                           {colStatus !== "closed" ? (
@@ -458,11 +462,12 @@ export function MaintenancePage() {
             <TableHeader>
               <TableRow className="bg-secondary/40 text-xs">
                 <TableHead className="pl-5 font-semibold">Order ID</TableHead>
-                <TableHead className="font-semibold">Asset</TableHead>
+                <TableHead className="font-semibold">Asset Name & ID</TableHead>
                 <TableHead className="font-semibold">Prescribed Repair Action</TableHead>
                 <TableHead className="font-semibold">Priority Tier</TableHead>
                 <TableHead className="font-semibold">Status</TableHead>
                 <TableHead className="font-semibold hidden lg:table-cell">Assigned Crew</TableHead>
+                <TableHead className="font-semibold">Assigned Date & Time</TableHead>
                 <TableHead className="font-semibold">Resolution Due</TableHead>
                 <TableHead className="pr-5 text-right font-semibold">Workflow</TableHead>
               </TableRow>
@@ -477,13 +482,14 @@ export function MaintenancePage() {
                     <TableCell className="pl-5 font-mono text-[13px] font-bold text-primary">
                       {order.id}
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="min-w-[150px]">
                       <button
                         type="button"
-                        className="font-medium text-foreground hover:text-primary hover:underline text-xs"
+                        className="font-medium text-foreground hover:text-primary hover:underline text-xs text-left block"
                         onClick={() => navigate(`/app/assets/${order.assetId}`)}
                       >
-                        {order.assetId}
+                        <span className="block font-semibold leading-tight">{order.assetName || "Infrastructure Asset"}</span>
+                        <span className="font-mono text-[10px] text-muted-foreground block mt-0.5">{order.assetId}</span>
                       </button>
                     </TableCell>
                     <TableCell className="max-w-72 truncate text-xs font-medium text-foreground">
@@ -498,10 +504,13 @@ export function MaintenancePage() {
                     <TableCell className="hidden text-xs text-muted-foreground lg:table-cell">
                       {order.team || order.assigneeName || "Civil Maintenance"}
                     </TableCell>
+                    <TableCell className="text-xs font-mono text-muted-foreground whitespace-nowrap">
+                      {formatISTDateTime(order.createdAt)}
+                    </TableCell>
                     <TableCell
                       className={`text-xs tabular-nums font-mono ${overdue ? "font-bold text-destructive" : "text-muted-foreground"}`}
                     >
-                      {order.dueDate ? new Date(order.dueDate).toLocaleDateString() : "TBD"}
+                      {order.dueDate ? formatISTDateTime(order.dueDate).split(",")[0] : "TBD"}
                       {overdue ? " (Overdue)" : ""}
                     </TableCell>
                     <TableCell className="pr-5 text-right">

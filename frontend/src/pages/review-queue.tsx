@@ -4,7 +4,7 @@ import { Search, ChevronLeft, ChevronRight, CheckCircle2, AlertCircle, Clock, Ey
 import { api } from "@/lib/api";
 import { FEATURES } from "@/lib/features";
 import { formatSeverityLabel, type SeverityLevel } from "@/lib/rules";
-import { formatISTDateOnly } from "@/lib/date-utils";
+import { formatISTDateTime } from "@/lib/date-utils";
 
 interface QueueItem {
   id: string;
@@ -218,8 +218,8 @@ export default function ReviewQueuePage() {
                         </span>
                       )}
                     </td>
-                    <td className="py-3 px-4 text-muted-foreground font-mono text-[11px]">
-                      {formatISTDateOnly(row.submittedAt)}
+                    <td className="py-3 px-4 text-muted-foreground font-mono text-[11px] whitespace-nowrap">
+                      {formatISTDateTime(row.submittedAt)}
                     </td>
                     {FEATURES.engineerReviewScreen && (
                       <td className="py-3 px-4 text-right">

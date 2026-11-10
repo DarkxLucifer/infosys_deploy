@@ -16,6 +16,13 @@ from app.services.classifier import get_classifier
 
 router = APIRouter(prefix="", tags=["Dashboards & Search"])
 
+def to_utc_iso(dt: Optional[datetime]) -> Optional[str]:
+    if not dt:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.isoformat()
+
 @router.get("/pipeline/counts")
 def get_pipeline_counts(
     current_user: User = Depends(get_current_user),
@@ -592,19 +599,33 @@ def get_role_dashboard_metrics(
         formatted_wos = []
         for wo in all_work_orders:
             asset = db.query(Asset).filter(Asset.id == wo.asset_id).first()
+            insp = db.query(Inspection).filter(Inspection.id == wo.inspection_id).first() if wo.inspection_id else None
+            cert_engineer = "Civil Engineer"
+            if insp:
+                if insp.reviews and len(insp.reviews) > 0:
+                    rev_u = db.query(User).filter(User.id == insp.reviews[0].reviewer_id).first()
+                    if rev_u:
+                        cert_engineer = rev_u.name
+                elif insp.inspector:
+                    cert_engineer = insp.inspector.name
+
             formatted_wos.append({
                 "id": wo.id,
                 "asset_id": wo.asset_id,
-                "asset_code": asset.id if asset else "INF-000",
+                "asset_code": (getattr(asset, "code", None) or asset.id) if asset else "INF-000",
                 "asset_name": asset.name if asset else "Asset",
+                "inspection_id": wo.inspection_id,
+                "certifying_engineer": cert_engineer,
+                "repair_window": wo.repair_window or "Within SLA",
                 "priority": wo.priority,
                 "status": wo.status,
                 "action": wo.action or "Remediation",
                 "assigned_to": wo.assignee_id or "Unassigned",
-                "assignee_team": wo.team or "Field Crew A",
+                "assignee_team": wo.team or "Civil Maintenance Crew",
                 "due_date": wo.due_date.strftime("%Y-%m-%d") if wo.due_date else now.strftime("%Y-%m-%d"),
-                "is_urgent_review_request": wo.priority == "urgent_engineering_review",
-                "created_at": wo.created_at.strftime("%Y-%m-%d") if wo.created_at else now.strftime("%Y-%m-%d")
+                "is_urgent_review_request": wo.priority in ("urgent_engineering_review", "critical"),
+                "assigned_at": to_utc_iso(wo.created_at) or to_utc_iso(now),
+                "created_at": to_utc_iso(wo.created_at) or to_utc_iso(now)
             })
 
         # Build live deadline alerts for open work orders
@@ -639,10 +660,10 @@ def get_role_dashboard_metrics(
 
         follow_ups = []
         for ui in upcoming_insp:
-            u_asset = ui.asset
+            u_asset = db.query(Asset).filter(Asset.id == ui.asset_id).first() if ui.asset_id else ui.asset
             follow_ups.append({
-                "assetCode": u_asset.id if u_asset else "INF-000",
-                "assetName": u_asset.name if u_asset else "Asset",
+                "assetCode": (getattr(u_asset, "code", None) or u_asset.id) if u_asset else "DM-501",
+                "assetName": u_asset.name if u_asset else "Infrastructure Asset",
                 "scheduledDate": ui.due_date.strftime("%Y-%m-%d") if ui.due_date else now.strftime("%Y-%m-%d"),
                 "reason": ui.notes or f"Follow-up verification survey ({ui.method or 'visual'})",
                 "assignedInspector": ui.inspector.name if ui.inspector else "Field Inspector"

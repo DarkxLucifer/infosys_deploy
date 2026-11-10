@@ -145,6 +145,11 @@ export interface MaintenanceItem {
   asset_id: string;
   asset_code: string;
   asset_name: string;
+  inspection_id?: string | null;
+  certifying_engineer?: string | null;
+  repair_window?: string | null;
+  assigned_at?: string;
+  created_at?: string;
   action: string;
   priority: "routine" | "low" | "medium" | "high" | "urgent_engineering_review";
   assignee_team: string;

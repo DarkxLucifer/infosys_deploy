@@ -10,6 +10,13 @@ from app.security.jwt import get_current_user
 
 router = APIRouter(prefix="/notifications", tags=["Notifications"])
 
+def to_utc_iso(dt: Optional[datetime]) -> Optional[str]:
+    if not dt:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.isoformat()
+
 def dispatch_notification(
     db: Session,
     user_id: str,
@@ -184,7 +191,8 @@ def list_notifications(
                 "entity_type": n.entity_type or ("inspection" if "/inspections/" in (n.link or "") else "work_order" if "/maintenance" in (n.link or "") else "asset"),
                 "entity_id": n.entity_id or (n.link.split("/")[-1] if n.link and "/" in n.link else n.id),
                 "isRead": n.is_read,
-                "createdAt": n.created_at.isoformat() if n.created_at else None
+                "createdAt": to_utc_iso(n.created_at),
+                "created_at": to_utc_iso(n.created_at)
             }
             for n in items
         ]
