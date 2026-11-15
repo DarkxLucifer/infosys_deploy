@@ -39,13 +39,24 @@ class RequestMetricsMiddleware(BaseHTTPMiddleware):
         return response
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
-    """Enforces Check P3: Strict security headers and no-store caching on auth responses."""
+    """Enforces strict security headers, GIS/tile resource permissions, and no-store caching on auth responses."""
     async def dispatch(self, request: Request, call_next):
         response: Response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        response.headers["Content-Security-Policy"] = "default-src 'self'; frame-ancestors 'none';"
+        
+        # Content Security Policy supporting GIS Map Tiles (CartoDB, OpenStreetMap), Leaflet assets, and Dicebear avatars
+        csp = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+            "style-src 'self' 'unsafe-inline' https://unpkg.com https://fonts.googleapis.com; "
+            "font-src 'self' data: https://fonts.gstatic.com; "
+            "img-src 'self' data: blob: https://*.basemaps.cartocdn.com https://*.tile.openstreetmap.org https://tile.openstreetmap.org https://api.dicebear.com https://unpkg.com; "
+            "connect-src 'self' https://*.basemaps.cartocdn.com https://*.tile.openstreetmap.org https://tile.openstreetmap.org; "
+            "frame-ancestors 'self' https://huggingface.co https://*.huggingface.co; "
+            "base-uri 'self';"
+        )
+        response.headers["Content-Security-Policy"] = csp
         
         path = request.url.path
         if "/auth/" in path or path.endswith("/login") or path.endswith("/token"):
