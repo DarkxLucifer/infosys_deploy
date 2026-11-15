@@ -51,8 +51,10 @@ DEFECT_CLASSES = {
 }
 
 DEFAULT_MODEL_PATHS = [
-    Path(r"d:\project\aiml prime\project\infosys\storage\models\infrascan_yolo_v1_2_crack_best.pt"),
     Path(os.path.join(os.getcwd(), "storage", "models", "infrascan_yolo_v1_2_crack_best.pt")),
+    Path(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))) / "storage" / "models" / "infrascan_yolo_v1_2_crack_best.pt",
+    Path(r"d:\project\aiml prime\project\infosys_deploy\storage\models\infrascan_yolo_v1_2_crack_best.pt"),
+    Path(r"d:\project\aiml prime\project\infosys\storage\models\infrascan_yolo_v1_2_crack_best.pt"),
     Path(r"C:\Users\yashr\Downloads\infrascan_yolo_v1_2_gpu_fast_accuracy_768-20261029T134420Z-1-001\infrascan_yolo_v1_2_gpu_fast_accuracy_768\weights\best.pt")
 ]
 

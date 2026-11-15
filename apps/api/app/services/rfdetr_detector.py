@@ -71,9 +71,10 @@ class RFDETRCrackDetector:
 
         candidate_paths = [
             model_path,
-            Path(r"d:\project\aiml prime\project\infosys\storage\models\rdd2022_rfdetr_medium_best.pth"),
-            Path(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "storage", "models", "rdd2022_rfdetr_medium_best.pth")),
             Path(os.path.join(os.getcwd(), "storage", "models", "rdd2022_rfdetr_medium_best.pth")),
+            Path(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "storage", "models", "rdd2022_rfdetr_medium_best.pth")),
+            Path(r"d:\project\aiml prime\project\infosys_deploy\storage\models\rdd2022_rfdetr_medium_best.pth"),
+            Path(r"d:\project\aiml prime\project\infosys\storage\models\rdd2022_rfdetr_medium_best.pth"),
             Path(r"C:\Users\yashr\AppData\Local\Temp\rfdetr_test\checkpoint_best_total.pth"),
         ]
 

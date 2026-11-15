@@ -25,6 +25,12 @@ apps/api/uploads/reports/
 # Temporary test databases
 test_model_integration.db
 apps/api/test_model_integration.db
+test_rbac_locks.db
+apps/api/test_rbac_locks.db
+test_completeness.db
+test_week1_audit.db
+infrascan_dev.db
+apps/api/infrascan_dev.db
 *.db-shm
 *.db-wal
 

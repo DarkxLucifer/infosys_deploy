@@ -46,6 +46,9 @@ class CrackClassifier:
         else:
             candidate_dirs = [
                 Path(getattr(settings, "MODEL_DIR", "")) if getattr(settings, "MODEL_DIR", None) else None,
+                Path(os.path.join(os.getcwd(), "storage", "models")),
+                Path(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))) / "storage" / "models",
+                Path(r"d:\project\aiml prime\project\infosys_deploy\storage\models"),
                 Path(r"d:\project\aiml prime\project\infosys\storage\models"),
                 Path(r"C:\Users\yashr\Downloads\infrascan_crack_results\models"),
                 Path(r"C:\Users\yashr\Downloads\checkpoints-20261028T135647Z-1-001\checkpoints")

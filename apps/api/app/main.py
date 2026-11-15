@@ -1,6 +1,8 @@
+import os
 import logging
+from pathlib import Path
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request, status
+from fastapi import FastAPI, Request, status, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
@@ -168,15 +170,6 @@ app.include_router(reports_router, prefix=api_v1_prefix)
 app.include_router(analytics_router, prefix=api_v1_prefix)
 
 
-@app.get("/")
-def root():
-    return {
-        "service": "InfraScan API Gateway",
-        "docs": "/api/docs",
-        "status": "operational",
-        "version": "1.0.0"
-    }
-
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "InfraScan API Gateway"}
@@ -191,4 +184,40 @@ def get_active_model_status():
     """Returns the loaded status, version, and capabilities of InfraScan AI models."""
     from app.services.classifier import get_classifier
     return get_classifier().get_status()
+
+# Mount static compiled frontend SPA when available (Production / Hugging Face Spaces)
+from fastapi.staticfiles import StaticFiles
+from starlette.responses import FileResponse
+
+dist_candidates = [
+    Path(__file__).resolve().parent.parent.parent / "frontend" / "dist",
+    Path(os.getcwd()) / "frontend" / "dist",
+    Path(os.getcwd()) / "dist",
+    Path("/app/frontend/dist"),
+    Path("/home/user/app/frontend/dist"),
+]
+dist_dir = next((d for d in dist_candidates if d.exists() and (d / "index.html").exists()), None)
+
+if dist_dir:
+    assets_dir = dist_dir / "assets"
+    if assets_dir.exists():
+        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def serve_spa(full_path: str):
+        if full_path.startswith(("api/", "api", "docs", "redoc", "openapi.json", "health", "ready")):
+            raise HTTPException(status_code=404, detail="Not Found")
+        target_file = dist_dir / full_path
+        if full_path and target_file.is_file():
+            return FileResponse(target_file)
+        return FileResponse(dist_dir / "index.html")
+else:
+    @app.get("/")
+    def root():
+        return {
+            "service": "InfraScan API Gateway",
+            "docs": "/api/docs",
+            "status": "operational",
+            "version": "1.0.0"
+        }
 

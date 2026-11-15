@@ -92,9 +92,10 @@ class UNetCrackSegmentor:
 
         candidate_paths = [
             model_path,
-            Path(r"d:\project\aiml prime\project\infosys\storage\models\infrascan_unet_crackseg9k_best.pth"),
-            Path(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "storage", "models", "infrascan_unet_crackseg9k_best.pth")),
             Path(os.path.join(os.getcwd(), "storage", "models", "infrascan_unet_crackseg9k_best.pth")),
+            Path(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "storage", "models", "infrascan_unet_crackseg9k_best.pth")),
+            Path(r"d:\project\aiml prime\project\infosys_deploy\storage\models\infrascan_unet_crackseg9k_best.pth"),
+            Path(r"d:\project\aiml prime\project\infosys\storage\models\infrascan_unet_crackseg9k_best.pth"),
             Path(r"C:\Users\yashr\Downloads\best_model.pth"),
         ]
 
