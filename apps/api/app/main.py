@@ -44,16 +44,9 @@ async def lifespan(app: FastAPI):
     # Check first-run administrator status (Section S.5)
     db = SessionLocal()
     try:
-        admin_count = db.query(User).filter(User.role == "admin").count()
-        if admin_count == 0:
-            logger.warning("========================================================================")
-            logger.warning("  [FIRST STARTUP] NO ADMINISTRATOR ACCOUNT DETECTED.")
-            logger.warning("  Use CLI: python -m app.cli create-admin --email <your_email>")
-            logger.warning("  OR Web Setup at /setup with one-time token:")
-            logger.warning(f"  SETUP TOKEN: {settings.SETUP_TOKEN}")
-            logger.warning("========================================================================")
-        else:
-            logger.info("InfraScan administrator registered. Web setup is disabled.")
+        from app.models.all_models import UserCredential, Asset
+        from app.security.password import hash_password
+        from datetime import datetime, timezone
 
         # Ensure default organization
         org = db.query(Organization).first()
@@ -61,6 +54,67 @@ async def lifespan(app: FastAPI):
             org = Organization(name="Primary Infrastructure Authority", allow_self_registration=True)
             db.add(org)
             db.commit()
+            db.refresh(org)
+
+        admin_count = db.query(User).filter(User.role == "admin").count()
+        if admin_count == 0:
+            logger.info("Initializing reference data and default demonstration accounts...")
+            try:
+                from app.cli import seed_reference_data
+                seed_reference_data()
+            except Exception as e:
+                logger.warning("Could not auto-seed reference data: %s", e)
+
+            now = datetime.now(timezone.utc)
+            demo_users = [
+                ("System Administrator", "admin@infrascan.local", "admin", "Admin@12345678"),
+                ("DarkxLucifer Admin", "yashrajghadage9898@gmail.com", "admin", "Admin@12345678"),
+                ("Jane Inspector", "inspector@infrascan.local", "inspector", "Inspector@12345678"),
+                ("Bob Civil Engineer", "engineer@infrascan.local", "civil-engineer", "Engineer@12345678"),
+                ("Mike Maintenance", "maintenance@infrascan.local", "maintenance", "Maintenance@12345678"),
+                ("Alice Manager", "manager@infrascan.local", "manager", "Manager@12345678"),
+            ]
+            for full_name, email_addr, user_role, plain_pass in demo_users:
+                existing = db.query(User).filter(User.email == email_addr).first()
+                if not existing:
+                    u = User(
+                        name=full_name,
+                        email=email_addr,
+                        role=user_role,
+                        status="active",
+                        organization_id=org.id,
+                        email_verified_at=now,
+                    )
+                    db.add(u)
+                    db.flush()
+                    cred = UserCredential(user_id=u.id, password_hash=hash_password(plain_pass))
+                    db.add(cred)
+
+            # Ensure at least one default asset for immediate inspection
+            asset_count = db.query(Asset).count()
+            if asset_count == 0:
+                demo_asset = Asset(
+                    id="AST-VIADUCT-01",
+                    organization_id=org.id,
+                    name="Coastal Highway Viaduct - Pier 4",
+                    asset_type="bridge",
+                    address="104 Ocean Boulevard, Sector 7",
+                    latitude=37.7749,
+                    longitude=-122.4194,
+                    construction_year=2012,
+                    material="reinforced_concrete",
+                    department="Bridges & Marine Structures",
+                    region="Western Coastal",
+                    inspection_frequency="Biannual",
+                    importance="critical",
+                    is_active=True
+                )
+                db.add(demo_asset)
+
+            db.commit()
+            logger.info("Default demonstration accounts & sample asset successfully created.")
+        else:
+            logger.info("InfraScan administrator registered. Web setup is disabled.")
     finally:
         db.close()
 
