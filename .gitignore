@@ -28,6 +28,8 @@ apps/api/test_model_integration.db
 *.db-shm
 *.db-wal
 
+.env
 .env.local
+*.env
 .DS_Store
 Thumbs.db
