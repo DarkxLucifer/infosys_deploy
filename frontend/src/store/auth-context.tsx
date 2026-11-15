@@ -33,7 +33,6 @@ export interface AuthContextType {
   loginWithGoogle: (code: string, redirectUri: string) => Promise<{ success: boolean; error?: string }>;
   verifyMfa: (code: string, mfaTicket: string) => Promise<{ success: boolean; error?: string }>;
   logout: (reason?: string) => Promise<void>;
-  switchRole: (newRole: RoleType) => void;
   // Session timeout state
   showTimeoutWarning: boolean;
   timeoutCountdownSeconds: number;
@@ -219,13 +218,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const switchRole = (newRole: RoleType) => {
-    if (user) {
-      setUser({ ...user, role: newRole });
-      lastActivityRef.current = Date.now();
-    }
-  };
-
   const login = async (
     email: string,
     pass: string,
@@ -326,7 +318,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         loginWithGoogle,
         verifyMfa,
         logout,
-        switchRole,
         showTimeoutWarning,
         timeoutCountdownSeconds,
         staySignedIn,

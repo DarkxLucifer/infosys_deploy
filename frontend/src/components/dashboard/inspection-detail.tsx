@@ -1288,7 +1288,7 @@ export function InspectionDetailPage() {
                                   RF-DETR
                                 </button>
                               )}
-                              {(img.hasYolo || hasCrack) && (
+                              {(hasCrack && Boolean(img.hasYolo || img.has_yolo || qr.yolo_detection || img.yoloDetection)) && (
                                 <button
                                   type="button"
                                   onClick={() => setViewMode((prev) => ({ ...prev, [img.id]: "yolo" }))}

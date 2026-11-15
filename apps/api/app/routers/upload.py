@@ -435,21 +435,33 @@ def run_and_persist_ai_classification(
         except Exception as rfdetr_exc:
             logger.warning("RF-DETR crack detection failed for image %s: %s", image.id, rfdetr_exc)
 
-        # Stage 2B: Run YOLOv8 Crack Detector
-        try:
-            from app.services.yolo_detector import get_yolo_detector
-            yolo_detector = get_yolo_detector()
-            yolo_ann_path = os.path.join(YOLO_DIR, f"{image.id}.jpg")
-            yolo_result = yolo_detector.detect(
-                image_input=proc_target,
-                conf=0.10,
-                imgsz=768,
-                save_annotated_path=yolo_ann_path
+        rfdetr_has_defects = bool(rfdetr_result and rfdetr_result.get("has_defect"))
+
+        # Stage 2B: Run YOLOv8 Crack Detector ONLY as fallback when RF-DETR Medium detects 0 defect classes
+        if not rfdetr_has_defects:
+            try:
+                from app.services.yolo_detector import get_yolo_detector
+                yolo_detector = get_yolo_detector()
+                yolo_ann_path = os.path.join(YOLO_DIR, f"{image.id}.jpg")
+                yolo_result = yolo_detector.detect(
+                    image_input=proc_target,
+                    conf=0.10,
+                    imgsz=768,
+                    save_annotated_path=yolo_ann_path
+                )
+                qr["yolo_detection"] = yolo_result
+                pred["yolo_detection"] = yolo_result
+            except Exception as yolo_exc:
+                logger.warning("YOLO crack detection failed for image %s: %s", image.id, yolo_exc)
+        else:
+            yolo_result = None
+            qr["yolo_detection"] = None
+            pred["yolo_detection"] = None
+            logger.info(
+                "Skipping Stage 2B YOLOv8 for image %s: RF-DETR Medium already detected %s defect(s).",
+                image.id,
+                rfdetr_result.get("num_detections", 0),
             )
-            qr["yolo_detection"] = yolo_result
-            pred["yolo_detection"] = yolo_result
-        except Exception as yolo_exc:
-            logger.warning("YOLO crack detection failed for image %s: %s", image.id, yolo_exc)
 
         # Stage 2C: Run U-Net Pixel-Level Crack Segmentation (CrackSeg9k)
         try:
@@ -496,13 +508,14 @@ def run_and_persist_ai_classification(
         except Exception as unet_exc:
             logger.warning("UNet crack segmentation failed for image %s: %s", image.id, unet_exc)
 
-        rfdetr_has_defects = bool(rfdetr_result and rfdetr_result.get("has_defect"))
         if not rfdetr_has_defects:
             qr["active_stage2_model"] = "unet_fallback"
+            qr["model_fallback"] = True
             pred["active_stage2_model"] = "unet_fallback"
             pred["model_fallback"] = True
         else:
             qr["active_stage2_model"] = "rfdetr"
+            qr["model_fallback"] = False
             pred["active_stage2_model"] = "rfdetr"
             pred["model_fallback"] = False
 
@@ -583,6 +596,8 @@ def run_and_persist_ai_classification(
             notes_parts = []
             if rf_has_def and rfdetr_result.get("num_detections"):
                 notes_parts.append(f"RF-DETR: {rfdetr_result.get('num_detections')} defect regions detected ({rfdetr_result.get('primary_label')}).")
+            elif yolo_has_def and yolo_result.get("num_detections"):
+                notes_parts.append(f"YOLOv8 Fallback: {yolo_result.get('num_detections')} defect regions detected ({yolo_result.get('primary_label') or yolo_result.get('primary_defect')}).")
             if unet_has_crk:
                 notes_parts.append(f"UNet: {unet_result.get('crack_area_pct')}% crack surface area ({unet_result.get('crack_pixels'):,} px), max thickness {unet_result.get('max_width_px')}px.")
             if dmg_assessment and dmg_assessment.get("severity"):
@@ -987,7 +1002,7 @@ def upload_image_endpoint(
         db.commit()
     if pred:
         report["ai_classification"] = pred
-        if pred.get("yolo_detection"):
+        if "yolo_detection" in pred:
             report["yolo_detection"] = pred["yolo_detection"]
         if pred.get("unet_segmentation"):
             report["unet_segmentation"] = pred["unet_segmentation"]
@@ -1440,11 +1455,13 @@ def get_image_details(
             except Exception as rfdetr_err:
                 logger.warning("On-demand RF-DETR error in get_image_details for %s: %s", image.id, rfdetr_err)
 
-        # On-demand YOLO crack type classification (fallback or secondary)
+        # On-demand YOLO crack type classification ONLY as fallback when RF-DETR found 0 defects
         yolo_file = find_stored_file("yolo", f"{image.id}.jpg") or os.path.join(YOLO_DIR, f"{image.id}.jpg")
         yolo_thumb = find_stored_file("thumbnails", f"{image.id}_yolo.jpg") or os.path.join(THUMBNAIL_DIR, f"{image.id}_yolo.jpg")
         qr_curr = dict(image.quality_report or {})
-        if ("yolo_detection" not in qr_curr) and proc_target and os.path.exists(proc_target):
+        rfdetr_det_curr = qr_curr.get("rfdetr_detection")
+        rfdetr_found_defect = bool(isinstance(rfdetr_det_curr, dict) and rfdetr_det_curr.get("has_defect"))
+        if (not rfdetr_found_defect) and ("yolo_detection" not in qr_curr) and proc_target and os.path.exists(proc_target):
             try:
                 from app.services.yolo_detector import get_yolo_detector
                 detector = get_yolo_detector()
@@ -1738,9 +1755,11 @@ def get_image_file_variant(
             target_path = image.original_path
 
     elif variant in ("yolo",):
-        if has_yolo and is_crack_defect:
+        rfdetr_det_qr = qr.get("rfdetr_detection") if isinstance(qr, dict) else None
+        rfdetr_found = bool(isinstance(rfdetr_det_qr, dict) and rfdetr_det_qr.get("has_defect"))
+        if has_yolo and is_crack_defect and not rfdetr_found:
             target_path = yolo_file
-        elif is_crack_defect and proc_target and os.path.exists(proc_target):
+        elif is_crack_defect and not rfdetr_found and proc_target and os.path.exists(proc_target):
             try:
                 from app.services.yolo_detector import get_yolo_detector
                 detector = get_yolo_detector()
@@ -1759,6 +1778,8 @@ def get_image_file_variant(
             except Exception as yolo_err:
                 logger.warning("On-demand YOLO generation failed in get_image_file_variant: %s", yolo_err)
                 target_path = rfdetr_file if has_rfdetr else proc_target
+        elif has_rfdetr and is_crack_defect:
+            target_path = rfdetr_file
         else:
             target_path = image.processed_path if (image.processed_path and os.path.exists(image.processed_path)) else image.original_path
 

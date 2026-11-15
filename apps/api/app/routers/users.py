@@ -53,17 +53,18 @@ def update_profile(
 ):
     updated = False
     details = {}
+    if req.role is not None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "ROLE_CHANGE_FORBIDDEN",
+                "message": "User roles are fixed per account and cannot be changed.",
+            },
+        )
     if req.name and req.name.strip():
         user.name = req.name.strip()
         updated = True
         details["updated_name"] = user.name
-    if req.role and req.role.strip():
-        valid_roles = {"inspector", "engineer", "civil-engineer", "civil_engineer", "maintenance", "manager", "admin"}
-        norm_role = req.role.strip().lower()
-        if norm_role in valid_roles:
-            user.role = norm_role
-            updated = True
-            details["updated_role"] = user.role
     if updated:
         db.commit()
         log_audit_event(

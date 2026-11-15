@@ -3108,7 +3108,7 @@ export const apiService = {
     return res.json();
   },
 
-  async updateProfile(data: { name?: string; role?: string }): Promise<any> {
+  async updateProfile(data: { name?: string }): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/me`, {
       method: "PATCH",
       headers: {

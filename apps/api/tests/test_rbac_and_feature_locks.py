@@ -296,12 +296,18 @@ def test_maintenance_engineer_blocked_from_unreviewed_inspections(client):
 def test_profile_role_update_endpoint(client):
     headers = get_auth_header("inspector@test.com", "inspector", "user-inspector")
 
-    # Update role to manager
+    # Role self-change must be blocked (one user -> one fixed role)
     res = client.patch("/api/v1/me", headers=headers, json={"role": "manager"})
-    assert res.status_code == 200
-    assert res.json()["user"]["role"] == "manager"
+    assert res.status_code == 403
+    assert res.json()["detail"]["code"] == "ROLE_CHANGE_FORBIDDEN"
+
+    # Name update still succeeds and role remains unchanged
+    name_res = client.patch("/api/v1/me", headers=headers, json={"name": "Inspector One"})
+    assert name_res.status_code == 200
+    assert name_res.json()["user"]["name"] == "Inspector One"
+    assert name_res.json()["user"]["role"] == "inspector"
 
     db = TestingSessionLocal()
     user = db.query(User).filter(User.id == "user-inspector").first()
-    assert user.role == "manager"
+    assert user.role == "inspector"
     db.close()

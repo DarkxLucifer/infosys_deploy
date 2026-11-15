@@ -9,9 +9,7 @@ import {
   User,
   CheckCircle2,
   UserCheck,
-  ChevronDown,
 } from "lucide-react";
-import { toast } from "sonner";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
@@ -30,34 +28,21 @@ import { CommandPalette } from "@/components/dashboard/command-palette";
 import { type RoleType } from "@/lib/rules";
 import { formatISTDateTime } from "@/lib/date-utils";
 
-const ROLE_OPTIONS: { role: RoleType; label: string; desc: string }[] = [
-  { role: "inspector", label: "Infrastructure Inspector", desc: "Plan visits, capture and upload images, track what is waiting for review" },
-  { role: "engineer", label: "Civil Engineer", desc: "Review findings, verify geometry, confirm priorities, sign off reports" },
-  { role: "manager", label: "Infrastructure Manager", desc: "Asset condition oversight, maintenance priorities, damage trends and hotspots" },
-  { role: "maintenance", label: "Maintenance Engineer", desc: "Work order execution, repair scheduling, follow-up inspections" },
-  { role: "admin", label: "Administrator", desc: "Users, models, audit logs and platform health" },
-];
+const ROLE_LABELS: Record<RoleType, string> = {
+  inspector: "Infrastructure Inspector",
+  engineer: "Civil Engineer",
+  manager: "Infrastructure Manager",
+  maintenance: "Maintenance Engineer",
+  admin: "Administrator",
+};
 
 export function DashboardTopbar() {
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
-  const { user, logout, switchRole } = useAuth();
+  const { user, logout } = useAuth();
   const { signOut } = useAppStore();
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
-
-  const handleRoleSwitch = async (newRole: RoleType) => {
-    switchRole(newRole);
-    try {
-      await api.updateProfile({ role: newRole });
-    } catch {
-      // offline/fallback
-    }
-    const roleMeta = ROLE_OPTIONS.find((r) => r.role === newRole);
-    toast.success(`Active role updated: ${roleMeta?.label || newRole}`, {
-      description: roleMeta?.desc,
-    });
-  };
 
   // Listen for Cmd+K / Ctrl+K
   useEffect(() => {
@@ -122,49 +107,19 @@ export function DashboardTopbar() {
           </button>
         </div>
 
-        {/* Right side: Role Switcher, Notification Bell, Theme toggle, Avatar */}
+        {/* Right side: Fixed Role Badge, Notification Bell, Theme toggle, Avatar */}
         <div className="flex items-center gap-2 sm:gap-3">
-          {/* Interactive Role Switcher for Pairing & Review Evaluation */}
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              type="button"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-secondary/60 text-primary font-semibold text-xs select-none hover:bg-secondary cursor-pointer transition-colors shadow-2xs"
-              title="Click to switch role context"
-            >
-              <UserCheck className="size-3.5" />
-              <span className="hidden sm:inline text-muted-foreground font-normal">Role:</span>
-              <span className="font-bold">
-                {ROLE_OPTIONS.find((r) => r.role === currentRole)?.label || currentRole}
-              </span>
-              <ChevronDown className="size-3 text-muted-foreground ml-0.5" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-72 p-1.5">
-              <DropdownMenuLabel className="text-[11px] font-bold text-muted-foreground uppercase px-2 py-1">
-                Active Specification Role
-              </DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              {ROLE_OPTIONS.map((opt) => {
-                const isActive = opt.role === currentRole;
-                return (
-                  <DropdownMenuItem
-                    key={opt.role}
-                    onClick={() => handleRoleSwitch(opt.role)}
-                    className={`flex flex-col items-start gap-0.5 p-2 rounded-lg cursor-pointer text-xs ${
-                      isActive ? "bg-primary/10 text-primary font-semibold" : "hover:bg-muted"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between w-full">
-                      <span className="font-bold">{opt.label}</span>
-                      {isActive && <span className="text-[10px] font-mono font-bold text-primary">CURRENT</span>}
-                    </div>
-                    <span className="text-[10px] text-muted-foreground leading-snug line-clamp-1">
-                      {opt.desc}
-                    </span>
-                  </DropdownMenuItem>
-                );
-              })}
-            </DropdownMenuContent>
-          </DropdownMenu>
+          {/* Read-only Assigned Role Indicator (one user -> one role) */}
+          <div
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-secondary/60 text-primary font-semibold text-xs select-none"
+            title="Assigned account role"
+          >
+            <UserCheck className="size-3.5" />
+            <span className="hidden sm:inline text-muted-foreground font-normal">Role:</span>
+            <span className="font-bold">
+              {ROLE_LABELS[currentRole] || currentRole}
+            </span>
+          </div>
 
           {/* Notification Bell Popover */}
           <DropdownMenu>
