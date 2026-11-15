@@ -27,19 +27,18 @@ const ThemeProviderContext = createContext<ThemeProviderState | null>(null);
 export function ThemeProvider({
   children,
   defaultTheme = "light",
-  storageKey = "astrix-theme",
+  storageKey = "infrascan-theme-v2",
 }: ThemeProviderProps) {
   const [theme, setThemeState] = useState<Theme>(() => {
-    if (typeof window === "undefined") return defaultTheme;
+    if (typeof window === "undefined") return "light";
 
     const storedTheme = localStorage.getItem(storageKey);
     if (storedTheme === "light" || storedTheme === "dark") {
       return storedTheme;
     }
 
-    return window.matchMedia("(prefers-color-scheme: dark)").matches
-      ? "dark"
-      : defaultTheme;
+    // Default to white (light) mode for any user (ignore system dark mode)
+    return defaultTheme;
   });
 
   useEffect(() => {

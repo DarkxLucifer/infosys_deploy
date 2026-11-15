@@ -198,7 +198,7 @@ function AssetDetailRoute() {
 
 export default function App() {
   return (
-    <ThemeProvider defaultTheme="light" storageKey="infrascan-theme">
+    <ThemeProvider defaultTheme="light" storageKey="infrascan-theme-v2">
       <AuthProvider>
         <AppStoreProvider>
           <Routes>

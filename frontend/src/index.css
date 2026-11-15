@@ -61,50 +61,50 @@
 }
 
 .dark {
-  --brand-text: #fbfbfe;
-  --brand-bg: #050315;
-  --brand-primary: #433bff;
-  --brand-secondary: #16134a;
-  --brand-accent: #9d98ff;
+  --brand-text: #f4f4f5;
+  --brand-bg: #09090b;
+  --brand-primary: #f4f4f5;
+  --brand-secondary: #18181b;
+  --brand-accent: #27272a;
 
-  --background: #050315;
-  --foreground: #fbfbfe;
-  --card: #0d0a2b;
-  --card-foreground: #fbfbfe;
-  --popover: #0d0a2b;
-  --popover-foreground: #fbfbfe;
-  --primary: #433bff;
-  --primary-foreground: #fbfbfe;
-  --secondary: #16134a;
-  --secondary-foreground: #dedcff;
-  --accent: #1f1b66;
-  --accent-foreground: #dedcff;
-  --muted: #120f38;
-  --muted-foreground: #b4b2d4;
-  --border: #2a2670;
-  --input: #6f6c9a;
-  --ring: #9d98ff;
+  --background: #09090b;
+  --foreground: #f4f4f5;
+  --card: #121214;
+  --card-foreground: #f4f4f5;
+  --popover: #121214;
+  --popover-foreground: #f4f4f5;
+  --primary: #f4f4f5;
+  --primary-foreground: #09090b;
+  --secondary: #18181b;
+  --secondary-foreground: #f4f4f5;
+  --accent: #27272a;
+  --accent-foreground: #f4f4f5;
+  --muted: #18181b;
+  --muted-foreground: #a1a1aa;
+  --border: #27272a;
+  --input: #3f3f46;
+  --ring: #71717a;
 
-  --destructive: #d16055;
-  --destructive-foreground: #fbfbfe;
-  --success: #4caf7d;
-  --success-soft: #14261c;
-  --warning: #d89a4a;
-  --warning-soft: #2a2213;
-  --danger-soft: #2e1715;
-  --critical: #f87171;
-  --critical-soft: #381212;
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+  --success: #22c55e;
+  --success-soft: #0e2014;
+  --warning: #f59e0b;
+  --warning-soft: #231908;
+  --danger-soft: #271212;
+  --critical: #ef4444;
+  --critical-soft: #2d0e0e;
 
-  --sidebar: #0d0a2b;
-  --sidebar-foreground: #b4b2d4;
-  --sidebar-primary: #433bff;
-  --sidebar-primary-foreground: #fbfbfe;
-  --sidebar-accent: #16134a;
-  --sidebar-accent-foreground: #dedcff;
-  --sidebar-border: #2a2670;
-  --sidebar-ring: #9d98ff;
+  --sidebar: #0c0c0e;
+  --sidebar-foreground: #a1a1aa;
+  --sidebar-primary: #f4f4f5;
+  --sidebar-primary-foreground: #09090b;
+  --sidebar-accent: #18181b;
+  --sidebar-accent-foreground: #f4f4f5;
+  --sidebar-border: #27272a;
+  --sidebar-ring: #71717a;
 
-  --input-addon-foreground: #b4b2d4;
+  --input-addon-foreground: #a1a1aa;
 }
 
 @theme inline {
@@ -198,7 +198,7 @@
   outline: none;
 }
 .dark .leaflet-container {
-  background-color: #0f172a !important;
+  background-color: #09090b !important;
 }
 .leaflet-tile {
   visibility: inherit !important;

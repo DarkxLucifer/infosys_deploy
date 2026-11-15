@@ -430,7 +430,7 @@ export function DamageMapPage() {
           center={defaultCenter}
           zoom={11}
           scrollWheelZoom={true}
-          className="w-full h-full z-0 bg-slate-100 dark:bg-slate-900"
+          className="w-full h-full z-0 bg-slate-100 dark:bg-zinc-950"
         >
           <MapResizeHandler />
           <TileLayer
