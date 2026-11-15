@@ -25,7 +25,7 @@ import { useAppStore } from "@/store/app";
 import { useTheme } from "./theme-provider";
 import { api, type NotificationItem } from "@/lib/api";
 import { CommandPalette } from "@/components/dashboard/command-palette";
-import { type RoleType } from "@/lib/rules";
+import { type RoleType, normalizeRole } from "@/lib/rules";
 import { formatISTDateTime } from "@/lib/date-utils";
 
 const ROLE_LABELS: Record<RoleType, string> = {
@@ -82,7 +82,7 @@ export function DashboardTopbar() {
     loadNotifications();
   };
 
-  const currentRole = user?.role || "engineer";
+  const currentRole = normalizeRole(user?.role);
   const userName = user?.name || "User";
 
   return (

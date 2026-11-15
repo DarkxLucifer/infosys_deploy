@@ -188,3 +188,31 @@
   background-image: radial-gradient(var(--border) 1px, transparent 1px);
   background-size: 16px 16px;
 }
+
+/* Leaflet GIS Tile & Container Rules */
+.leaflet-container {
+  width: 100% !important;
+  height: 100% !important;
+  background-color: #f1f5f9 !important;
+  z-index: 0;
+  outline: none;
+}
+.dark .leaflet-container {
+  background-color: #0f172a !important;
+}
+.leaflet-tile {
+  visibility: inherit !important;
+  opacity: 1 !important;
+}
+.leaflet-pane {
+  z-index: 400;
+}
+.leaflet-tile-pane {
+  z-index: 200;
+}
+.leaflet-marker-pane {
+  z-index: 600;
+}
+.leaflet-popup-pane {
+  z-index: 700;
+}

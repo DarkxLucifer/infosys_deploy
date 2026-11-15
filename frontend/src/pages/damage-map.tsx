@@ -118,6 +118,48 @@ function createAssetDivIcon(asset: MapAssetItem) {
   });
 }
 
+// Force Leaflet to recompute viewport dimensions when layout renders or transitions
+function MapResizeHandler() {
+  const map = useMap();
+  useEffect(() => {
+    map.invalidateSize();
+    const t1 = setTimeout(() => map.invalidateSize(), 100);
+    const t2 = setTimeout(() => map.invalidateSize(), 500);
+    const t3 = setTimeout(() => map.invalidateSize(), 1500);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      clearTimeout(t3);
+    };
+  }, [map]);
+  return null;
+}
+
+// Predefined reliable tile providers for civil infrastructure mapping
+const TILE_LAYERS = {
+  voyager: {
+    name: "Civil Street",
+    url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions" target="_blank" rel="noopener noreferrer">CARTO</a>',
+    subdomains: "abcd",
+    maxZoom: 20,
+  },
+  osm: {
+    name: "OpenStreetMap",
+    url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a> contributors',
+    subdomains: "abc",
+    maxZoom: 19,
+  },
+  dark: {
+    name: "Dark GIS",
+    url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions" target="_blank" rel="noopener noreferrer">CARTO</a>',
+    subdomains: "abcd",
+    maxZoom: 20,
+  },
+};
+
 // Recenter map on assets
 function MapRecenter({ assets }: { assets: MapAssetItem[] }) {
   const map = useMap();
@@ -152,6 +194,7 @@ export function DamageMapPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedSeverity, setSelectedSeverity] = useState<string>("all");
   const [selectedType, setSelectedType] = useState<string>("all");
+  const [activeLayer, setActiveLayer] = useState<keyof typeof TILE_LAYERS>("voyager");
   const [currentZoom, setCurrentZoom] = useState(11);
 
   const fetchMapData = async () => {
@@ -336,6 +379,24 @@ export function DamageMapPage() {
 
           {/* Reset / Reload Buttons */}
           <div className="flex items-center gap-2">
+            {/* Tile Layer Selector */}
+            <div className="flex items-center rounded-lg border border-border bg-muted/40 p-0.5 text-xs">
+              {(Object.keys(TILE_LAYERS) as Array<keyof typeof TILE_LAYERS>).map((layerKey) => (
+                <button
+                  key={layerKey}
+                  type="button"
+                  onClick={() => setActiveLayer(layerKey)}
+                  className={`px-2 py-1 rounded-md text-[11px] font-medium transition-all ${
+                    activeLayer === layerKey
+                      ? "bg-background text-primary shadow-xs font-semibold"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {TILE_LAYERS[layerKey].name}
+                </button>
+              ))}
+            </div>
+
             <Button
               type="button"
               variant="outline"
@@ -387,14 +448,15 @@ export function DamageMapPage() {
           center={defaultCenter}
           zoom={11}
           scrollWheelZoom={true}
-          className="w-full h-full z-0"
-          style={{ background: "#0f172a" }}
+          className="w-full h-full z-0 bg-slate-100 dark:bg-slate-900"
         >
-          {/* OpenStreetMap Standard Tiles */}
+          <MapResizeHandler />
           <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a> contributors | InfraScan GIS'
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            maxZoom={19}
+            key={activeLayer}
+            attribution={TILE_LAYERS[activeLayer].attribution}
+            url={TILE_LAYERS[activeLayer].url}
+            subdomains={TILE_LAYERS[activeLayer].subdomains}
+            maxZoom={TILE_LAYERS[activeLayer].maxZoom}
           />
 
           <MapZoomTracker onZoomChange={setCurrentZoom} />

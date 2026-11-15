@@ -25,6 +25,16 @@ export type RoleType =
   | "manager"
   | "admin";
 
+export function normalizeRole(role?: string | null): RoleType {
+  const r = (role || "").toLowerCase().trim();
+  if (r === "civil-engineer" || r === "civil_engineer" || r === "engineer") return "engineer";
+  if (r === "maintenance-engineer" || r === "maintenance_engineer" || r === "maintenance") return "maintenance";
+  if (r === "infrastructure-inspector" || r === "infrastructure_inspector" || r === "inspector") return "inspector";
+  if (r === "infrastructure-manager" || r === "infrastructure_manager" || r === "manager") return "manager";
+  if (r === "admin" || r === "administrator") return "admin";
+  return "engineer";
+}
+
 export interface FormattedMeasurement {
   value: number;
   displayValue: string;

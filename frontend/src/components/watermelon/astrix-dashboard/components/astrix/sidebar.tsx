@@ -47,6 +47,7 @@ import {
 } from "@/components/ui/sidebar";
 import { cn } from "@/lib/utils";
 import { FEATURES } from "@/lib/features";
+import { normalizeRole } from "@/lib/rules";
 
 interface NavEntry {
   name: string;
@@ -62,7 +63,7 @@ export function DashboardSidebar() {
   const { user: authUser, logout } = useAuth();
   const location = useLocation();
 
-  const currentRole = authUser?.role || (state.session?.role === "maintenance-engineer" ? "maintenance" : state.session?.role === "civil-engineer" ? "engineer" : state.session?.role) || "engineer";
+  const currentRole = normalizeRole(authUser?.role || state.session?.role);
 
   const [unreadCount, setUnreadCount] = useState<number>(0);
 
