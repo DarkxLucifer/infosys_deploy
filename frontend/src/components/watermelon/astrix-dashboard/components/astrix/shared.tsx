@@ -26,19 +26,20 @@ const toneClasses: Record<Tone, string> = {
 };
 
 function StatusChip({
-  tone,
+  tone = "neutral",
   icon,
   label,
   pulse = false,
 }: {
-  tone: Tone;
+  tone?: Tone;
   icon?: React.ReactNode;
   label: string;
   pulse?: boolean;
 }) {
+  const toneCls = (tone && toneClasses[tone]) || toneClasses.neutral;
   return (
     <span
-      className={`inline-flex h-7 items-center gap-1.5 rounded-lg px-2.5 text-xs font-semibold whitespace-nowrap ${toneClasses[tone]}`}
+      className={`inline-flex h-7 items-center gap-1.5 rounded-lg px-2.5 text-xs font-semibold whitespace-nowrap ${toneCls}`}
     >
       {icon}
       {label}
@@ -55,22 +56,33 @@ function StatusChip({
 /* ------------------------------- inspection ------------------------------- */
 
 const inspectionStatusTone: Record<
-  InspectionStatus,
+  string,
   { tone: Tone; label: string; pulse?: boolean }
 > = {
+  assigned: { tone: "info", label: "Assigned" },
   "in-progress": { tone: "info", label: "In progress" },
+  in_progress: { tone: "info", label: "In progress" },
   processing: { tone: "info", label: "Processing", pulse: true },
   "awaiting-review": { tone: "warning", label: "Awaiting review" },
+  awaiting_review: { tone: "warning", label: "Awaiting review" },
+  pending_review: { tone: "warning", label: "Pending review" },
+  in_review: { tone: "warning", label: "In review" },
   reviewed: { tone: "success", label: "Reviewed" },
+  reported: { tone: "success", label: "Reported" },
+  closed: { tone: "neutral", label: "Closed" },
   escalated: { tone: "danger", label: "Escalated" },
 };
 
-export function InspectionStatusBadge({ status }: { status: InspectionStatus }) {
-  const config = inspectionStatusTone[status];
+export function InspectionStatusBadge({ status }: { status: InspectionStatus | string }) {
+  const norm = (status || "assigned").toLowerCase().trim();
+  const config = inspectionStatusTone[norm] || {
+    tone: "neutral" as Tone,
+    label: (status || "Assigned").replace(/[_-]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
+  };
   const Icon =
-    status === "reviewed"
+    norm === "reviewed" || norm === "reported"
       ? CheckCircleIcon
-      : status === "awaiting-review" || status === "escalated"
+      : norm === "awaiting-review" || norm === "pending_review" || norm === "escalated"
         ? WarningCircleIcon
         : Clock;
 
@@ -101,8 +113,8 @@ const severityTone: Record<
 };
 
 export function SeverityBadge({ severity }: { severity: Severity | string }) {
-  const key = (severity || "low").toLowerCase();
-  const config = severityTone[key] || { tone: "neutral", label: severity || "Normal" };
+  const key = (severity || "low").toLowerCase().trim();
+  const config = severityTone[key] || { tone: "neutral" as Tone, label: severity || "Normal" };
 
   if (config.solid) {
     return (
@@ -125,7 +137,7 @@ export function SeverityBadge({ severity }: { severity: Severity | string }) {
 /* ------------------------------ finding review ----------------------------- */
 
 const reviewTone: Record<
-  FindingReview,
+  string,
   { tone: Tone; label: string }
 > = {
   pending: { tone: "warning", label: "Pending review" },
@@ -133,14 +145,18 @@ const reviewTone: Record<
   flagged: { tone: "danger", label: "Flagged" },
 };
 
-export function FindingReviewBadge({ review }: { review: FindingReview }) {
-  const config = reviewTone[review];
+export function FindingReviewBadge({ review }: { review: FindingReview | string }) {
+  const norm = (review || "pending").toLowerCase().trim();
+  const config = reviewTone[norm] || {
+    tone: "neutral" as Tone,
+    label: (review || "Pending").replace(/[_-]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
+  };
   return (
     <StatusChip
       tone={config.tone}
       label={config.label}
       icon={
-        review === "pending"
+        norm === "pending"
           ? <Clock className="size-3.5" />
           : <CheckCircleIcon className="size-3.5" />
       }
@@ -150,18 +166,22 @@ export function FindingReviewBadge({ review }: { review: FindingReview }) {
 
 /* --------------------------------- reports -------------------------------- */
 
-const reportStatusTone: Record<ReportStatus, { tone: Tone; label: string }> = {
+const reportStatusTone: Record<string, { tone: Tone; label: string }> = {
   ready: { tone: "success", label: "Ready" },
   generating: { tone: "info", label: "Generating" },
 };
 
-export function ReportStatusBadge({ status }: { status: ReportStatus }) {
-  const config = reportStatusTone[status];
+export function ReportStatusBadge({ status }: { status: ReportStatus | string }) {
+  const norm = (status || "ready").toLowerCase().trim();
+  const config = reportStatusTone[norm] || {
+    tone: "neutral" as Tone,
+    label: (status || "Ready").replace(/[_-]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
+  };
   return (
     <StatusChip
       tone={config.tone}
       label={config.label}
-      pulse={status === "generating"}
+      pulse={norm === "generating"}
       icon={<Clock className="size-3.5" />}
     />
   );
@@ -169,15 +189,19 @@ export function ReportStatusBadge({ status }: { status: ReportStatus }) {
 
 /* ------------------------------- work orders ------------------------------- */
 
-const workOrderTone: Record<WorkOrderStatus, { tone: Tone; label: string }> = {
+const workOrderTone: Record<string, { tone: Tone; label: string }> = {
   open: { tone: "danger", label: workOrderStatusLabels.open },
   scheduled: { tone: "warning", label: workOrderStatusLabels.scheduled },
   "in-progress": { tone: "info", label: workOrderStatusLabels["in-progress"] },
   closed: { tone: "success", label: workOrderStatusLabels.closed },
 };
 
-export function WorkOrderStatusBadge({ status }: { status: WorkOrderStatus }) {
-  const config = workOrderTone[status];
+export function WorkOrderStatusBadge({ status }: { status: WorkOrderStatus | string }) {
+  const norm = (status || "open").toLowerCase().trim();
+  const config = workOrderTone[norm] || {
+    tone: "neutral" as Tone,
+    label: (status || "Open").replace(/[_-]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
+  };
   return (
     <StatusChip tone={config.tone} label={config.label} />
   );
@@ -185,17 +209,23 @@ export function WorkOrderStatusBadge({ status }: { status: WorkOrderStatus }) {
 
 /* -------------------------------- condition -------------------------------- */
 
-const conditionTone: Record<AssetCondition, Tone> = {
+const conditionTone: Record<string, Tone> = {
   good: "success",
   fair: "warning",
   poor: "danger",
+  critical: "danger",
+  moderate: "warning",
+  minor: "success",
 };
 
-export function ConditionBadge({ condition }: { condition: AssetCondition }) {
+export function ConditionBadge({ condition }: { condition?: AssetCondition | string | null }) {
+  const norm = (condition || "good").toLowerCase().trim();
+  const tone = conditionTone[norm] || "neutral";
+  const label = conditionLabels[norm as AssetCondition] || (condition ? String(condition).toUpperCase() : "Good");
   return (
     <StatusChip
-      tone={conditionTone[condition]}
-      label={conditionLabels[condition]}
+      tone={tone}
+      label={label}
     />
   );
 }

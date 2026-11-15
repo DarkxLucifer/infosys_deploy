@@ -1,7 +1,8 @@
 import csv
 import io
+import re
 from datetime import datetime, timezone, timedelta
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Tuple
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -19,6 +20,31 @@ def to_utc_iso(dt: Optional[datetime]) -> Optional[str]:
     else:
         dt = dt.astimezone(timezone.utc)
     return dt.isoformat()
+
+
+def parse_coordinates_from_text(text: Optional[str]) -> Optional[Tuple[float, float]]:
+    """
+    Parses latitude and longitude from free-form text or address strings such as:
+    '19.0760, 72.8777', 'GPS: 19.0760, 72.8777', '19.0760 72.8777', '(19.0760, 72.8777)'.
+    Automatically detects and handles swapped [lng, lat] order.
+    """
+    if not text:
+        return None
+    matches = re.findall(r"[-+]?\d+(?:\.\d+)?", text)
+    if len(matches) >= 2:
+        try:
+            val1 = float(matches[0])
+            val2 = float(matches[1])
+            # Check standard lat [-90, 90] and lng [-180, 180]
+            if -90.0 <= val1 <= 90.0 and -180.0 <= val2 <= 180.0:
+                # If val2 is within [-90, 90] too, assume [lat, lng]
+                return val1, val2
+            elif -90.0 <= val2 <= 90.0 and -180.0 <= val1 <= 180.0:
+                # Swapped: user typed longitude first
+                return val2, val1
+        except (ValueError, TypeError):
+            pass
+    return None
 
 
 router = APIRouter(prefix="/assets", tags=["Assets"])
@@ -134,8 +160,26 @@ def create_asset(
             detail={"code": "DUPLICATE_ASSET_ID", "message": f"Asset with ID '{asset_id_clean}' already exists."}
         )
 
-    lat = req.latitude if req.latitude is not None else 40.7128
-    lng = req.longitude if req.longitude is not None else -74.0060
+    lat = req.latitude
+    lng = req.longitude
+
+    # Auto-extract coordinates from address if missing
+    if lat is None or lng is None:
+        parsed = parse_coordinates_from_text(req.address or "")
+        if parsed:
+            lat, lng = parsed
+
+    # Detect swapped coordinates
+    if lat is not None and lng is not None:
+        if (lat < -90.0 or lat > 90.0) and (-90.0 <= lng <= 90.0):
+            lat, lng = lng, lat
+
+    # Default to regional center only if completely unspecified
+    if lat is None:
+        lat = 40.7128
+    if lng is None:
+        lng = -74.0060
+
     addr = req.address.strip() if (req.address and req.address.strip()) else f"Field GPS ({lat:.4f}, {lng:.4f})"
 
     target_inspector_id = req.assigned_inspector_id
@@ -576,10 +620,17 @@ def update_asset(
         asset.name = req.name.strip()
     if req.address is not None:
         asset.address = req.address.strip()
+        if req.latitude is None and req.longitude is None:
+            parsed = parse_coordinates_from_text(asset.address)
+            if parsed:
+                asset.latitude, asset.longitude = parsed
     if req.latitude is not None:
         asset.latitude = req.latitude
     if req.longitude is not None:
         asset.longitude = req.longitude
+    if asset.latitude is not None and asset.longitude is not None:
+        if (asset.latitude < -90.0 or asset.latitude > 90.0) and (-90.0 <= asset.longitude <= 90.0):
+            asset.latitude, asset.longitude = asset.longitude, asset.latitude
     if req.material is not None:
         asset.material = req.material.strip()
     if req.department is not None:

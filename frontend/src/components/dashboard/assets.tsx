@@ -341,6 +341,24 @@ export function AssetsPage() {
 /* Register asset dialog                                               */
 /* ------------------------------------------------------------------ */
 
+function parseCoordinates(input: string): { lat: number; lng: number } | null {
+  if (!input || typeof input !== "string") return null;
+  const matches = input.match(/[-+]?\d+(?:\.\d+)?/g);
+  if (matches && matches.length >= 2) {
+    let val1 = Number.parseFloat(matches[0]);
+    let val2 = Number.parseFloat(matches[1]);
+    if (!isNaN(val1) && !isNaN(val2)) {
+      if ((val1 > 90 || val1 < -90) && val2 >= -90 && val2 <= 90) {
+        return { lat: val2, lng: val1 };
+      }
+      if (val1 >= -90 && val1 <= 90 && val2 >= -180 && val2 <= 180) {
+        return { lat: val1, lng: val2 };
+      }
+    }
+  }
+  return null;
+}
+
 function RegisterAssetDialog({
   open,
   onOpenChange,
@@ -365,6 +383,42 @@ function RegisterAssetDialog({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const handleLocationChange = (val: string) => {
+    setLocation(val);
+    const parsed = parseCoordinates(val);
+    if (parsed) {
+      setLatitude(parsed.lat);
+      setLongitude(parsed.lng);
+    }
+  };
+
+  const handleLatChange = (valStr: string) => {
+    if (valStr.trim() === "") {
+      setLatitude(undefined);
+      return;
+    }
+    const val = Number.parseFloat(valStr);
+    setLatitude(isNaN(val) ? undefined : val);
+  };
+
+  const handleLngChange = (valStr: string) => {
+    if (valStr.trim() === "") {
+      setLongitude(undefined);
+      return;
+    }
+    const val = Number.parseFloat(valStr);
+    setLongitude(isNaN(val) ? undefined : val);
+  };
+
+  const swapCoords = () => {
+    if (latitude !== undefined && longitude !== undefined) {
+      const prevLat = latitude;
+      setLatitude(longitude);
+      setLongitude(prevLat);
+      toast.info("Swapped Latitude and Longitude");
+    }
+  };
+
   const acquireGps = () => {
     if (!navigator.geolocation) {
       toast.error("Geolocation is not supported by your browser");
@@ -385,12 +439,8 @@ function RegisterAssetDialog({
       },
       (_err) => {
         setGettingGps(false);
-        // Default to regional center if denied/unavailable
-        setLatitude(40.7128);
-        setLongitude(-74.0060);
-        setLocation("Central Highway Corridor · Zone 1");
-        toast.info("Using regional central coordinates", {
-          description: "GPS permission was denied or timed out.",
+        toast.info("GPS unavailable", {
+          description: "Please enter the site latitude and longitude directly below.",
         });
       },
       { enableHighAccuracy: true, timeout: 8000 }
@@ -409,6 +459,25 @@ function RegisterAssetDialog({
       return;
     }
 
+    let finalLat = latitude;
+    let finalLng = longitude;
+    if (finalLat === undefined || finalLng === undefined) {
+      const parsed = parseCoordinates(location);
+      if (parsed) {
+        finalLat = parsed.lat;
+        finalLng = parsed.lng;
+      }
+    }
+
+    if (finalLat !== undefined && (finalLat < -90 || finalLat > 90)) {
+      setError("Latitude must be between -90 and +90 degrees.");
+      return;
+    }
+    if (finalLng !== undefined && (finalLng < -180 || finalLng > 180)) {
+      setError("Longitude must be between -180 and +180 degrees.");
+      return;
+    }
+
     setError(null);
     setSubmitting(true);
 
@@ -418,9 +487,9 @@ function RegisterAssetDialog({
         id: cleanId || undefined,
         name: name.trim(),
         asset_type: kind,
-        address: location.trim() || (latitude ? `GPS (${latitude.toFixed(4)}, ${longitude?.toFixed(4)})` : undefined),
-        latitude,
-        longitude,
+        address: location.trim() || (finalLat !== undefined ? `GPS (${finalLat.toFixed(4)}, ${finalLng?.toFixed(4)})` : undefined),
+        latitude: finalLat,
+        longitude: finalLng,
         construction_year: Number.isFinite(year) ? year : 2018,
         material: material.trim() || "Reinforced concrete",
         importance: "medium",
@@ -512,12 +581,12 @@ function RegisterAssetDialog({
             </div>
           </div>
 
-          {/* Location & GPS option */}
-          <div className="space-y-1.5 rounded-xl border border-primary/20 bg-primary/5 p-3">
+          {/* Location & Coordinates Section */}
+          <div className="space-y-2 rounded-xl border border-primary/20 bg-primary/5 p-3">
             <div className="flex items-center justify-between">
               <Label htmlFor="asset-location" className="text-xs font-semibold text-foreground flex items-center gap-1.5">
                 <MapPin className="size-3.5 text-primary" />
-                <span>Geographic Location / GPS</span>
+                <span>Geographic Location & Coordinates</span>
               </Label>
               <Button
                 type="button"
@@ -531,18 +600,81 @@ function RegisterAssetDialog({
                 <span>{gettingGps ? "Acquiring..." : "Use Current Location (GPS)"}</span>
               </Button>
             </div>
-            <Input
-              id="asset-location"
-              value={location}
-              onChange={(event) => setLocation(event.target.value)}
-              placeholder="e.g. Route 9 · Km 14+200 or click GPS above"
-              className="rounded-lg bg-background text-xs"
-            />
-            {latitude && longitude && (
-              <p className="text-[11px] text-primary font-mono">
-                📍 Coordinates: {latitude.toFixed(5)}, {longitude.toFixed(5)}
-              </p>
-            )}
+
+            <div className="space-y-1">
+              <Input
+                id="asset-location"
+                value={location}
+                onChange={(event) => handleLocationChange(event.target.value)}
+                placeholder="e.g. Route 9 · Km 14+200 (or paste coordinates here)"
+                className="rounded-lg bg-background text-xs"
+              />
+            </div>
+
+            {/* Explicit Lat / Lng inputs */}
+            <div className="grid grid-cols-2 gap-2 pt-1 border-t border-border/40">
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="asset-lat" className="text-[11px] font-medium text-foreground">
+                    Latitude (-90 to +90)
+                  </Label>
+                  {latitude !== undefined && (latitude < -90 || latitude > 90) && (
+                    <span className="text-[10px] text-destructive font-semibold">Out of range</span>
+                  )}
+                </div>
+                <Input
+                  id="asset-lat"
+                  type="number"
+                  step="any"
+                  value={latitude !== undefined ? latitude : ""}
+                  onChange={(e) => handleLatChange(e.target.value)}
+                  placeholder="e.g. 19.0760"
+                  className="rounded-lg bg-background font-mono text-xs"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="asset-lng" className="text-[11px] font-medium text-foreground">
+                    Longitude (-180 to +180)
+                  </Label>
+                  {longitude !== undefined && (longitude < -180 || longitude > 180) && (
+                    <span className="text-[10px] text-destructive font-semibold">Out of range</span>
+                  )}
+                </div>
+                <Input
+                  id="asset-lng"
+                  type="number"
+                  step="any"
+                  value={longitude !== undefined ? longitude : ""}
+                  onChange={(e) => handleLngChange(e.target.value)}
+                  placeholder="e.g. 72.8777"
+                  className="rounded-lg bg-background font-mono text-xs"
+                />
+              </div>
+            </div>
+
+            {/* Coordinate Status / Swap */}
+            <div className="flex items-center justify-between text-[11px] pt-0.5">
+              {latitude !== undefined && longitude !== undefined ? (
+                <div className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-mono text-[11px]">
+                  <span>📍 GPS: {Number(latitude).toFixed(5)}, {Number(longitude).toFixed(5)}</span>
+                </div>
+              ) : (
+                <span className="text-muted-foreground text-[10px]">
+                  Enter coordinates or paste them to place marker on the damage map.
+                </span>
+              )}
+              {latitude !== undefined && longitude !== undefined && (
+                <button
+                  type="button"
+                  onClick={swapCoords}
+                  className="text-[10px] text-primary underline hover:opacity-80 cursor-pointer"
+                >
+                  Swap Lat/Lng
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3">

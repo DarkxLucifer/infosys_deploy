@@ -165,8 +165,26 @@ function MapRecenter({ assets }: { assets: MapAssetItem[] }) {
   const map = useMap();
   useEffect(() => {
     if (assets.length === 0) return;
-    const bounds = L.latLngBounds(assets.map((a) => [a.latitude, a.longitude]));
-    map.fitBounds(bounds, { padding: [50, 50], maxZoom: 14 });
+    const valid = assets.filter(
+      (a) =>
+        typeof a.latitude === "number" &&
+        !isNaN(a.latitude) &&
+        typeof a.longitude === "number" &&
+        !isNaN(a.longitude) &&
+        a.latitude >= -90 &&
+        a.latitude <= 90 &&
+        a.longitude >= -180 &&
+        a.longitude <= 180
+    );
+    if (valid.length === 0) return;
+    if (valid.length === 1) {
+      map.setView([valid[0].latitude, valid[0].longitude], 13);
+      return;
+    }
+    const bounds = L.latLngBounds(valid.map((a) => [a.latitude, a.longitude]));
+    if (bounds.isValid()) {
+      map.fitBounds(bounds, { padding: [50, 50], maxZoom: 14 });
+    }
   }, [assets, map]);
   return null;
 }
@@ -463,7 +481,19 @@ export function DamageMapPage() {
           <MapRecenter assets={filteredAssets} />
 
           {/* Render Markers */}
-          {filteredAssets.map((asset) => {
+          {filteredAssets
+            .filter(
+              (asset) =>
+                typeof asset.latitude === "number" &&
+                !isNaN(asset.latitude) &&
+                typeof asset.longitude === "number" &&
+                !isNaN(asset.longitude) &&
+                asset.latitude >= -90 &&
+                asset.latitude <= 90 &&
+                asset.longitude >= -180 &&
+                asset.longitude <= 180
+            )
+            .map((asset) => {
             const icon = createAssetDivIcon(asset);
             const isZoomedIn = currentZoom >= 12;
 
