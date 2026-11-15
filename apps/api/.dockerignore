@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+*.db-shm
+*.db-wal
+test_*.db
+.env.local
+.git
+.github

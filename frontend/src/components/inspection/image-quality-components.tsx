@@ -1181,9 +1181,9 @@ export function ImageDetailsDrawer({
     photo?.version,
   ]);
 
-  if (!photo) return null;
-
   const [analyzingAi, setAnalyzingAi] = useState(false);
+
+  if (!photo) return null;
 
   const qualityReport = details?.qualityReport || photo.qualityReport;
   const processingRun = details?.processingRun || photo.processingRun;
