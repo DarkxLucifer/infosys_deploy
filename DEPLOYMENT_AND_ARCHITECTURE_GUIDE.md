@@ -316,6 +316,42 @@ When optical calibration is absent, the system evaluates:
 
 *Morphological Escalation*: Photos with detected **Exposed Reinforcing Steel (Rebar)** or **Active Concrete Spalling** automatically escalate to `Critical` severity regardless of crack width.
 
+### 3.8 Stage 2F: Explainable AI (XAI) & Visual Attribution Engine (`explainable_ai.py`)
+
+To ensure civil engineers can audit, defend, and verify why deep neural networks declared an infrastructure defect, InfraScan embeds an automated Explainable AI (XAI) Engine adhering to PDF Section 12 (Page 15) and Section 18 (Page 21):
+
+```
++---------------------------------------------------------------------------------------------------+
+|                            5-WAY UNIFIED VISUAL EXPLANATION STRIP                                 |
+|                                                                                                   |
+|  [ 1. Original Image ] ──► [ 2. Defect Detection ] ──► [ 3. U-Net Mask ]                          |
+|         Raw Photo            RF-DETR / YOLO Box        Crimson 45% Alpha                          |
+|                                                                                                   |
+|                                ──► [ 4. AI Attention Map ] ──► [ 5. Damage Assessment ]           |
+|                                      Grad-CAM++ Heatmap           AASHTO Severity & Action        |
++---------------------------------------------------------------------------------------------------+
+```
+
+#### Visual Explanation Modalities:
+1. **Grad-CAM (Gradient-Weighted Class Activation Mapping)**:
+   Computes activation gradients flowing into the final convolutional layer of ResNet-18 (`layer4[1].conv2`):
+   $$\alpha_k^c = \frac{1}{Z} \sum_{i} \sum_{j} \frac{\partial Y^c}{\partial A_{i, j}^k}, \quad L_{\text{Grad-CAM}}^c = \text{ReLU}\left(\sum_k \alpha_k^c A^k\right)$$
+2. **Grad-CAM++**:
+   Incorporates second- and third-order positive partial derivatives, delivering superior localization for multiple fine hairline crack branches within the same structural member.
+3. **Spatial Feature Attention Maps**:
+   Evaluates cross-channel energy activation norms ($L_2$ norm along channel axis $C$) independent of classification gradients, highlighting all structural discontinuities.
+4. **Input Saliency Maps**:
+   Computes vanilla input-space pixel attributions via $\left|\nabla_x Y^c\right|$, revealing individual edge boundaries influencing the prediction.
+
+#### Runtime Engineering & Concurrency:
+- **Device & Backward Hook Locks**: PyTorch backward graph passes are executed within a dedicated mutex (`_XAI_LOCK = threading.Lock()`) to prevent race conditions during forward/backward hook execution.
+- **Dynamic Colormap Synthesis**: Heatmaps are normalized to $[0, 1]$, colorized via OpenCV (`COLORMAP_TURBO`, `COLORMAP_JET`, `COLORMAP_PLASMA`, `COLORMAP_VIRIDIS`, `COLORMAP_INFERNO`), and composited onto original photographs.
+- **REST API Endpoints**:
+  - `GET /api/v1/images/{image_id}/xai`: Returns structured XAI metadata, target class, confidence, top decision factors, and variant image URLs.
+  - `GET /api/v1/images/{image_id}/xai?variant={gradcam|gradcam_pp|attention|saliency}&colormap={turbo|jet|plasma}`: Streams on-demand blended visual heatmaps.
+- **Interactive UI Integration**:
+  Rendered in the right sidebar drawer (`ImageDetailsDrawer` in `image-quality-components.tsx`) under the **Explainable AI** tab with an interactive opacity slider ($0\%-100\%$), colormap picker, and multi-model explainability correlation matrix.
+
 ---
 
 ## 4. Step-by-Step Installation & Setup (uv & npm)
@@ -796,6 +832,7 @@ All operational settings are parsed by `apps/api/app/config.py` from the root `.
 │       │       ├── crack_geometry.py     <- Skeleton centerline graph, EDT width, PCA angle
 │       │       ├── damage_assessment.py  <- AASHTO / Scale-invariant damage severity engine
 │       │       ├── email.py              <- aiosmtplib transactional email dispatcher
+│       │       ├── explainable_ai.py     <- Explainable AI (XAI) service (Grad-CAM, Grad-CAM++, Attention, Saliency)
 │       │       ├── image_quality.py      <- 7-point OpenCV quality audit & preprocessing
 │       │       ├── priority_engine.py    <- P1-P5 multi-factor maintenance priority matrix
 │       │       ├── reporting.py          <- ReportLab certified PDF generator
@@ -815,6 +852,7 @@ All operational settings are parsed by `apps/api/app/config.py` from the root `.
 │   │   │   │   └── role-dashboards/      <- Inspector, Engineer, Manager, Maintenance, Admin
 │   │   │   ├── inspection/               <- Crack frame, comparison slider, quality drawer
 │   │   │   │   ├── crack-geometry-section.tsx <- HUD crack geometry & severity cards
+│   │   │   │   ├── explainable-ai-section.tsx <- 5-way visual strip, opacity slider, colormaps, attribution
 │   │   │   │   ├── image-quality-components.tsx <- 10 diagnostic quality & transform tools
 │   │   │   │   └── optical-calibration-modal.tsx <- Fiduciary scale calibration tool
 │   │   │   └── watermelon/               <- Astrix dashboard layout, sidebar, disclaimer
@@ -835,7 +873,8 @@ All operational settings are parsed by `apps/api/app/config.py` from the root `.
     ├── rfdetr/                           <- Labeled RF-DETR defect bounding box overlays
     ├── yolo/                             <- Fallback YOLOv8 bounding box overlays
     ├── unet/                             <- Binary masks & neon crimson overlays
-    └── geometry/                         <- Centerline skeleton HUD overlays
+    ├── geometry/                         <- Centerline skeleton HUD overlays
+    └── xai/                              <- Visual explanation heatmaps & multi-modal overlays
 ```
 
 ### 9.1 Filesystem Permissions Matrix
@@ -859,7 +898,7 @@ This section maps the operational responsibility of every key file in the InfraS
 
 | File Name | Size | Endpoints | Core Responsibilities |
 | :--- | :--- | :--- | :--- |
-| `upload.py` | 186 KB | 28 | Image upload streaming, 7-point quality audit, multi-stage AI inference orchestration, interactive Crop & Rotate transformations (`POST /api/v1/images/{id}/transform`), sound concrete confirmations, derivative file streaming (`/storage/thumbnails/{id}`). |
+| `upload.py` | 186 KB | 29 | Image upload streaming, 7-point quality audit, multi-stage AI inference orchestration, interactive Crop & Rotate transformations (`POST /api/v1/images/{id}/transform`), Explainable AI visual heatmap streaming (`GET /api/v1/images/{id}/xai`), sound concrete confirmations, derivative file streaming (`/storage/thumbnails/{id}`). |
 | `inspections.py` | 65 KB | 32 | Complete inspection lifecycle management (`draft` $\to$ `assigned` $\to$ `in_progress` $\to$ `analysing` $\to$ `pending_review` $\to$ `reviewed` $\to$ `reported`), review locking mechanism (`claimed_by`, `claimed_at`), peer review audits, engineer sign-off submission. |
 | `dashboards.py` | 57 KB | 18 | High-performance SQL aggregation feeds tailored to 5 roles: Inspector metrics (pending uploads, warnings), Civil Engineer review queue, Manager asset fleet health, Maintenance work orders, and Admin system telemetry. |
 | `assets.py` | 34 KB | 22 | Civil asset registry CRUD, GIS geolocation coordinates (`latitude`, `longitude`), asset health score calculation, regional categorization, assigned inspector bindings. |
@@ -885,6 +924,7 @@ This section maps the operational responsibility of every key file in the InfraS
 | `unet_segmentor.py` | `UNetCrackSegmentor` | Deep 4-stage DoubleConv UNet trained on CrackSeg9k. Produces pixel-level probability mask and neon crimson visual overlay. |
 | `crack_geometry.py` | `extract_crack_geometry` | Deterministic mathematical geometry engine: skeletonization, 8-connected graph traversal (1.0 vs $\sqrt{2}$), Euclidean Distance Transform (L2) width profiling, PCA dominant angle. |
 | `damage_assessment.py` | `assess_photo_damage_severity` | Evaluates structural defect severity and priority action window under AASHTO/ASTM C856 (calibrated mm) or scale-invariant density % and ratio $R$. |
+| `explainable_ai.py` | `ExplainableAIService` | Explainable AI (XAI) engine generating Grad-CAM, Grad-CAM++, Spatial Attention, and Input Saliency heatmaps with dynamic colormaps and PyTorch backward graph locks. |
 | `image_quality.py` | `assess_quality`, `preprocess_image` | 7-point OpenCV quality audit (Laplacian blur, pHash, luminance) and 9-step classical enhancement (LAB CLAHE, bilateral filter, unsharp mask, tiling). |
 | `priority_engine.py` | `calculate_priority` | Computes maintenance remediation priority ($P1$ Immediate to $P5$ Routine) by weighting severity, structural importance, progression, and material. |
 | `severity_engine.py` | `calculate_severity` | Configurable multi-factor structural defect severity scoring. |
@@ -901,7 +941,8 @@ This section maps the operational responsibility of every key file in the InfraS
 | `lib/api.ts` | Networking | Axios HTTP client configured with 95 typed API methods, automatic Bearer JWT injection, 401 response refresh token retry interceptor. |
 | `components/dashboard/inspection-new.tsx` | Acquisition UI | Field photo capture workspace supporting live camera input, drag-and-drop batch upload, GPS acquisition, photo status cards, and live U-Net thumbnail rendering. |
 | `components/inspection/crack-geometry-section.tsx` | Engineering HUD | Interactive HUD cards rendering crack surface area %, maximum thickness, total centerline length, PCA orientation vector, and defect severity rating. |
-| `components/inspection/image-quality-components.tsx` | Diagnostic Drawer | Side panel inspection drawer featuring before/after split comparison slider (Original vs CLAHE vs U-Net vs Binary Mask), 7-point quality audit scores, and interactive Crop & Rotate tool. |
+| `components/inspection/explainable-ai-section.tsx` | XAI Drawer | 5-way visual strip (Original $\to$ Detection $\to$ U-Net $\to$ AI Attention $\to$ Damage Assessment), interactive opacity slider (0-100%), colormap selector, decision influence metrics, and cross-model correlation matrix. |
+| `components/inspection/image-quality-components.tsx` | Diagnostic Drawer | Side panel inspection drawer featuring before/after split comparison slider (Original vs CLAHE vs U-Net vs Binary Mask), 7-point quality audit scores, Explainable AI tab, and interactive Crop & Rotate tool. |
 | `components/inspection/optical-calibration-modal.tsx` | Calibration UI | Interactive canvas modal allowing engineers to draw reference lines across fiduciary markers to calculate exact `mm_per_pixel` scale. |
 | `pages/review-queue.tsx` | Review Queue | Civil Engineer structural review queue displaying flagged defects, severity filters, verification locks, and sign-off workflows. |
 | `pages/damage-map.tsx` | GIS Map | Leaflet interactive map rendering civil asset markers, inspection locations, color-coded damage pins, and asset detail popups. |
@@ -1037,6 +1078,7 @@ from app.services.classifier import get_classifier
 from app.services.rfdetr_detector import get_rfdetr_detector
 from app.services.yolo_detector import get_yolo_detector
 from app.services.unet_segmentor import get_unet_segmentor
+from app.services.explainable_ai import get_xai_service
 
 print('=== 1. HARDWARE ACCELERATION ===')
 cuda_ok = torch.cuda.is_available()
@@ -1054,14 +1096,16 @@ clf = get_classifier()
 rf = get_rfdetr_detector()
 yolo = get_yolo_detector()
 unet = get_unet_segmentor()
+xai = get_xai_service()
 
 print(f'ResNet-18 Gate: {clf.is_loaded} (Engine: {clf.engine_type})')
 print(f'RF-DETR Medium: {rf.is_loaded}')
 print(f'YOLOv8 Localizer: {yolo.is_loaded}')
 print(f'UNet Segmentor: {unet.is_loaded}')
+print(f'Explainable AI: {xai.is_loaded} (Device: {xai.device})')
 
 print('\n================================')
-if cuda_ok and clf.is_loaded and rf.is_loaded and yolo.is_loaded and unet.is_loaded:
+if cuda_ok and clf.is_loaded and rf.is_loaded and yolo.is_loaded and unet.is_loaded and xai.is_loaded:
     print('ALL PRODUCTION PRE-FLIGHT CHECKS PASSED!')
     sys.exit(0)
 else:
