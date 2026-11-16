@@ -241,15 +241,22 @@ class ExplainableAIService:
         elif gradcam_norm.max() < 0.05:
             gradcam_norm = attn_norm.copy()
 
-        # Generate blended overlays
-        def make_overlay(norm_map: np.ndarray) -> np.ndarray:
-            heat = cv2.applyColorMap(np.uint8(255 * norm_map), cm)
-            return cv2.addWeighted(img_bgr, 1.0 - alpha, heat, alpha, 0)
+        # Generate pure heatmaps and blended overlays
+        cm_name = colormap_name.lower()
+        cm = COLORMAPS.get(cm_name, cv2.COLORMAP_TURBO)
 
-        overlay_gradcam = make_overlay(gradcam_norm)
-        overlay_gradcam_pp = make_overlay(gradcam_pp_norm)
-        overlay_attention = make_overlay(attn_norm)
-        overlay_saliency = make_overlay(saliency_norm)
+        pure_heatmaps = {}
+        blended_overlays = {}
+        for method_name, norm_map in [
+            ("gradcam", gradcam_norm),
+            ("gradcam_pp", gradcam_pp_norm),
+            ("attention", attn_norm),
+            ("saliency", saliency_norm),
+        ]:
+            pure_heat = cv2.applyColorMap(np.uint8(255 * norm_map), cm)
+            blend_heat = cv2.addWeighted(img_bgr, 1.0 - alpha, pure_heat, alpha, 0)
+            pure_heatmaps[method_name] = pure_heat
+            blended_overlays[method_name] = blend_heat
 
         # Quantitative Metrics
         hotspot_threshold = 0.55
@@ -276,7 +283,7 @@ class ExplainableAIService:
             "crack_probability": round(crack_prob, 4),
             "uncracked_probability": round(uncracked_prob, 4),
             "confidence": round(max(crack_prob, uncracked_prob), 4),
-            "colormap": colormap_name,
+            "colormap": cm_name,
             "hotspot_percentage": hotspot_pct,
             "explanation_summary": summary,
             "maps": {
@@ -285,12 +292,8 @@ class ExplainableAIService:
                 "attention": attn_norm,
                 "saliency": saliency_norm,
             },
-            "overlays": {
-                "gradcam": overlay_gradcam,
-                "gradcam_pp": overlay_gradcam_pp,
-                "attention": overlay_attention,
-                "saliency": overlay_saliency,
-            }
+            "pure_heatmaps": pure_heatmaps,
+            "overlays": blended_overlays
         }
 
     def _generate_fallback_xai(
@@ -353,13 +356,26 @@ class ExplainableAIService:
         out_path = Path(output_dir)
         out_path.mkdir(parents=True, exist_ok=True)
 
-        res = self.generate_xai_maps(image_input=image_input, colormap_name=colormap_name)
+        cm_name = (colormap_name or "turbo").lower()
+        res = self.generate_xai_maps(image_input=image_input, colormap_name=cm_name)
 
         artifacts = {}
-        for method_name, overlay_bgr in res["overlays"].items():
-            dest_file = out_path / f"{image_id}_{method_name}.jpg"
-            cv2.imwrite(str(dest_file), overlay_bgr, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
-            artifacts[method_name] = str(dest_file)
+        # Save pure heatmaps
+        for method_name, pure_bgr in res.get("pure_heatmaps", {}).items():
+            dest_pure = out_path / f"{image_id}_{method_name}_{cm_name}_pure.jpg"
+            cv2.imwrite(str(dest_pure), pure_bgr, [int(cv2.IMWRITE_JPEG_QUALITY), 92])
+            artifacts[f"{method_name}_pure"] = str(dest_pure)
+
+        # Save blended overlays
+        for method_name, overlay_bgr in res.get("overlays", {}).items():
+            dest_blend = out_path / f"{image_id}_{method_name}_{cm_name}_blend.jpg"
+            cv2.imwrite(str(dest_blend), overlay_bgr, [int(cv2.IMWRITE_JPEG_QUALITY), 92])
+            artifacts[f"{method_name}_blend"] = str(dest_blend)
+
+            # Default alias for backwards compatibility
+            dest_default = out_path / f"{image_id}_{method_name}.jpg"
+            cv2.imwrite(str(dest_default), overlay_bgr, [int(cv2.IMWRITE_JPEG_QUALITY), 92])
+            artifacts[method_name] = str(dest_default)
 
         # Save metadata summary
         meta = {
@@ -370,7 +386,7 @@ class ExplainableAIService:
             "confidence": res["confidence"],
             "hotspot_percentage": res["hotspot_percentage"],
             "explanation_summary": res["explanation_summary"],
-            "colormap": colormap_name,
+            "colormap": cm_name,
             "files": {k: f"{image_id}_{k}.jpg" for k in artifacts.keys()}
         }
         meta_file = out_path / f"{image_id}_xai.json"

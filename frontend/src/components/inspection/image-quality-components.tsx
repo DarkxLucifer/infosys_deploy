@@ -1505,16 +1505,20 @@ export function ImageDetailsDrawer({
           </div>
         ) : (
           <Tabs defaultValue="compare" className="w-full">
-            <TabsList className="grid grid-cols-4 sm:grid-cols-8 h-auto p-1 bg-muted/60 rounded-xl mb-4 text-xs gap-1">
-              <TabsTrigger value="xai" className="rounded-lg font-semibold text-primary">Explainable AI</TabsTrigger>
-              <TabsTrigger value="compare" className="rounded-lg">Compare</TabsTrigger>
-              <TabsTrigger value="ai" className="rounded-lg">AI Model</TabsTrigger>
-              <TabsTrigger value="quality" className="rounded-lg">Quality (7)</TabsTrigger>
-              <TabsTrigger value="processing" className="rounded-lg">Pipeline</TabsTrigger>
-              <TabsTrigger value="augmentations" className="rounded-lg">Augment (4)</TabsTrigger>
-              <TabsTrigger value="metadata" className="rounded-lg">Metadata</TabsTrigger>
-              <TabsTrigger value="geometry" className="rounded-lg">Geometry</TabsTrigger>
-            </TabsList>
+            <div className="w-full overflow-x-auto pb-1.5 mb-3 scrollbar-none no-scrollbar">
+              <TabsList className="inline-flex w-max min-w-full items-center justify-start p-1 bg-muted/60 rounded-xl text-xs gap-1.5">
+                <TabsTrigger value="xai" className="rounded-lg font-bold shrink-0 px-3 py-1.5 whitespace-nowrap text-primary data-[state=active]:bg-background data-[state=active]:text-primary data-[state=active]:shadow-xs">
+                  Explainable AI
+                </TabsTrigger>
+                <TabsTrigger value="compare" className="rounded-lg shrink-0 px-3 py-1.5 whitespace-nowrap">Compare</TabsTrigger>
+                <TabsTrigger value="ai" className="rounded-lg shrink-0 px-3 py-1.5 whitespace-nowrap">AI Model</TabsTrigger>
+                <TabsTrigger value="quality" className="rounded-lg shrink-0 px-3 py-1.5 whitespace-nowrap">Quality (7)</TabsTrigger>
+                <TabsTrigger value="processing" className="rounded-lg shrink-0 px-3 py-1.5 whitespace-nowrap">Pipeline</TabsTrigger>
+                <TabsTrigger value="augmentations" className="rounded-lg shrink-0 px-3 py-1.5 whitespace-nowrap">Augment (4)</TabsTrigger>
+                <TabsTrigger value="metadata" className="rounded-lg shrink-0 px-3 py-1.5 whitespace-nowrap">Metadata</TabsTrigger>
+                <TabsTrigger value="geometry" className="rounded-lg shrink-0 px-3 py-1.5 whitespace-nowrap">Geometry</TabsTrigger>
+              </TabsList>
+            </div>
 
             {/* TAB: Explainable AI Module (Grad-CAM, Grad-CAM++, Attention, Saliency, 5-Way Strip) */}
             <TabsContent value="xai" className="space-y-4">

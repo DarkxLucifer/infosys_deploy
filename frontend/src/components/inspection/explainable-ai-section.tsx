@@ -58,10 +58,11 @@ export function ExplainableAISection({
 }: ExplainableAISectionProps) {
   const [activeMethod, setActiveMethod] = useState<"gradcam" | "gradcam_pp" | "attention" | "saliency">("gradcam");
   const [opacity, setOpacity] = useState<number>(65);
-  const [viewMode, setViewMode] = useState<"blend" | "side_by_side" | "heatmap_only" | "original_only">("blend");
+  const [viewMode, setViewMode] = useState<"blend" | "side_by_side" | "heatmap_only">("blend");
   const [colormap, setColormap] = useState<"turbo" | "jet" | "viridis" | "inferno">("turbo");
-  const [activeStripStep, setActiveStripStep] = useState<number>(3); // Default to Step 4: AI Attention / Heatmap
+  const [activeStripStep, setActiveStripStep] = useState<number>(3); // Default: Step 4 (AI Attention / Heatmap)
   const [loading, setLoading] = useState<boolean>(false);
+  const [imageLoading, setImageLoading] = useState<boolean>(false);
   const [xaiData, setXaiData] = useState<any>(null);
   const [imageError, setImageError] = useState<boolean>(false);
 
@@ -70,7 +71,7 @@ export function ExplainableAISection({
     let isMounted = true;
     if (!photo?.id) return;
 
-    // Check if XAI data is already present in photo or details
+    setImageError(false);
     const existingXai =
       details?.explainableAi ||
       details?.explainable_ai ||
@@ -84,7 +85,6 @@ export function ExplainableAISection({
       setXaiData(existingXai);
     }
 
-    // Always fetch fresh / cached XAI metadata from API
     setLoading(true);
     api.getImageXai(photo.id)
       .then((data) => {
@@ -94,7 +94,6 @@ export function ExplainableAISection({
         }
       })
       .catch((err) => {
-        // Fallback gracefully
         console.warn("Could not fetch XAI metadata:", err);
       })
       .finally(() => {
@@ -106,13 +105,20 @@ export function ExplainableAISection({
     };
   }, [photo?.id, photo?.version]);
 
+  // Reset image error and set loading when method, colormap, or viewMode changes
+  useEffect(() => {
+    setImageError(false);
+    setImageLoading(true);
+  }, [activeMethod, colormap, viewMode, photo?.id]);
+
   const handleRefresh = async () => {
     if (!photo?.id) return;
     setLoading(true);
+    setImageLoading(true);
+    setImageError(false);
     try {
       const data = await api.getImageXai(photo.id);
       setXaiData(data);
-      setImageError(false);
       toast.success("Explainable AI heatmaps refreshed");
     } catch (e: any) {
       toast.error("Failed to refresh XAI maps: " + (e.message || "Unknown error"));
@@ -121,7 +127,7 @@ export function ExplainableAISection({
     }
   };
 
-  // Resolve base image URL
+  // Base raw image URL
   const baseImgSrc = getAuthUrl(
     originalUrl ||
     details?.originalUrl ||
@@ -130,12 +136,37 @@ export function ExplainableAISection({
     photo?.previewUrl
   );
 
-  // Resolve heatmap overlay URL based on method
-  const heatmapSrc = getAuthUrl(
-    `/api/v1/images/${photo.id}/file?variant=${activeMethod}&colormap=${colormap}&v=${photo?.version || 1}`
+  // Crack detection URL (RF-DETR or YOLO)
+  const detectionImgSrc = getAuthUrl(
+    rfdetrUrl ||
+    details?.rfdetrUrl ||
+    photo?.rfdetrUrl ||
+    yoloUrl ||
+    details?.yoloUrl ||
+    photo?.yoloUrl ||
+    `/api/v1/images/${photo.id}/file?variant=rfdetr`
   );
 
-  // Classification & confidence metrics
+  // U-Net segmentation mask overlay URL
+  const segmentationImgSrc = getAuthUrl(
+    unetUrl ||
+    details?.unetUrl ||
+    photo?.unetUrl ||
+    unetMaskUrl ||
+    `/api/v1/images/${photo.id}/file?variant=unet`
+  );
+
+  // Pure Heatmap URL (unblended colormap)
+  const pureHeatmapSrc = getAuthUrl(
+    `/api/v1/images/${photo.id}/file?variant=${activeMethod}&colormap=${colormap}&mode=pure&v=${photo?.version || 1}_${activeMethod}_${colormap}`
+  );
+
+  // Pre-blended Heatmap URL (backend weighted blend)
+  const blendedHeatmapSrc = getAuthUrl(
+    `/api/v1/images/${photo.id}/file?variant=${activeMethod}&colormap=${colormap}&mode=blend&v=${photo?.version || 1}_${activeMethod}_${colormap}`
+  );
+
+  // Metrics
   const crackProb = typeof aiClassification?.crack_probability === "number"
     ? aiClassification.crack_probability
     : (xaiData?.crack_probability ?? 0.0);
@@ -146,12 +177,12 @@ export function ExplainableAISection({
   const confPercent = Math.round((isCracked ? crackProb : (1.0 - crackProb)) * 100);
   const hotspotPct = xaiData?.hotspot_percentage ?? (isCracked ? 14.8 : 2.4);
 
-  // 5-Way Visual Explanation Strip items
+  // 5-Way Visual Explanation Strip definitions
   const visualSteps = [
     {
       step: 1,
       title: "Original Photo",
-      subtitle: "Raw inspection capture",
+      subtitle: "Raw field capture",
       src: baseImgSrc,
       badge: "Unprocessed",
       badgeColor: "bg-muted text-foreground border-border",
@@ -161,8 +192,8 @@ export function ExplainableAISection({
       step: 2,
       title: "Crack Detection",
       subtitle: "RF-DETR / YOLOv8 boxes",
-      src: getAuthUrl(rfdetrUrl || yoloUrl || baseImgSrc),
-      badge: rfdetrDetection?.has_defect ? "Defect Boxed" : (isCracked ? "Localizing" : "No Defect"),
+      src: detectionImgSrc,
+      badge: rfdetrDetection?.has_defect ? "Defect Boxed" : (isCracked ? "RF-DETR Active" : "No Defect"),
       badgeColor: rfdetrDetection?.has_defect ? "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/30" : "bg-muted text-muted-foreground border-border",
       desc: "Bounding boxes identifying localized damage regions."
     },
@@ -170,8 +201,8 @@ export function ExplainableAISection({
       step: 3,
       title: "Segmentation Mask",
       subtitle: "U-Net pixel-level mask",
-      src: getAuthUrl(unetUrl || unetMaskUrl || baseImgSrc),
-      badge: unetSegmentation?.crack_area_pct ? `${unetSegmentation.crack_area_pct}% Area` : (isCracked ? "U-Net Segmented" : "0.0% Crack"),
+      src: segmentationImgSrc,
+      badge: unetSegmentation?.crack_area_pct ? `${unetSegmentation.crack_area_pct}% Area` : (isCracked ? "U-Net Mask" : "0.0% Crack"),
       badgeColor: isCracked ? "bg-destructive/10 text-destructive border-destructive/30" : "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30",
       desc: "Pixel-accurate segmentation of concrete fracture lines."
     },
@@ -179,7 +210,7 @@ export function ExplainableAISection({
       step: 4,
       title: "AI Attention / Grad-CAM",
       subtitle: "Feature attribution heatmap",
-      src: heatmapSrc,
+      src: blendedHeatmapSrc,
       badge: `${activeMethod.toUpperCase()}`,
       badgeColor: "bg-primary/10 text-primary border-primary/30",
       desc: "Heatmap isolating image regions influencing AI inference."
@@ -188,7 +219,7 @@ export function ExplainableAISection({
       step: 5,
       title: "Damage Assessment",
       subtitle: "AASHTO / ASTM rating",
-      src: null, // Card view
+      src: null,
       badge: damageAssessment?.severity || (isCracked ? "Moderate Defect" : "Sound Surface"),
       badgeColor: isCracked ? "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/30" : "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30",
       desc: "Engineering structural appraisal & action priority."
@@ -240,7 +271,7 @@ export function ExplainableAISection({
               5-Way Unified Visual Explanation Pipeline
             </span>
             <span className="text-[10px] text-muted-foreground">
-              Click any stage to inspect
+              Click stage to view in main stage
             </span>
           </div>
 
@@ -250,10 +281,13 @@ export function ExplainableAISection({
               return (
                 <div
                   key={step.step}
-                  onClick={() => setActiveStripStep(idx)}
+                  onClick={() => {
+                    setActiveStripStep(idx);
+                    setImageLoading(true);
+                  }}
                   className={`group relative rounded-xl border p-2 cursor-pointer transition-all duration-150 flex flex-col justify-between ${
                     isSelected
-                      ? "border-primary bg-primary/5 shadow-xs ring-1 ring-primary/30"
+                      ? "border-primary bg-primary/10 shadow-xs ring-2 ring-primary/40"
                       : "border-border/70 bg-muted/20 hover:border-border hover:bg-muted/40"
                   }`}
                 >
@@ -273,7 +307,6 @@ export function ExplainableAISection({
                         alt={step.title}
                         className="w-full h-full object-cover transition-transform group-hover:scale-105"
                         onError={(e) => {
-                          // Fallback to base image
                           if (baseImgSrc) (e.target as HTMLImageElement).src = baseImgSrc;
                         }}
                       />
@@ -304,26 +337,29 @@ export function ExplainableAISection({
 
       {/* ─── Interactive Explainability Visualizer & Blending Canvas ──────────── */}
       <div className="rounded-xl border border-border bg-card p-4 space-y-3.5 shadow-xs">
-        {/* Visualizer Controls Bar */}
+        {/* Controls Bar */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2 border-b border-border/70">
           {/* Method Selector */}
           <div className="space-y-1">
             <span className="text-[11px] font-bold text-muted-foreground tracking-wider uppercase">
-              Attribution Method
+              Attribution Method (ResNet-18 layer4)
             </span>
             <div className="flex items-center gap-1.5 flex-wrap">
               {[
-                { id: "gradcam", label: "Grad-CAM", tag: "layer4 CAM" },
-                { id: "gradcam_pp", label: "Grad-CAM++", tag: "Hairline Cracks" },
-                { id: "attention", label: "Attention Map", tag: "L2 Feature Norm" },
+                { id: "gradcam", label: "Grad-CAM", tag: "Class Activation" },
+                { id: "gradcam_pp", label: "Grad-CAM++", tag: "Hairline Focus" },
+                { id: "attention", label: "Attention Map", tag: "Feature Energy" },
                 { id: "saliency", label: "Saliency", tag: "Pixel Gradient" },
               ].map((m) => (
                 <button
                   key={m.id}
                   type="button"
-                  onClick={() => setActiveMethod(m.id as any)}
+                  onClick={() => {
+                    setActiveMethod(m.id as any);
+                    setActiveStripStep(3); // Switch viewer to Step 4 (AI Heatmap)
+                  }}
                   className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
-                    activeMethod === m.id
+                    activeMethod === m.id && activeStripStep === 3
                       ? "bg-primary text-primary-foreground shadow-xs"
                       : "bg-muted/70 text-foreground hover:bg-muted border border-border/60"
                   }`}
@@ -340,19 +376,29 @@ export function ExplainableAISection({
             <div className="flex items-center bg-muted/60 p-0.5 rounded-lg border border-border/70 text-xs">
               <button
                 type="button"
-                onClick={() => setViewMode("blend")}
-                className={`px-2 py-1 rounded-md font-medium transition-all ${
-                  viewMode === "blend" ? "bg-background text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground"
+                onClick={() => {
+                  setViewMode("blend");
+                  setActiveStripStep(3);
+                }}
+                className={`px-2.5 py-1 rounded-md font-medium transition-all ${
+                  viewMode === "blend" && activeStripStep === 3
+                    ? "bg-background text-foreground shadow-xs font-bold"
+                    : "text-muted-foreground hover:text-foreground"
                 }`}
-                title="Overlay heatmap with opacity blending"
+                title="Overlay heatmap with live opacity blending"
               >
                 Blend
               </button>
               <button
                 type="button"
-                onClick={() => setViewMode("side_by_side")}
-                className={`px-2 py-1 rounded-md font-medium transition-all ${
-                  viewMode === "side_by_side" ? "bg-background text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground"
+                onClick={() => {
+                  setViewMode("side_by_side");
+                  setActiveStripStep(3);
+                }}
+                className={`px-2.5 py-1 rounded-md font-medium transition-all ${
+                  viewMode === "side_by_side" && activeStripStep === 3
+                    ? "bg-background text-foreground shadow-xs font-bold"
+                    : "text-muted-foreground hover:text-foreground"
                 }`}
                 title="View original and heatmap side-by-side"
               >
@@ -360,11 +406,16 @@ export function ExplainableAISection({
               </button>
               <button
                 type="button"
-                onClick={() => setViewMode("heatmap_only")}
-                className={`px-2 py-1 rounded-md font-medium transition-all ${
-                  viewMode === "heatmap_only" ? "bg-background text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground"
+                onClick={() => {
+                  setViewMode("heatmap_only");
+                  setActiveStripStep(3);
+                }}
+                className={`px-2.5 py-1 rounded-md font-medium transition-all ${
+                  viewMode === "heatmap_only" && activeStripStep === 3
+                    ? "bg-background text-foreground shadow-xs font-bold"
+                    : "text-muted-foreground hover:text-foreground"
                 }`}
-                title="View isolated heatmap"
+                title="View pure isolated heatmap"
               >
                 Heatmap
               </button>
@@ -373,7 +424,10 @@ export function ExplainableAISection({
             {/* Colormap */}
             <select
               value={colormap}
-              onChange={(e) => setColormap(e.target.value as any)}
+              onChange={(e) => {
+                setColormap(e.target.value as any);
+                setActiveStripStep(3);
+              }}
               className="h-8 rounded-lg bg-muted/60 border border-border/70 px-2 text-xs font-medium text-foreground cursor-pointer"
             >
               <option value="turbo">Turbo (Spectral)</option>
@@ -384,15 +438,15 @@ export function ExplainableAISection({
           </div>
         </div>
 
-        {/* Live Opacity Slider (When in Blend Mode) */}
-        {viewMode === "blend" && (
+        {/* Live Opacity Slider (When in Blend Mode and Step 4 is active) */}
+        {activeStripStep === 3 && viewMode === "blend" && (
           <div className="bg-muted/30 rounded-xl p-3 border border-border/60 flex flex-col sm:flex-row sm:items-center gap-3">
-            <div className="flex items-center justify-between sm:w-44 text-xs font-semibold text-foreground">
+            <div className="flex items-center justify-between sm:w-48 text-xs font-semibold text-foreground">
               <span className="flex items-center gap-1.5">
                 <Sliders className="size-3.5 text-primary" />
-                Heatmap Blending:
+                Live Heatmap Blend:
               </span>
-              <span className="font-mono text-primary">{opacity}%</span>
+              <span className="font-mono text-primary font-bold">{opacity}%</span>
             </div>
             <div className="flex-1 flex items-center gap-2">
               <span className="text-[10px] text-muted-foreground font-semibold">0% (Photo)</span>
@@ -409,90 +463,217 @@ export function ExplainableAISection({
           </div>
         )}
 
-        {/* ─── Image Display Stage ────────────────────────────────────────── */}
-        <div className="relative rounded-xl overflow-hidden bg-black/10 dark:bg-black/60 border border-border min-h-[320px] flex items-center justify-center">
-          {loading && (
-            <div className="absolute inset-0 bg-background/70 backdrop-blur-xs flex flex-col items-center justify-center z-20 gap-2">
-              <Loader2 className="size-8 text-primary animate-spin" />
-              <span className="text-xs font-semibold text-foreground">Computing {activeMethod.toUpperCase()} backpropagation…</span>
+        {/* ─── Main Image Stage ───────────────────────────────────────────── */}
+        <div className="relative rounded-xl overflow-hidden bg-black/10 dark:bg-black/60 border border-border min-h-[340px] flex items-center justify-center">
+          {imageLoading && (
+            <div className="absolute inset-0 bg-background/50 backdrop-blur-xs flex flex-col items-center justify-center z-20 gap-2 pointer-events-none">
+              <Loader2 className="size-7 text-primary animate-spin" />
+              <span className="text-xs font-medium text-foreground">Loading visual explanation…</span>
             </div>
           )}
 
-          {viewMode === "blend" && (
-            <div className="relative w-full aspect-video flex items-center justify-center overflow-hidden">
-              {/* Bottom Layer: Original / Preprocessed Photo */}
+          {/* STAGE A: Step 1 (Original Photo) */}
+          {activeStripStep === 0 && (
+            <div className="relative w-full aspect-video flex items-center justify-center">
               {baseImgSrc && (
                 <img
                   src={baseImgSrc}
-                  alt="Original concrete surface"
-                  className="absolute inset-0 w-full h-full object-contain"
+                  alt="Original Concrete Surface"
+                  className="w-full h-full object-contain"
+                  onLoad={() => setImageLoading(false)}
                 />
               )}
+              <div className="absolute top-2.5 left-2.5 px-2 py-0.5 rounded-md bg-black/70 text-white text-[10px] font-semibold backdrop-blur-xs">
+                Step 1: Original Field Capture
+              </div>
+            </div>
+          )}
 
-              {/* Top Layer: Explainability Heatmap with Live CSS Opacity */}
-              {heatmapSrc && !imageError && (
-                <img
-                  src={heatmapSrc}
-                  alt={`${activeMethod} heatmap`}
-                  style={{ opacity: opacity / 100 }}
-                  className="absolute inset-0 w-full h-full object-contain transition-opacity duration-75 pointer-events-none"
-                  onError={() => setImageError(true)}
-                />
-              )}
+          {/* STAGE B: Step 2 (Crack Detection) */}
+          {activeStripStep === 1 && (
+            <div className="relative w-full aspect-video flex items-center justify-center">
+              <img
+                src={detectionImgSrc}
+                alt="Crack Detection Overlay"
+                className="w-full h-full object-contain"
+                onLoad={() => setImageLoading(false)}
+                onError={(e) => {
+                  if (baseImgSrc) (e.target as HTMLImageElement).src = baseImgSrc;
+                }}
+              />
+              <div className="absolute top-2.5 left-2.5 px-2 py-0.5 rounded-md bg-amber-950/80 text-amber-200 border border-amber-500/30 text-[10px] font-semibold backdrop-blur-xs">
+                Step 2: RF-DETR / YOLOv8 Defect Localization
+              </div>
+            </div>
+          )}
 
-              {imageError && (
-                <div className="absolute bottom-3 left-3 bg-card/90 border border-border px-3 py-1.5 rounded-lg text-xs text-muted-foreground z-10">
-                  Heatmap rendering on demand. Click "Recalculate" if overlay is delayed.
+          {/* STAGE C: Step 3 (Segmentation Mask) */}
+          {activeStripStep === 2 && (
+            <div className="relative w-full aspect-video flex items-center justify-center">
+              <img
+                src={segmentationImgSrc}
+                alt="U-Net Segmentation Mask"
+                className="w-full h-full object-contain"
+                onLoad={() => setImageLoading(false)}
+                onError={(e) => {
+                  if (baseImgSrc) (e.target as HTMLImageElement).src = baseImgSrc;
+                }}
+              />
+              <div className="absolute top-2.5 left-2.5 px-2 py-0.5 rounded-md bg-destructive/80 text-destructive-foreground border border-destructive/30 text-[10px] font-semibold backdrop-blur-xs">
+                Step 3: U-Net Pixel-Level Fracture Segmentation
+              </div>
+            </div>
+          )}
+
+          {/* STAGE D: Step 4 (AI Explainability Heatmap / Blend / Split) */}
+          {activeStripStep === 3 && (
+            <>
+              {/* D.1 Blend Mode */}
+              {viewMode === "blend" && (
+                <div className="relative w-full aspect-video flex items-center justify-center overflow-hidden">
+                  {/* Bottom Layer: Base Image */}
+                  {baseImgSrc && (
+                    <img
+                      src={baseImgSrc}
+                      alt="Base Concrete Surface"
+                      className="absolute inset-0 w-full h-full object-contain"
+                      onLoad={() => setImageLoading(false)}
+                    />
+                  )}
+
+                  {/* Top Layer: Pure Heatmap with Dynamic CSS Opacity */}
+                  {!imageError && (
+                    <img
+                      key={`blend-${activeMethod}-${colormap}`}
+                      src={pureHeatmapSrc}
+                      alt={`${activeMethod} heatmap`}
+                      style={{ opacity: opacity / 100 }}
+                      className="absolute inset-0 w-full h-full object-contain transition-opacity duration-75 pointer-events-none"
+                      onLoad={() => setImageLoading(false)}
+                      onError={() => {
+                        setImageError(true);
+                        setImageLoading(false);
+                      }}
+                    />
+                  )}
+
+                  {imageError && (
+                    <div className="absolute bottom-3 left-3 bg-card/90 border border-border px-3 py-1.5 rounded-lg text-xs text-muted-foreground z-10 flex items-center gap-2">
+                      <span>Heatmap rendering on demand.</span>
+                      <Button size="xs" variant="outline" onClick={handleRefresh}>
+                        Retry
+                      </Button>
+                    </div>
+                  )}
+
+                  <div className="absolute top-2.5 left-2.5 px-2 py-0.5 rounded-md bg-black/70 text-white text-[10px] font-semibold backdrop-blur-xs flex items-center gap-1.5">
+                    <span className="size-1.5 rounded-full bg-primary animate-pulse" />
+                    <span>Blend: {opacity}% {activeMethod.toUpperCase()} ({colormap})</span>
+                  </div>
                 </div>
               )}
-            </div>
-          )}
 
-          {viewMode === "side_by_side" && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 w-full h-full gap-1 p-1">
-              <div className="relative aspect-video rounded-lg overflow-hidden border border-border/60 bg-black/20 flex flex-col justify-between">
-                <span className="absolute top-2 left-2 z-10 px-2 py-0.5 rounded-md bg-black/70 text-white text-[10px] font-semibold backdrop-blur-xs">
-                  Original Concrete Surface
-                </span>
-                {baseImgSrc && (
+              {/* D.2 Split Mode */}
+              {viewMode === "side_by_side" && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 w-full h-full gap-1 p-1">
+                  <div className="relative aspect-video rounded-lg overflow-hidden border border-border/60 bg-black/20 flex items-center justify-center">
+                    <span className="absolute top-2 left-2 z-10 px-2 py-0.5 rounded-md bg-black/70 text-white text-[10px] font-semibold backdrop-blur-xs">
+                      Original Concrete Surface
+                    </span>
+                    {baseImgSrc && (
+                      <img
+                        src={baseImgSrc}
+                        alt="Original Photo"
+                        className="w-full h-full object-contain"
+                        onLoad={() => setImageLoading(false)}
+                      />
+                    )}
+                  </div>
+                  <div className="relative aspect-video rounded-lg overflow-hidden border border-border/60 bg-black/20 flex items-center justify-center">
+                    <span className="absolute top-2 left-2 z-10 px-2 py-0.5 rounded-md bg-black/70 text-white text-[10px] font-semibold backdrop-blur-xs">
+                      {activeMethod.toUpperCase()} Heatmap ({colormap})
+                    </span>
+                    <img
+                      key={`split-${activeMethod}-${colormap}`}
+                      src={pureHeatmapSrc}
+                      alt={`${activeMethod} heatmap`}
+                      className="w-full h-full object-contain"
+                      onLoad={() => setImageLoading(false)}
+                      onError={() => {
+                        setImageError(true);
+                        setImageLoading(false);
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* D.3 Heatmap Only Mode */}
+              {viewMode === "heatmap_only" && (
+                <div className="relative w-full aspect-video flex items-center justify-center">
                   <img
-                    src={baseImgSrc}
-                    alt="Original Photo"
-                    className="w-full h-full object-contain"
-                  />
-                )}
-              </div>
-              <div className="relative aspect-video rounded-lg overflow-hidden border border-border/60 bg-black/20 flex flex-col justify-between">
-                <span className="absolute top-2 left-2 z-10 px-2 py-0.5 rounded-md bg-black/70 text-white text-[10px] font-semibold backdrop-blur-xs">
-                  {activeMethod.toUpperCase()} Heatmap ({colormap})
-                </span>
-                {heatmapSrc && (
-                  <img
-                    src={heatmapSrc}
+                    key={`pure-${activeMethod}-${colormap}`}
+                    src={pureHeatmapSrc}
                     alt={`${activeMethod} heatmap`}
                     className="w-full h-full object-contain"
+                    onLoad={() => setImageLoading(false)}
+                    onError={() => {
+                      setImageError(true);
+                      setImageLoading(false);
+                    }}
                   />
-                )}
+                  <div className="absolute top-2.5 left-2.5 px-2 py-0.5 rounded-md bg-black/70 text-white text-[10px] font-semibold backdrop-blur-xs flex items-center gap-1.5">
+                    <span className="size-1.5 rounded-full bg-primary" />
+                    <span>Pure {activeMethod.toUpperCase()} Map ({colormap})</span>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* STAGE E: Step 5 (Damage Assessment) */}
+          {activeStripStep === 4 && (
+            <div className="w-full p-6 flex flex-col items-center justify-center text-center space-y-3">
+              <div className={`p-4 rounded-full ${isCracked ? "bg-amber-500/10 text-amber-500" : "bg-emerald-500/10 text-emerald-500"}`}>
+                <ShieldAlert className="size-8" />
+              </div>
+              <div>
+                <h4 className="text-base font-bold text-foreground">
+                  {damageAssessment?.severity || (isCracked ? "Moderate Structural Defect" : "Sound Concrete Surface")}
+                </h4>
+                <p className="text-xs text-muted-foreground mt-1 max-w-md">
+                  {damageAssessment?.priority?.action || (
+                    isCracked
+                      ? "AASHTO / ASTM appraisal: Cracking confirmed across inspected concrete face requiring engineer sign-off."
+                      : "Routine maintenance classification: No critical structural fissure detected."
+                  )}
+                </p>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs w-full max-w-lg pt-2">
+                <div className="p-2 rounded-lg bg-muted/40 border border-border">
+                  <span className="text-[10px] text-muted-foreground block">Crack Density</span>
+                  <span className="font-bold text-foreground font-mono">{unetSegmentation?.crack_area_pct ?? (isCracked ? "22.6%" : "0.0%")}</span>
+                </div>
+                <div className="p-2 rounded-lg bg-muted/40 border border-border">
+                  <span className="text-[10px] text-muted-foreground block">AI Confidence</span>
+                  <span className="font-bold text-foreground font-mono">{confPercent}%</span>
+                </div>
+                <div className="p-2 rounded-lg bg-muted/40 border border-border">
+                  <span className="text-[10px] text-muted-foreground block">Decision Gate</span>
+                  <span className="font-bold text-foreground font-mono">80.0% Gate</span>
+                </div>
+                <div className="p-2 rounded-lg bg-muted/40 border border-border">
+                  <span className="text-[10px] text-muted-foreground block">Review Status</span>
+                  <span className="font-bold text-foreground font-mono">{isCracked ? "Needs Review" : "Approved"}</span>
+                </div>
               </div>
             </div>
           )}
 
-          {viewMode === "heatmap_only" && (
-            <div className="relative w-full aspect-video flex items-center justify-center">
-              {heatmapSrc && (
-                <img
-                  src={heatmapSrc}
-                  alt={`${activeMethod} heatmap`}
-                  className="w-full h-full object-contain"
-                />
-              )}
-            </div>
-          )}
-
-          {/* Method Watermark Tag */}
-          <div className="absolute bottom-2.5 right-2.5 z-10 flex items-center gap-1.5 bg-background/80 dark:bg-black/80 backdrop-blur-md px-2.5 py-1 rounded-lg border border-border/70 text-[10px] font-mono text-foreground">
-            <span className="size-2 rounded-full bg-primary animate-pulse" />
-            <span>Target: ResNet-18 layer4 · {activeMethod.toUpperCase()}</span>
+          {/* Watermark Tag */}
+          <div className="absolute bottom-2.5 right-2.5 z-10 flex items-center gap-1.5 bg-background/85 dark:bg-black/85 backdrop-blur-md px-2.5 py-1 rounded-lg border border-border/70 text-[10px] font-mono text-foreground">
+            <span className="size-2 rounded-full bg-primary" />
+            <span>ResNet-18 layer4 · {activeMethod.toUpperCase()}</span>
           </div>
         </div>
 
@@ -531,7 +712,6 @@ export function ExplainableAISection({
                 ({isCracked ? "Defect" : "Sound"} certainty)
               </span>
             </div>
-            {/* Progress bar with 80% marker */}
             <div className="w-full bg-muted rounded-full h-1.5 relative overflow-hidden">
               <div
                 className={`h-full rounded-full ${isCracked ? "bg-primary" : "bg-emerald-500"}`}
@@ -565,7 +745,6 @@ export function ExplainableAISection({
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
-            {/* Model 1: ResNet-18 */}
             <div className="p-2.5 rounded-lg border border-border/60 bg-card space-y-1">
               <div className="flex items-center justify-between">
                 <span className="font-bold text-foreground text-[11px]">ResNet-18 (Gate)</span>
@@ -580,7 +759,6 @@ export function ExplainableAISection({
               </p>
             </div>
 
-            {/* Model 2: RF-DETR / YOLOv8 */}
             <div className="p-2.5 rounded-lg border border-border/60 bg-card space-y-1">
               <div className="flex items-center justify-between">
                 <span className="font-bold text-foreground text-[11px]">RF-DETR / YOLO</span>
@@ -597,7 +775,6 @@ export function ExplainableAISection({
               </p>
             </div>
 
-            {/* Model 3: U-Net */}
             <div className="p-2.5 rounded-lg border border-border/60 bg-card space-y-1">
               <div className="flex items-center justify-between">
                 <span className="font-bold text-foreground text-[11px]">U-Net Segmentation</span>

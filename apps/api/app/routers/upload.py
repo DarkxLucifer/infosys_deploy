@@ -1756,6 +1756,8 @@ def get_image_file_variant(
     image_id: str,
     inspection_id: Optional[str] = None,
     variant: str = Query("processed", description="'processed' (default - returns YOLO if cracked), 'original', 'yolo', 'enhanced', or 'thumbnail'"),
+    colormap: Optional[str] = Query("turbo", description="XAI colormap: turbo, jet, viridis, inferno"),
+    mode: Optional[str] = Query("blend", description="XAI mode: blend or pure"),
     current_user: Optional[User] = Depends(get_optional_current_user),
     db: Session = Depends(get_db)
 ):
@@ -1780,7 +1782,7 @@ def get_image_file_variant(
 
     inspection = db.query(Inspection).filter(Inspection.id == image.inspection_id).first()
     if current_user:
-        is_proc_or_quality = (variant in ("processed", "yolo", "annotated", "enhanced", "cv_processed"))
+        is_proc_or_quality = (variant in ("processed", "yolo", "annotated", "enhanced", "cv_processed", "xai", "gradcam", "gradcam_pp", "gradcam_plus", "attention", "saliency", "mask", "unet", "geometry"))
         enforce_image_visibility(current_user, image, inspection, is_quality_or_processed=is_proc_or_quality)
 
     rfdetr_file = find_stored_file("rfdetr", f"{image.id}.jpg") or os.path.join(RFDETR_DIR, f"{image.id}.jpg")
@@ -1802,9 +1804,26 @@ def get_image_file_variant(
     thresh = float(ai_clf.get("threshold", 0.80)) if isinstance(ai_clf, dict) else 0.80
     is_crack_defect = bool(p_crack >= thresh)
 
-    proc_target = image.processed_path if (image.processed_path and os.path.exists(image.processed_path)) else image.original_path
+    # Multi-path robust resolution for source photo across environments
+    proc_target = None
+    for cand in [
+        image.processed_path,
+        image.original_path,
+        find_stored_file("processed", f"{image.id}.jpg"),
+        find_stored_file("uploads", image.filename) if image.filename else None,
+        find_stored_file("raw", image.filename) if image.filename else None,
+        find_stored_file("uploads", f"{image.id}.jpg"),
+        find_stored_file("raw", f"{image.id}.jpg"),
+        os.path.join(UPLOAD_DIR, image.filename) if image.filename else None,
+        os.path.join(UPLOAD_DIR, f"{image.id}.jpg"),
+        os.path.join(PROCESSED_DIR, f"{image.id}.jpg"),
+        os.path.join(API_DIR, "storage", "uploads", image.filename) if image.filename else None,
+    ]:
+        if cand and os.path.exists(cand):
+            proc_target = cand
+            break
 
-    target_path = image.original_path
+    target_path = proc_target or image.original_path
 
     if variant in ("rfdetr", "rdd2022"):
         if has_rfdetr and is_crack_defect:
@@ -1927,7 +1946,18 @@ def get_image_file_variant(
         elif variant == "saliency":
             xai_method = "saliency"
 
-        xai_file = find_stored_file("xai", f"{image.id}_{xai_method}.jpg") or os.path.join(XAI_DIR, f"{image.id}_{xai_method}.jpg")
+        cm_name = (colormap or "turbo").lower()
+        if cm_name not in ("turbo", "jet", "viridis", "inferno"):
+            cm_name = "turbo"
+
+        m_name = (mode or "blend").lower()
+        if m_name not in ("blend", "pure"):
+            m_name = "blend"
+
+        target_file_name = f"{image.id}_{xai_method}_{cm_name}_{m_name}.jpg"
+        xai_file = find_stored_file("xai", target_file_name) or os.path.join(XAI_DIR, target_file_name)
+        legacy_file = find_stored_file("xai", f"{image.id}_{xai_method}.jpg") or os.path.join(XAI_DIR, f"{image.id}_{xai_method}.jpg")
+
         if os.path.exists(xai_file):
             target_path = xai_file
         elif proc_target and os.path.exists(proc_target):
@@ -1937,17 +1967,25 @@ def get_image_file_variant(
                 xai_res = xai_svc.save_xai_artifacts(
                     image_id=image.id,
                     image_input=proc_target,
-                    output_dir=XAI_DIR
+                    output_dir=XAI_DIR,
+                    colormap_name=cm_name
                 )
-                if xai_method in xai_res.get("artifact_files", {}) and os.path.exists(xai_res["artifact_files"][xai_method]):
+                cand_key = f"{xai_method}_{m_name}"
+                if cand_key in xai_res.get("artifact_files", {}) and os.path.exists(xai_res["artifact_files"][cand_key]):
+                    target_path = xai_res["artifact_files"][cand_key]
+                elif xai_method in xai_res.get("artifact_files", {}) and os.path.exists(xai_res["artifact_files"][xai_method]):
                     target_path = xai_res["artifact_files"][xai_method]
+                elif os.path.exists(legacy_file):
+                    target_path = legacy_file
                 else:
                     target_path = proc_target
             except Exception as xai_err:
                 logger.warning("On-demand XAI generation failed in variant=%s: %s", variant, xai_err)
-                target_path = proc_target
+                target_path = legacy_file if os.path.exists(legacy_file) else proc_target
+        elif os.path.exists(legacy_file):
+            target_path = legacy_file
         else:
-            target_path = image.original_path
+            target_path = proc_target or image.original_path
 
     elif variant == "processed":
         # When crack defect was identified:
