@@ -2690,6 +2690,20 @@ export const apiService = {
     return res.json();
   },
 
+  async getImageXai(imageId: string): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/images/${imageId}/xai`, {
+      headers: authHeaders(),
+      credentials: "include",
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const err: any = new Error(data.detail?.message || data.detail || "Failed to load Explainable AI data");
+      err.response = data;
+      throw err;
+    }
+    return data;
+  },
+
   async getImageGeometry(imageId: string): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/images/${imageId}/geometry`, {
       headers: authHeaders(),

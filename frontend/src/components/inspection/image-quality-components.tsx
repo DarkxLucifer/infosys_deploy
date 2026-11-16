@@ -58,6 +58,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api, getAuthToken } from "@/lib/api";
 import { toast } from "sonner";
 import { CrackGeometrySection } from "./crack-geometry-section";
+import { ExplainableAISection } from "./explainable-ai-section";
 
 export function getAuthenticatedUrl(url?: string | null): string | undefined {
   if (!url) return undefined;
@@ -1504,7 +1505,8 @@ export function ImageDetailsDrawer({
           </div>
         ) : (
           <Tabs defaultValue="compare" className="w-full">
-            <TabsList className="grid grid-cols-7 h-9 bg-muted/60 p-1 rounded-xl mb-4 text-xs">
+            <TabsList className="grid grid-cols-4 sm:grid-cols-8 h-auto p-1 bg-muted/60 rounded-xl mb-4 text-xs gap-1">
+              <TabsTrigger value="xai" className="rounded-lg font-semibold text-primary">Explainable AI</TabsTrigger>
               <TabsTrigger value="compare" className="rounded-lg">Compare</TabsTrigger>
               <TabsTrigger value="ai" className="rounded-lg">AI Model</TabsTrigger>
               <TabsTrigger value="quality" className="rounded-lg">Quality (7)</TabsTrigger>
@@ -1513,6 +1515,25 @@ export function ImageDetailsDrawer({
               <TabsTrigger value="metadata" className="rounded-lg">Metadata</TabsTrigger>
               <TabsTrigger value="geometry" className="rounded-lg">Geometry</TabsTrigger>
             </TabsList>
+
+            {/* TAB: Explainable AI Module (Grad-CAM, Grad-CAM++, Attention, Saliency, 5-Way Strip) */}
+            <TabsContent value="xai" className="space-y-4">
+              <ExplainableAISection
+                photo={photo}
+                details={details}
+                originalUrl={originalUrl}
+                processedUrl={processedUrl}
+                rfdetrUrl={rfdetrUrl}
+                rfdetrDetection={rfdetrDetection}
+                yoloUrl={yoloUrl}
+                yoloDetection={yoloDetection}
+                unetUrl={unetUrl}
+                unetMaskUrl={unetMaskUrl}
+                unetSegmentation={unetSegmentation}
+                aiClassification={aiClassification}
+                damageAssessment={details?.damageAssessment || photo?.damageAssessment}
+              />
+            </TabsContent>
 
             {/* TAB 1: Compare Viewer & AI Classification Assessment */}
             <TabsContent value="compare" className="space-y-4">
