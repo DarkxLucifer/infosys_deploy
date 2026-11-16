@@ -391,6 +391,11 @@ Mounted at `/api/v1` and aliased at `/api` for frontend client compatibility.
 | `GET` | `/images/{image_id}/augmentations` | Generates on-the-fly photometric augmentations for visual verification | Engineer, Admin |
 | `GET` | `/images/datasets/samples` | Lists benchmark public dataset samples available for import | Authenticated |
 | `POST` | `/images/datasets/import` | Imports public dataset image directly into active inspection | Engineer, Admin |
+| `GET` | `/images/{image_id}/xai` | Returns Explainable AI metadata (target/pred class, confidence, hotspot %, URLs)| Authenticated |
+| `GET` | `/images/{image_id}/gradcam` | Shortcut route to stream pure or blended Grad-CAM heatmap overlay | Role-based visibility |
+| `GET` | `/images/{image_id}/gradcam-pp` | Shortcut route to stream pure or blended Grad-CAM++ high-order heatmap | Role-based visibility |
+| `GET` | `/images/{image_id}/attention` | Shortcut route to stream spatial feature activation energy attention map | Role-based visibility |
+| `GET` | `/images/{image_id}/saliency` | Shortcut route to stream input pixel-level gradient saliency map | Role-based visibility |
 
 ---
 
@@ -647,6 +652,7 @@ apps/api/app/services/
 ├── damage_assessment.py    # Calibrated vs Uncalibrated scale-invariant appraisal
 ├── registration.py         # Temporal feature matching & homography registration
 ├── reporting.py            # Certified PDF (ReportLab), Excel (.xlsx), CSV, JSON generator
+├── explainable_ai.py       # Explainable AI (Grad-CAM, Grad-CAM++, Attention, Saliency)
 ├── classifier.py           # ResNet-18 crack classification gate service
 ├── rfdetr_detector.py      # Primary RF-DETR defect detector (FP16 GPU)
 ├── yolo_detector.py        # Fallback YOLOv8 defect detector
@@ -675,6 +681,14 @@ Generates formal engineering reports compliant with municipal infrastructure sta
 - **PDF Generation**: Built with ReportLab `SimpleDocTemplate` on Letter/A4 format. Includes document header, asset metadata table, reviewer credentials, quantitative defect measurement tables, engineering disclaimer, and SHA-256 integrity checksum.
 - **Excel Generation**: Formats multi-tab spreadsheets using `openpyxl`.
 - **Integrity Verification**: Generates cryptographic SHA-256 hash of output files, stored in `Report.checksum` to detect tampering.
+
+### 7.4 Explainable AI (XAI) Engine (`explainable_ai.py`)
+Implements transparent visual feature attribution for civil engineering decision support:
+- **Grad-CAM**: Evaluates first-order gradient of target classification logits with respect to ResNet-18 `layer4` convolutional feature maps ($512 \times 7 \times 7$). Positive activations are rectified with ReLU and scaled.
+- **Grad-CAM++**: Utilizes second- and third-order gradient weighting to resolve multi-instance fine hairline cracks without dominant defect artifacts masking secondary fissures.
+- **Spatial Feature Attention**: Computes $L_2$ activation norm energy across channel dimensions without requiring backpropagation.
+- **Input Pixel Saliency**: Measures raw input pixel attribution via gradient magnitude with respect to the input tensor ($\max_c |\nabla_X Y^c|$).
+- **Dual Representation & Colormap Support**: Generates both `pure` (colormap heatmap on transparent/solid background) and `blend` (alpha blended overlay) images across `turbo`, `jet`, and `viridis` palettes. Cached in `storage/xai/{image_id}_{method}_{pure|blend}_{colormap}.jpg` with full JSON metadata.
 
 ---
 
@@ -710,7 +724,8 @@ apps/api/
 │   ├── yolo/               # YOLOv8 bounding box overlay visualizations
 │   ├── rfdetr/             # RF-DETR bounding box overlay visualizations
 │   ├── unet/               # UNet binary and color-coded segmentation masks
-│   └── geometry/           # Rendered skeleton and width marker diagnostic plots
+│   ├── geometry/           # Rendered skeleton and width marker diagnostic plots
+│   └── xai/                # Explainable AI Grad-CAM, Attention, Saliency heatmaps & JSON metadata
 ├── uploads/
 │   └── reports/            # Certified PDF, XLSX, CSV, and JSON report files
 └── infrascan_dev.db        # SQLite database file (accompanied by -wal and -shm files)
