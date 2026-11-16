@@ -271,6 +271,29 @@ The binary mask from Stage 2C is processed using deterministic algorithms:
    - $65^\circ \le \theta \le 115^\circ$: Longitudinal (Vertical)
    - Otherwise: Diagonal / Oblique
 
+### 4.8 Stage 2E: Explainable AI (XAI) Attribution Engine (`explainable_ai.py`)
+To satisfy civil engineering defensibility requirements (Specification PDF Sections 12 & 18), InfraScan integrates an Explainable AI visual attribution service that proves *why* the deep learning models declared a surface cracked:
+
+1. **Attribution Algorithms**:
+   - **Grad-CAM (Gradient-Weighted Class Activation Mapping)**: Calculates the gradient of the predicted class score $Y^c$ with respect to the feature activation maps $A^k$ of ResNet-18 `layer4`. Neuron importance weights:
+     $$\alpha_k^c = \frac{1}{Z} \sum_i \sum_j \frac{\partial Y^c}{\partial A_{i, j}^k}$$
+     $$L_{\text{Grad-CAM}}^c = \text{ReLU}\left(\sum_k \alpha_k^c A^k\right)$$
+   - **Grad-CAM++**: Generalized gradient CAM incorporating 2nd and 3rd order partial derivatives ($w_{ijk}^c = \frac{\partial^2 Y^c / (\partial A_{ijk}^2)}{2 \partial^2 Y^c / (\partial A_{ijk}^2) + \sum a_{abk} \partial^3 Y^c / (\partial A_{ijk}^3)}$) for capturing multiple fine hairline crack instances in a single scene.
+   - **Spatial Feature Attention Maps**: Norm of channel activations across convolutional layers ($L_2$ norm $\|A\|_{2}$ across channels) showing macro structural concrete surface feature extraction.
+   - **Input Saliency Maps**: Direct backpropagation of loss gradient magnitude into pixel space ($\max_c |\nabla_I Y^c|$), smoothed with Gaussian filtering ($\sigma=7$).
+2. **Hook Mechanism & Thread Safety**:
+   - PyTorch forward and full-backward hooks dynamically attached to `model.layer4` during backward passes.
+   - Synchronized with `_XAI_LOCK` (`threading.Lock`) to ensure safe multi-threaded GPU backward pass execution without gradient collision.
+3. **Dual Heatmap Artifact Generation**:
+   Generates both unblended (`pure`) and blended (`blend`) color representations across 5 scientific colormaps (**Turbo**, Jet, Plasma, Viridis, Inferno):
+   - `storage/xai/{image_id}_{method}_{colormap}_pure.jpg`: Pure heatmap colormap representation.
+   - `storage/xai/{image_id}_{method}_{colormap}_blend.jpg`: Alpha-composited visualization ($1 - \alpha$ photo + $\alpha$ heatmap).
+   - `storage/xai/{image_id}_xai.json`: Attribution metadata, hotspot percentage, and decision influence explanation.
+4. **Interactive 5-Way Visual Strip**:
+   Directly drives the frontend inspection suite via a 5-step interactive progression strip:
+   $$\text{Original Photo} \longrightarrow \text{Defect Detection} \longrightarrow \text{Segmentation Mask} \longrightarrow \text{AI Heatmap (XAI)} \longrightarrow \text{Damage Assessment}$$
+   Selecting any step updates the primary inspection canvas in real time. The interactive opacity slider ($0\% - 100\%$) allows engineers to dynamically blend the pure heatmap over the base photo substrate.
+
 ---
 
 ## 5. Damage Metrics & Severity Assessment (`damage_assessment.py`)
