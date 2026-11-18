@@ -683,11 +683,12 @@ Generates formal engineering reports compliant with municipal infrastructure sta
 - **Integrity Verification**: Generates cryptographic SHA-256 hash of output files, stored in `Report.checksum` to detect tampering.
 
 ### 7.4 Explainable AI (XAI) Engine (`explainable_ai.py`)
-Implements transparent visual feature attribution for civil engineering decision support:
-- **Grad-CAM**: Evaluates first-order gradient of target classification logits with respect to ResNet-18 `layer4` convolutional feature maps ($512 \times 7 \times 7$). Positive activations are rectified with ReLU and scaled.
-- **Grad-CAM++**: Utilizes second- and third-order gradient weighting to resolve multi-instance fine hairline cracks without dominant defect artifacts masking secondary fissures.
-- **Spatial Feature Attention**: Computes $L_2$ activation norm energy across channel dimensions without requiring backpropagation.
-- **Input Pixel Saliency**: Measures raw input pixel attribution via gradient magnitude with respect to the input tensor ($\max_c |\nabla_X Y^c|$).
+Implements transparent visual feature attribution for civil engineering decision support with distinct mathematical formulations:
+- **Grad-CAM**: Evaluates first-order gradient of target classification logits with respect to ResNet-18 `layer4` convolutional feature maps ($512 \times 7 \times 7$). Positive activations are rectified with ReLU and scaled, providing coarse macroscopic semantic attribution.
+- **Grad-CAM++**: Utilizes second- and third-order gradient weighting with 95th-percentile non-linear exponential sharpening ($S = \text{Norm}^{1.8}$) to isolate fine hairline crack epicenters without dominant background concrete artifacts.
+- **Spatial Feature Attention**: Multi-scale activation energy combining ResNet-18 `layer3` ($14 \times 14$, weight 0.35) and `layer4` ($7 \times 7$, weight 0.65) via channel $L_2$ norm, capturing rich structural fracture geometry independent of class gradients.
+- **Input Pixel Saliency**: Measures raw input pixel attribution via gradient magnitude with respect to the input tensor ($\max_c |\nabla_X Y^c|$), enhanced via 98th-percentile contrast stretching and bilateral edge-preserving filtering to reveal crisp fracture trajectories.
+- **Robust Algorithmic Fallbacks**: If PyTorch model weights are uninitialized, distinct morphological heuristics (CLAHE/adaptive thresholding, morphological skeletonization, multi-scale Gaussian energy, Sobel/Scharr edge gradients) guarantee method divergence (>10% pairwise).
 - **Dual Representation & Colormap Support**: Generates both `pure` (colormap heatmap on transparent/solid background) and `blend` (alpha blended overlay) images across `turbo`, `jet`, and `viridis` palettes. Cached in `storage/xai/{image_id}_{method}_{pure|blend}_{colormap}.jpg` with full JSON metadata.
 
 ---
