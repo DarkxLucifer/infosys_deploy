@@ -65,7 +65,11 @@ class ExplainableAIService:
         candidate_paths = [
             self.model_dir / "infrascan_crack_resnet18_weights.pth",
             Path(getattr(settings, "STORAGE_DIR", "storage")) / "models" / "infrascan_crack_resnet18_weights.pth",
+            Path("storage/models/infrascan_crack_resnet18_weights.pth"),
+            Path("/app/storage/models/infrascan_crack_resnet18_weights.pth"),
             Path(r"d:\project\aiml prime\project\infosys\storage\models\infrascan_crack_resnet18_weights.pth"),
+            Path(r"d:\project\aiml prime\project\infosys_deploy\storage\models\infrascan_crack_resnet18_weights.pth"),
+            Path(r"d:\project\aiml prime\project\hf_space_infrascan\storage\models\infrascan_crack_resnet18_weights.pth"),
             Path(r"C:\Users\yashr\Downloads\infrascan_crack_results\models\infrascan_crack_resnet18_weights.pth"),
             Path(r"C:\Users\yashr\Downloads\checkpoints-20261028T135647Z-1-001\checkpoints\resnet18_best.pth")
         ]
@@ -144,19 +148,23 @@ class ExplainableAIService:
         cm = COLORMAPS.get(colormap_name.lower(), cv2.COLORMAP_TURBO)
 
         with _XAI_LOCK:
-            activations = []
-            gradients = []
+            activations = {}
+            gradients = {}
 
-            def forward_hook(module, inp, out):
-                activations.append(out)
+            def fwd_hook(name):
+                def hook(module, inp, out):
+                    activations[name] = out
+                return hook
 
-            def backward_hook(module, grad_in, grad_out):
-                gradients.append(grad_out[0])
+            def bwd_hook(name):
+                def hook(module, grad_in, grad_out):
+                    gradients[name] = grad_out[0]
+                return hook
 
-            # Hook ResNet-18 layer4 (last convolutional residual block)
-            target_layer = self.model.layer4
-            h_fwd = target_layer.register_forward_hook(forward_hook)
-            h_bwd = target_layer.register_full_backward_hook(backward_hook)
+            # Hook ResNet-18 layer3 (14x14 intermediate features) and layer4 (7x7 semantic bottleneck)
+            h_fwd_l3 = self.model.layer3.register_forward_hook(fwd_hook("layer3"))
+            h_fwd_l4 = self.model.layer4.register_forward_hook(fwd_hook("layer4"))
+            h_bwd_l4 = self.model.layer4.register_full_backward_hook(bwd_hook("layer4"))
 
             try:
                 self.model.zero_grad()
@@ -164,20 +172,25 @@ class ExplainableAIService:
                 probs = F.softmax(logits, dim=1).detach().cpu().numpy()[0]
                 pred_class_idx = int(np.argmax(probs))
 
-                # If target_class is None, analyze class 1 (Cracked) to show defect features,
-                # or fallback to predicted class if crack score is very low
-                chosen_class = 1 if target_class is None else target_class
+                # Dynamic class targeting:
+                # If target_class is specified, use it. Otherwise, explain the predicted class
+                chosen_class = pred_class_idx if target_class is None else target_class
                 score = logits[0, chosen_class]
                 score.backward(retain_graph=True)
 
-                g = gradients[0] if gradients else None
-                a = activations[0] if activations else None
+                g = gradients.get("layer4")
+                a4 = activations.get("layer4")
+                a3 = activations.get("layer3")
 
-                # 1. Grad-CAM Calculation
-                if g is not None and a is not None:
+                # 1. Grad-CAM (Selvaraju et al., 2017)
+                # Global average pooled gradients define coarse feature channel importance over layer4 (7x7)
+                if g is not None and a4 is not None:
                     alpha_k = g.mean(dim=(2, 3), keepdim=True)
-                    cam = F.relu((alpha_k * a).sum(dim=1, keepdim=True))
-                    cam_resized = F.interpolate(cam, size=(orig_h, orig_w), mode="bilinear", align_corners=False)
+                    cam = (alpha_k * a4).sum(dim=1, keepdim=True)
+                    cam_pos = F.relu(cam)
+                    if cam_pos.max() <= 0:
+                        cam_pos = torch.abs(cam)
+                    cam_resized = F.interpolate(cam_pos, size=(orig_h, orig_w), mode="bilinear", align_corners=False)
                     gradcam_raw = cam_resized[0, 0].detach().cpu().numpy()
                     if gradcam_raw.max() > gradcam_raw.min():
                         gradcam_norm = (gradcam_raw - gradcam_raw.min()) / (gradcam_raw.max() - gradcam_raw.min() + 1e-8)
@@ -186,60 +199,72 @@ class ExplainableAIService:
                 else:
                     gradcam_norm = np.zeros((orig_h, orig_w), dtype=np.float32)
 
-                # 2. Grad-CAM++ Calculation
-                if g is not None and a is not None:
+                # 2. Grad-CAM++ (Chattopadhay et al., 2018)
+                # High-order 2nd and 3rd analytical derivatives with exponential percentile focus
+                # Isolates fine-grained fracture epicenters and multiple defect loci
+                if g is not None and a4 is not None:
                     g2 = g.pow(2)
                     g3 = g.pow(3)
-                    denom = 2 * g2 + (a * g3).sum(dim=(2, 3), keepdim=True)
+                    denom = 2 * g2 + (a4 * g3).sum(dim=(2, 3), keepdim=True)
                     denom = torch.where(denom != 0.0, denom, 1e-7 * torch.ones_like(denom))
                     w_pp = g2 / denom
                     alpha_pp = (w_pp * F.relu(g)).sum(dim=(2, 3), keepdim=True)
-                    cam_pp = F.relu((alpha_pp * a).sum(dim=1, keepdim=True))
-                    cam_pp_resized = F.interpolate(cam_pp, size=(orig_h, orig_w), mode="bilinear", align_corners=False)
+                    cam_pp = (alpha_pp * a4).sum(dim=1, keepdim=True)
+                    cam_pp_pos = F.relu(cam_pp)
+                    if cam_pp_pos.max() <= 0:
+                        cam_pp_pos = torch.abs(cam_pp)
+                    cam_pp_resized = F.interpolate(cam_pp_pos, size=(orig_h, orig_w), mode="bilinear", align_corners=False)
                     gradcam_pp_raw = cam_pp_resized[0, 0].detach().cpu().numpy()
                     if gradcam_pp_raw.max() > gradcam_pp_raw.min():
-                        gradcam_pp_norm = (gradcam_pp_raw - gradcam_pp_raw.min()) / (gradcam_pp_raw.max() - gradcam_pp_raw.min() + 1e-8)
+                        # Contrast-sharpening: focus tightly on the 95th percentile fracture loci
+                        p95 = np.percentile(gradcam_pp_raw, 95)
+                        gpp_scaled = np.clip(gradcam_pp_raw / (p95 + 1e-8), 0.0, 1.0) ** 1.8
+                        gradcam_pp_norm = (gpp_scaled - gpp_scaled.min()) / (gpp_scaled.max() - gpp_scaled.min() + 1e-8)
                     else:
                         gradcam_pp_norm = np.zeros((orig_h, orig_w), dtype=np.float32)
                 else:
                     gradcam_pp_norm = np.zeros((orig_h, orig_w), dtype=np.float32)
 
-                # 3. Spatial Attention Map (L2 norm of channel activations)
-                if a is not None:
-                    attn = torch.norm(a, p=2, dim=1, keepdim=True)
-                    attn_resized = F.interpolate(attn, size=(orig_h, orig_w), mode="bilinear", align_corners=False)
-                    attn_raw = attn_resized[0, 0].detach().cpu().numpy()
-                    if attn_raw.max() > attn_raw.min():
-                        attn_norm = (attn_raw - attn_raw.min()) / (attn_raw.max() - attn_raw.min() + 1e-8)
-                    else:
-                        attn_norm = np.zeros((orig_h, orig_w), dtype=np.float32)
+                # 3. Spatial Attention Map (Zagoruyko & Komodakis, 2016)
+                # Multi-scale convolutional feature activation energy:
+                # Combines Layer 3 (14x14, 256ch - edge & surface texture) with Layer 4 (7x7, 512ch - semantic context)
+                if a3 is not None and a4 is not None:
+                    attn3 = torch.norm(a3, p=2, dim=1, keepdim=True)
+                    attn3_up = F.interpolate(attn3, size=(orig_h, orig_w), mode="bilinear", align_corners=False)[0, 0].detach().cpu().numpy()
+                    attn3_norm = (attn3_up - attn3_up.min()) / (attn3_up.max() - attn3_up.min() + 1e-8)
+
+                    attn4 = torch.norm(a4, p=2, dim=1, keepdim=True)
+                    attn4_up = F.interpolate(attn4, size=(orig_h, orig_w), mode="bilinear", align_corners=False)[0, 0].detach().cpu().numpy()
+                    attn4_norm = (attn4_up - attn4_up.min()) / (attn4_up.max() - attn4_up.min() + 1e-8)
+
+                    multi_attn = 0.55 * attn3_norm + 0.45 * attn4_norm
+                    attn_norm = (multi_attn - multi_attn.min()) / (multi_attn.max() - multi_attn.min() + 1e-8)
+                elif a4 is not None:
+                    attn4 = torch.norm(a4, p=2, dim=1, keepdim=True)
+                    attn4_up = F.interpolate(attn4, size=(orig_h, orig_w), mode="bilinear", align_corners=False)[0, 0].detach().cpu().numpy()
+                    attn_norm = (attn4_up - attn4_up.min()) / (attn4_up.max() - attn4_up.min() + 1e-8)
                 else:
                     attn_norm = np.zeros((orig_h, orig_w), dtype=np.float32)
 
-                # 4. Saliency Map (Pixel gradient magnitude)
+                # 4. Saliency Map (Simonyan et al., 2013 / Edge-Preserving Gradient Magnitude)
+                # Full input-space gradient |dY/dX| with 98th-percentile contrast normalization & bilateral filtering
                 if tensor.grad is not None:
-                    saliency, _ = torch.max(tensor.grad.data.abs(), dim=1)
-                    saliency_resized = F.interpolate(saliency.unsqueeze(1), size=(orig_h, orig_w), mode="bilinear", align_corners=False)
-                    sal_raw = saliency_resized[0, 0].detach().cpu().numpy()
-                    # Apply Gaussian smoothing to reduce pixel noise in saliency
-                    sal_smooth = cv2.GaussianBlur(sal_raw, (7, 7), 0)
-                    if sal_smooth.max() > sal_smooth.min():
-                        saliency_norm = (sal_smooth - sal_smooth.min()) / (sal_smooth.max() - sal_smooth.min() + 1e-8)
+                    sal_raw, _ = torch.max(tensor.grad.data.abs(), dim=1)
+                    sal_resized = F.interpolate(sal_raw.unsqueeze(1), size=(orig_h, orig_w), mode="bilinear", align_corners=False)[0, 0].detach().cpu().numpy()
+                    p98 = np.percentile(sal_resized, 98)
+                    sal_clamped = np.clip(sal_resized / (p98 + 1e-8), 0.0, 1.0)
+                    sal_filtered = cv2.bilateralFilter((sal_clamped * 255).astype(np.uint8), 9, 75, 75).astype(np.float32) / 255.0
+                    if sal_filtered.max() > sal_filtered.min():
+                        saliency_norm = (sal_filtered - sal_filtered.min()) / (sal_filtered.max() - sal_filtered.min() + 1e-8)
                     else:
                         saliency_norm = np.zeros((orig_h, orig_w), dtype=np.float32)
                 else:
                     saliency_norm = np.zeros((orig_h, orig_w), dtype=np.float32)
 
             finally:
-                h_fwd.remove()
-                h_bwd.remove()
-
-        # If Grad-CAM is blank because class 1 has negative gradient on sound surface,
-        # blend Attention with Grad-CAM++ to show genuine region influence
-        if gradcam_norm.max() < 0.05 and gradcam_pp_norm.max() > 0.1:
-            gradcam_norm = 0.6 * gradcam_pp_norm + 0.4 * attn_norm
-        elif gradcam_norm.max() < 0.05:
-            gradcam_norm = attn_norm.copy()
+                h_fwd_l3.remove()
+                h_fwd_l4.remove()
+                h_bwd_l4.remove()
 
         # Generate pure heatmaps and blended overlays
         cm_name = colormap_name.lower()
@@ -304,19 +329,55 @@ class ExplainableAIService:
         colormap_name: str,
         alpha: float
     ) -> Dict[str, Any]:
-        """Heuristic computer-vision gradient fallback when PyTorch weights are missing."""
+        """
+        Differentiated classical computer-vision heuristic fallback
+        when PyTorch weights are unavailable. Each method produces a distinct visual identity.
+        """
         gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
         clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
         enh = clahe.apply(gray)
+
+        # Base gradient magnitude via Sobel
         sobelx = cv2.Sobel(enh, cv2.CV_32F, 1, 0, ksize=3)
         sobely = cv2.Sobel(enh, cv2.CV_32F, 0, 1, ksize=3)
         grad_mag = np.sqrt(sobelx**2 + sobely**2)
-        grad_blur = cv2.GaussianBlur(grad_mag, (15, 15), 0)
-        norm = (grad_blur - grad_blur.min()) / (grad_blur.max() - grad_blur.min() + 1e-8)
+        grad_norm = (grad_mag - grad_mag.min()) / (grad_mag.max() - grad_mag.min() + 1e-8)
+
+        # 1. Fallback Saliency: High-resolution edge lines preserving thin fracture paths
+        sal_filtered = cv2.bilateralFilter((grad_norm * 255).astype(np.uint8), 7, 50, 50).astype(np.float32) / 255.0
+        sal_norm = (sal_filtered - sal_filtered.min()) / (sal_filtered.max() - sal_filtered.min() + 1e-8)
+
+        # 2. Fallback Grad-CAM: Macro low-frequency receptive field heatmap (broad Gaussian blur)
+        kernel_sz = max(31, (min(orig_h, orig_w) // 16) | 1)
+        gc_blur = cv2.GaussianBlur(grad_norm, (kernel_sz, kernel_sz), 0)
+        gc_norm = (gc_blur - gc_blur.min()) / (gc_blur.max() - gc_blur.min() + 1e-8)
+
+        # 3. Fallback Grad-CAM++: High-contrast focal core (squared power curve over 90th percentile)
+        p90 = np.percentile(gc_norm, 90)
+        gcpp_sharp = np.clip(gc_norm / (p90 + 1e-8), 0.0, 1.0) ** 2.2
+        gcpp_norm = (gcpp_sharp - gcpp_sharp.min()) / (gcpp_sharp.max() - gcpp_sharp.min() + 1e-8)
+
+        # 4. Fallback Spatial Attention: Multi-scale structural variance (Sobel gradient + Laplacian texture)
+        lap = np.abs(cv2.Laplacian(enh, cv2.CV_32F, ksize=3))
+        lap_norm = (lap - lap.min()) / (lap.max() - lap.min() + 1e-8)
+        attn_combo = 0.5 * grad_norm + 0.5 * lap_norm
+        attn_blur = cv2.GaussianBlur(attn_combo, (15, 15), 0)
+        attn_norm = (attn_blur - attn_blur.min()) / (attn_blur.max() - attn_blur.min() + 1e-8)
 
         cm = COLORMAPS.get(colormap_name.lower(), cv2.COLORMAP_TURBO)
-        heat = cv2.applyColorMap(np.uint8(255 * norm), cm)
-        overlay = cv2.addWeighted(img_bgr, 1.0 - alpha, heat, alpha, 0)
+        pure_heatmaps = {}
+        blended_overlays = {}
+
+        for m_name, m_map in [
+            ("gradcam", gc_norm),
+            ("gradcam_pp", gcpp_norm),
+            ("attention", attn_norm),
+            ("saliency", sal_norm),
+        ]:
+            pure_heat = cv2.applyColorMap(np.uint8(255 * m_map), cm)
+            blend_heat = cv2.addWeighted(img_bgr, 1.0 - alpha, pure_heat, alpha, 0)
+            pure_heatmaps[m_name] = pure_heat
+            blended_overlays[m_name] = blend_heat
 
         return {
             "success": True,
@@ -327,19 +388,15 @@ class ExplainableAIService:
             "confidence": 0.50,
             "colormap": colormap_name,
             "hotspot_percentage": 10.0,
-            "explanation_summary": "Classical edge-gradient spatial map generated as PyTorch weights fallback.",
+            "explanation_summary": "Differentiated classical computer-vision heuristic explainability maps generated.",
             "maps": {
-                "gradcam": norm,
-                "gradcam_pp": norm,
-                "attention": norm,
-                "saliency": norm,
+                "gradcam": gc_norm,
+                "gradcam_pp": gcpp_norm,
+                "attention": attn_norm,
+                "saliency": sal_norm,
             },
-            "overlays": {
-                "gradcam": overlay,
-                "gradcam_pp": overlay,
-                "attention": overlay,
-                "saliency": overlay,
-            }
+            "pure_heatmaps": pure_heatmaps,
+            "overlays": blended_overlays,
         }
 
     def save_xai_artifacts(

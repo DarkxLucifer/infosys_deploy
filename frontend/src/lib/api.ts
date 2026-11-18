@@ -2690,8 +2690,9 @@ export const apiService = {
     return res.json();
   },
 
-  async getImageXai(imageId: string): Promise<any> {
-    const res = await fetch(`${API_BASE_URL}/images/${imageId}/xai`, {
+  async getImageXai(imageId: string, recalculate: boolean = false): Promise<any> {
+    const qs = recalculate ? "?recalculate=true" : "";
+    const res = await fetch(`${API_BASE_URL}/images/${imageId}/xai${qs}`, {
       headers: authHeaders(),
       credentials: "include",
     });

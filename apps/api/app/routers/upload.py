@@ -1758,6 +1758,7 @@ def get_image_file_variant(
     variant: str = Query("processed", description="'processed' (default - returns YOLO if cracked), 'original', 'yolo', 'enhanced', or 'thumbnail'"),
     colormap: Optional[str] = Query("turbo", description="XAI colormap: turbo, jet, viridis, inferno"),
     mode: Optional[str] = Query("blend", description="XAI mode: blend or pure"),
+    refresh: Optional[bool] = Query(False, description="Force re-generation of XAI heatmaps"),
     current_user: Optional[User] = Depends(get_optional_current_user),
     db: Session = Depends(get_db)
 ):
@@ -1958,7 +1959,7 @@ def get_image_file_variant(
         xai_file = find_stored_file("xai", target_file_name) or os.path.join(XAI_DIR, target_file_name)
         legacy_file = find_stored_file("xai", f"{image.id}_{xai_method}.jpg") or os.path.join(XAI_DIR, f"{image.id}_{xai_method}.jpg")
 
-        if os.path.exists(xai_file):
+        if os.path.exists(xai_file) and not refresh:
             target_path = xai_file
         elif proc_target and os.path.exists(proc_target):
             try:
@@ -1973,16 +1974,20 @@ def get_image_file_variant(
                 cand_key = f"{xai_method}_{m_name}"
                 if cand_key in xai_res.get("artifact_files", {}) and os.path.exists(xai_res["artifact_files"][cand_key]):
                     target_path = xai_res["artifact_files"][cand_key]
-                elif xai_method in xai_res.get("artifact_files", {}) and os.path.exists(xai_res["artifact_files"][xai_method]):
+                elif m_name == "blend" and xai_method in xai_res.get("artifact_files", {}) and os.path.exists(xai_res["artifact_files"][xai_method]):
                     target_path = xai_res["artifact_files"][xai_method]
-                elif os.path.exists(legacy_file):
+                elif m_name == "pure" and f"{xai_method}_pure" in xai_res.get("artifact_files", {}) and os.path.exists(xai_res["artifact_files"][f"{xai_method}_pure"]):
+                    target_path = xai_res["artifact_files"][f"{xai_method}_pure"]
+                elif os.path.exists(xai_file):
+                    target_path = xai_file
+                elif m_name == "blend" and os.path.exists(legacy_file):
                     target_path = legacy_file
                 else:
                     target_path = proc_target
             except Exception as xai_err:
                 logger.warning("On-demand XAI generation failed in variant=%s: %s", variant, xai_err)
-                target_path = legacy_file if os.path.exists(legacy_file) else proc_target
-        elif os.path.exists(legacy_file):
+                target_path = legacy_file if (m_name == "blend" and os.path.exists(legacy_file)) else proc_target
+        elif m_name == "blend" and os.path.exists(legacy_file):
             target_path = legacy_file
         else:
             target_path = proc_target or image.original_path
@@ -2156,6 +2161,7 @@ def get_saliency_shortcut(
 def get_image_xai_summary(
     image_id: str,
     inspection_id: Optional[str] = None,
+    recalculate: Optional[bool] = Query(False, description="Force re-calculation of XAI metadata and maps"),
     current_user: Optional[User] = Depends(get_optional_current_user),
     db: Session = Depends(get_db)
 ):
@@ -2177,7 +2183,7 @@ def get_image_xai_summary(
 
     # Check cached metadata json
     meta_path = find_stored_file("xai", f"{image.id}_xai.json") or os.path.join(XAI_DIR, f"{image.id}_xai.json")
-    if os.path.exists(meta_path):
+    if os.path.exists(meta_path) and not recalculate:
         try:
             with open(meta_path, "r", encoding="utf-8") as f:
                 meta = json.load(f)

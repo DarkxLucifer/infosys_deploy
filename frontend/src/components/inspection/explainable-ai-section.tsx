@@ -65,6 +65,7 @@ export function ExplainableAISection({
   const [imageLoading, setImageLoading] = useState<boolean>(false);
   const [xaiData, setXaiData] = useState<any>(null);
   const [imageError, setImageError] = useState<boolean>(false);
+  const [refreshCount, setRefreshCount] = useState<number>(0);
 
   // Load XAI data on mount or photo change
   useEffect(() => {
@@ -109,7 +110,7 @@ export function ExplainableAISection({
   useEffect(() => {
     setImageError(false);
     setImageLoading(true);
-  }, [activeMethod, colormap, viewMode, photo?.id]);
+  }, [activeMethod, colormap, viewMode, photo?.id, refreshCount]);
 
   const handleRefresh = async () => {
     if (!photo?.id) return;
@@ -117,8 +118,9 @@ export function ExplainableAISection({
     setImageLoading(true);
     setImageError(false);
     try {
-      const data = await api.getImageXai(photo.id);
+      const data = await api.getImageXai(photo.id, true);
       setXaiData(data);
+      setRefreshCount((c) => c + 1);
       toast.success("Explainable AI heatmaps refreshed");
     } catch (e: any) {
       toast.error("Failed to refresh XAI maps: " + (e.message || "Unknown error"));
@@ -158,12 +160,12 @@ export function ExplainableAISection({
 
   // Pure Heatmap URL (unblended colormap)
   const pureHeatmapSrc = getAuthUrl(
-    `/api/v1/images/${photo.id}/file?variant=${activeMethod}&colormap=${colormap}&mode=pure&v=${photo?.version || 1}_${activeMethod}_${colormap}`
+    `/api/v1/images/${photo.id}/file?variant=${activeMethod}&colormap=${colormap}&mode=pure&v=${photo?.version || 1}_${activeMethod}_${colormap}_${refreshCount}${refreshCount > 0 ? "&refresh=true" : ""}`
   );
 
   // Pre-blended Heatmap URL (backend weighted blend)
   const blendedHeatmapSrc = getAuthUrl(
-    `/api/v1/images/${photo.id}/file?variant=${activeMethod}&colormap=${colormap}&mode=blend&v=${photo?.version || 1}_${activeMethod}_${colormap}`
+    `/api/v1/images/${photo.id}/file?variant=${activeMethod}&colormap=${colormap}&mode=blend&v=${photo?.version || 1}_${activeMethod}_${colormap}_${refreshCount}${refreshCount > 0 ? "&refresh=true" : ""}`
   );
 
   // Metrics
