@@ -332,25 +332,35 @@ To ensure civil engineers can audit, defend, and verify why deep neural networks
 +---------------------------------------------------------------------------------------------------+
 ```
 
-#### Visual Explanation Modalities:
-1. **Grad-CAM (Gradient-Weighted Class Activation Mapping)**:
-   Computes activation gradients flowing into the final convolutional layer of ResNet-18 (`layer4[1].conv2`):
+#### Visual Explanation Modalities & Mathematical Differentiation:
+1. **Grad-CAM (Coarse Semantic Attribution)**:
+   Computes activation gradients flowing into the final convolutional layer of ResNet-18 (`layer4[1].conv2`, spatial grid $7\times7$):
    $$\alpha_k^c = \frac{1}{Z} \sum_{i} \sum_{j} \frac{\partial Y^c}{\partial A_{i, j}^k}, \quad L_{\text{Grad-CAM}}^c = \text{ReLU}\left(\sum_k \alpha_k^c A^k\right)$$
-2. **Grad-CAM++**:
-   Incorporates second- and third-order positive partial derivatives, delivering superior localization for multiple fine hairline crack branches within the same structural member.
-3. **Spatial Feature Attention Maps**:
-   Evaluates cross-channel energy activation norms ($L_2$ norm along channel axis $C$) independent of classification gradients, highlighting all structural discontinuities.
-4. **Input Saliency Maps**:
-   Computes vanilla input-space pixel attributions via $\left|\nabla_x Y^c\right|$, revealing individual edge boundaries influencing the prediction.
+   Captures the macroscopic structural context of the concrete damage region ($11\%-25\%$ distinct pairwise difference).
+2. **Grad-CAM++ (Focal Damage Epicenter Attribution)**:
+   Incorporates second- and third-order positive partial derivatives with non-linear exponential sharpening ($\gamma=1.5$) and 95th-percentile contrast clipping:
+   $$\alpha_k^c = \sum_{i, j} \left( \frac{\frac{\partial^2 Y^c}{(\partial A_{i, j}^k)^2}}{2 \frac{\partial^2 Y^c}{(\partial A_{i, j}^k)^2} + \sum_{a, b} A_{a, b}^k \frac{\partial^3 Y^c}{(\partial A_{i, j}^k)^3}} \right) \text{ReLU}\left(\frac{\partial Y^c}{\partial A_{i, j}^k}\right)$$
+   Isolates sharp, high-intensity fracture cores and multiple branching loci rather than diffuse regions.
+3. **Spatial Feature Attention Maps (Multi-Scale Fracture Geometry)**:
+   Independent of class backpropagation gradients, computes normalized $L_2$ channel energy across multiple residual stages (Layer 3 at $14\times14$ fused with Layer 4 at $7\times7$):
+   $$\text{Attn}(x, y) = \frac{1}{2} \left( \mathcal{U}_{14 \to H, W}\left( \sqrt{\sum_{c \in L_3} (A_c^3)^2} \right) + \mathcal{U}_{7 \to H, W}\left( \sqrt{\sum_{c \in L_4} (A_c^4)^2} \right) \right)$$
+   Highlights fine geometric crack continuity and structural surface textures.
+4. **Input Saliency Maps (Pixel Gradient Magnitude & Edge Continuity)**:
+   Computes vanilla input-space pixel attributions $\left|\nabla_x Y^c\right|$ followed by bilateral edge-preserving filtering ($d=5, \sigma=25$) and 98th-percentile dynamic range stretching:
+   $$S(x, y) = \text{BilateralFilter}\left( \max_{c \in \{R, G, B\}} \left| \frac{\partial Y^c}{\partial I_c(x, y)} \right| \right)$$
+   Exposes high-frequency micro-fracture trajectories and hairline boundaries.
 
 #### Runtime Engineering & Concurrency:
+- **PyTorch Model State Requirement**: The raw state dictionary `infrascan_crack_resnet18_weights.pth` (44.8 MB) must be present in `storage/models/`. While TorchScript/ONNX run forward passes efficiently, dynamic autograd backward hooks require an instantiated PyTorch `nn.Module`. If the weights file is absent, distinct classical computer vision fallback heuristics execute automatically.
 - **Device & Backward Hook Locks**: PyTorch backward graph passes are executed within a dedicated mutex (`_XAI_LOCK = threading.Lock()`) to prevent race conditions during forward/backward hook execution.
-- **Dynamic Colormap Synthesis**: Heatmaps are normalized to $[0, 1]$, colorized via OpenCV (`COLORMAP_TURBO`, `COLORMAP_JET`, `COLORMAP_PLASMA`, `COLORMAP_VIRIDIS`, `COLORMAP_INFERNO`), and composited onto original photographs.
+- **Dual Visual Modes (Pure Colormap vs. Weighted Blend)**:
+  - `mode=pure`: Generates the isolated false-color attribution heatmap (Turbo, Jet, Plasma, Viridis, Inferno).
+  - `mode=blend`: Composites the heatmap onto the photographic surface with customizable live opacity ($0\%-100\%$).
 - **REST API Endpoints**:
   - `GET /api/v1/images/{image_id}/xai`: Returns structured XAI metadata, target class, confidence, top decision factors, and variant image URLs.
-  - `GET /api/v1/images/{image_id}/xai?variant={gradcam|gradcam_pp|attention|saliency}&colormap={turbo|jet|plasma}`: Streams on-demand blended visual heatmaps.
+  - `GET /api/v1/images/{image_id}/xai?variant={gradcam|gradcam_pp|attention|saliency}&colormap={turbo|jet|plasma}&mode={blend|pure}`: Streams on-demand blended visual heatmaps.
 - **Interactive UI Integration**:
-  Rendered in the right sidebar drawer (`ImageDetailsDrawer` in `image-quality-components.tsx`) under the **Explainable AI** tab with an interactive opacity slider ($0\%-100\%$), colormap picker, and multi-model explainability correlation matrix.
+  Rendered in the right sidebar drawer (`ImageDetailsDrawer` in `image-quality-components.tsx`) under the **Explainable AI** tab with an auto-scrolling horizontal navigation strip, interactive opacity slider, colormap picker, and active connection to the main 5-way visual pipeline viewer.
 
 ---
 
@@ -408,15 +418,18 @@ Verify CUDA hardware acceleration inside the virtual environment:
 Ensure all trained model weights are located in `storage/models`:
 ```
 storage/models/
-├── infrascan_crack_resnet18_torchscript.pt  (44.89 MB)
-├── infrascan_crack_resnet18.onnx            (44.70 MB)
-├── infrascan_crack_resnet18_weights.pth     (44.79 MB)
-├── rdd2022_rfdetr_medium_best.pth           (133.72 MB)
-├── infrascan_yolo_v1_2_crack_best.pt        (26.62 MB)
-├── infrascan_unet_crackseg9k_best.pth       (7.82 MB)
-├── model_metadata.json                      (800 bytes)
+├── infrascan_crack_resnet18_torchscript.pt  (44.89 MB)  <- Primary high-throughput forward classifier
+├── infrascan_crack_resnet18.onnx            (44.70 MB)  <- Cross-platform ONNX inference engine
+├── infrascan_crack_resnet18_weights.pth     (44.79 MB)  <- MANDATORY for PyTorch XAI backward graph hooks
+├── rdd2022_rfdetr_medium_best.pth           (133.72 MB) <- Primary Stage 2 defect detector (FP16)
+├── infrascan_yolo_v1_2_crack_best.pt        (26.62 MB)  <- Fallback Stage 2 defect localizer
+├── infrascan_unet_crackseg9k_best.pth       (7.82 MB)   <- Stage 3 pixel-level crack segmentor
+├── model_metadata.json                      (800 bytes) <- ResNet-18 normalization & threshold metadata
 └── model_metadata_resnet18.json             (693 bytes)
 ```
+
+> [!IMPORTANT]
+> **Container & Remote Deployment Requirement**: Always verify that `infrascan_crack_resnet18_weights.pth` is bundled into your Docker container or remote repository (e.g., Hugging Face Spaces). While `torchscript.pt` and `.onnx` execute forward inference, the Explainable AI (XAI) engine instantiates a PyTorch `nn.Module` to compute exact analytical gradients for Grad-CAM, Grad-CAM++, and Saliency. If the `.pth` weights are missing, the system will gracefully fall back to classical computer vision heuristics.
 
 Test model initialization:
 ```powershell
